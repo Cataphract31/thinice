@@ -275,23 +275,36 @@ function TicketsStat({ snap }: { snap: Snapshot }): JSX.Element {
 }
 
 function Stats({ snap }: { snap: Snapshot }): JSX.Element {
-  // The rakeback drip lands in the balance silently at every round end, which
-  // wastes the entire point of passive income: a number nobody sees move is a
-  // number that never went up. Watch the lifetime-streamed counter and float
-  // each increment over the wallet as it arrives — including for spectators,
-  // who are exactly the people the stream is meant to pull back in.
+  // Two money moments float over the wallet, in the game's own colours.
+  // The rakeback drip (cyan — the rev-share colour) lands at the SEAL, the
+  // instant the rake is collected; the round's own result (profit green /
+  // danger red) lands at the end. Separated on purpose: summed together the
+  // drip was invisible next to a round swing two orders of magnitude bigger.
   const prevStreamed = useRef<number | null>(null);
-  const [gain, setGain] = useState<{ amt: number; key: number } | null>(null);
+  const lastResultRound = useRef(0);
+  const [gain, setGain] = useState<{ amt: number; key: number; color: string } | null>(null);
   useEffect(() => {
     const cur = snap.tickets.revStreamed;
     // First observation is baseline, never a gain: on connect the counter
     // jumps from 0 to a lifetime total, and floating THAT would announce a
     // windfall nobody just received.
     if (prevStreamed.current !== null && cur - prevStreamed.current > 5e-5) {
-      setGain({ amt: cur - prevStreamed.current, key: Date.now() });
+      setGain({ amt: cur - prevStreamed.current, key: Date.now(), color: "var(--color-cyan)" });
     }
     prevStreamed.current = cur;
   }, [snap.tickets.revStreamed]);
+  useEffect(() => {
+    if (snap.phase !== "result" || !snap.you.joined) return;
+    if (snap.you.plates.total === 0 || lastResultRound.current === snap.roundId) return;
+    lastResultRound.current = snap.roundId;
+    const net = snap.you.balance - snap.you.plates.total * snap.entry;
+    if (Math.abs(net) < 5e-5) return;
+    setGain({
+      amt: net,
+      key: Date.now(),
+      color: net >= 0 ? "var(--color-profit)" : "var(--color-danger)",
+    });
+  }, [snap.phase, snap.roundId, snap.you, snap.entry]);
 
   return (
     <>
@@ -300,9 +313,11 @@ function Stats({ snap }: { snap: Snapshot }): JSX.Element {
         {gain && (
           <span
             key={gain.key}
-            className="gain-float tnum pointer-events-none absolute right-0 top-full z-10 mt-0.5 text-[11px] font-bold text-[var(--color-profit)]"
+            className="gain-float tnum pointer-events-none absolute right-0 top-full z-10 mt-0.5 text-[11px] font-bold"
+            style={{ color: gain.color }}
           >
-            +{gain.amt.toFixed(4)} ◎
+            {gain.amt >= 0 ? "+" : ""}
+            {gain.amt.toFixed(4)} ◎
           </span>
         )}
       </div>

@@ -155,8 +155,11 @@ Two ticket economies, both flat at 200 tickets per entry:
   including on rounds they sat out. Weight decays with a 60-day half-life
   (continuously, per ticket, from the moment it was earned — there is no decay
   job and no interval), so the stream tracks recent volume instead of lifetime
-  volume. Paid automatically into the balance at every round end; nobody
-  claims anything.
+  volume. Paid automatically into the balance the moment each round SEALS —
+  the rake is collected by then, so the stream is a settled fact — and nobody
+  claims anything. A crashed round claws its seal-time payouts back as part
+  of the startup refund (`rakeback_payouts` is the per-round record that
+  makes those fractional reversals possible).
 
 Design notes and the measurements behind them are in the config comments —
 `packages/engine/src/config.ts` is worth reading in full before changing a

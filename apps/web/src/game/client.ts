@@ -852,6 +852,29 @@ export class GameClient {
     this.round = new Round(this.config, rngFromSeedHex(this.roundSeedHex), this.lobbyEntrants);
     this.phase = "live";
     this.nextTickAt = Date.now() + this.config.timing.tickMs;
+
+    // Rakeback pays at the SEAL, same as the server: the rake is collected
+    // the moment the field locks, so the guaranteed drip lands now and the
+    // round's own win/loss arrives separately at the end — two legible money
+    // moments instead of one muddled sum.
+    const sealMs = Date.now();
+    for (const e of this.lobbyEntrants) {
+      this.revShare.credit(isYou(e.id) ? YOU_ID : e.id, sealMs);
+    }
+    this.revShare.distribute(
+      this.lobbyEntrants.length * this.config.entry * this.config.rake.revShare,
+      sealMs,
+    );
+    const owed = this.revShare.earningsOf(YOU_ID);
+    const delta = owed - this.rakebackClaimed;
+    if (delta > 0) {
+      this.wallet += delta;
+      this.session += delta;
+      this.rakebackClaimed = owed;
+      this.revStreamedLifetime += delta;
+      this.stats.revEarned = this.revStreamedLifetime;
+    }
+
     sfxSeal();
     this.emit();
   }
@@ -957,12 +980,10 @@ export class GameClient {
       for (const p of res.players) {
         // Your plates all credit the ONE ledger identity, so tickets and the
         // rakeback stream see a single player however many plates they held.
-        const ledgerId = isYou(p.id) ? YOU_ID : p.id;
-        this.jackpot.credit(ledgerId, p.bonanzaTickets);
-        this.revShare.credit(ledgerId, nowMs);
+        // (Rev-share tickets and the stream itself were handled at the seal.)
+        this.jackpot.credit(isYou(p.id) ? YOU_ID : p.id, p.bonanzaTickets);
       }
       this.jackpot.fund(res.toBonanza + res.wipeLeak);
-      this.revShare.distribute(res.toRevShare, nowMs);
 
       const yours = res.players.filter((p) => isYou(p.id));
       for (const p of yours) {
@@ -972,19 +993,6 @@ export class GameClient {
         this.stats.returned += p.cashedOut;
         this.stats.bestMultiple = Math.max(this.stats.bestMultiple, mult);
         if (mult >= 1) this.stats.roundsWon++;
-      }
-
-      // Rakeback auto-claims into the wallet. Without this the client charges
-      // the 2% rev-share rake and never returns it: a build that displays
-      // "98% RTP" while actually paying 96%.
-      const owed = this.revShare.earningsOf(YOU_ID);
-      const delta = owed - this.rakebackClaimed;
-      if (delta > 0) {
-        this.wallet += delta;
-        this.session += delta;
-        this.rakebackClaimed = owed;
-        this.revStreamedLifetime += delta;
-        this.stats.revEarned = this.revStreamedLifetime;
       }
 
       // The winner scene's subject: the last one standing, or when the ice

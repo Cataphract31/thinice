@@ -117,6 +117,19 @@ export class Database {
         value TEXT NOT NULL
       );
 
+      /* Per-round rakeback payouts. Exists so a crashed round can be fully
+         reversed: rakeback pays at SEAL (the rake is already collected), so
+         a round that dies mid-play has already streamed money that the
+         startup refund must claw back — and fractional payouts to many
+         wallets cannot be reversed without a record of exactly who got what.
+         Doubles as the rakeback audit trail. */
+      CREATE TABLE IF NOT EXISTS rakeback_payouts (
+        roundId  INTEGER NOT NULL,
+        wallet   TEXT    NOT NULL,
+        lamports INTEGER NOT NULL,
+        PRIMARY KEY (roundId, wallet)
+      );
+
       /* On-chain movements. The PRIMARY KEY on the signature is the entire
          double-credit defence for deposits: a transaction can be presented a
          thousand times and only the first insert credits anything. */
@@ -325,7 +338,7 @@ export class Database {
    * marker is what bounds the next payment, the entire lifetime total goes out
    * again on the very next round.
    */
-  payRakeback(wallet: string, lamports: number, claimedTotal: number): void {
+  payRakeback(roundId: number, wallet: string, lamports: number, claimedTotal: number): void {
     this.db.exec("BEGIN");
     try {
       this.db
@@ -334,6 +347,14 @@ export class Database {
             WHERE wallet = ?`,
         )
         .run(lamports, lamports, claimedTotal, wallet);
+      // The audit row commits WITH the money, or a crash between them makes
+      // the payout invisible to the refund sweep.
+      this.db
+        .prepare(
+          `INSERT INTO rakeback_payouts (roundId, wallet, lamports) VALUES (?, ?, ?)
+           ON CONFLICT(roundId, wallet) DO UPDATE SET lamports = lamports + excluded.lamports`,
+        )
+        .run(roundId, wallet, lamports);
       this.db.exec("COMMIT");
     } catch (err) {
       this.db.exec("ROLLBACK");
@@ -374,9 +395,32 @@ export class Database {
       outcome: string;
       seat: number;
     }[];
-    if (orphans.length === 0) return 0;
+    // Rakeback streamed at the seal of a round that never finished. Clawed
+    // back as part of the same reversal: the round "never happened", so the
+    // 2% it distributed must not survive it — for real money that leak would
+    // be the house minting a fraction of every crashed round's handle.
+    const orphanRake = this.db
+      .prepare(
+        `SELECT p.roundId, p.wallet, p.lamports
+           FROM rakeback_payouts p JOIN rounds r ON r.id = p.roundId
+          WHERE r.endedAt IS NULL`,
+      )
+      .all() as { roundId: number; wallet: string; lamports: number }[];
+    if (orphans.length === 0 && orphanRake.length === 0) return 0;
     this.db.exec("BEGIN");
     try {
+      for (const o of orphanRake) {
+        this.db
+          .prepare(
+            `UPDATE players
+                SET balance = balance - ?, revEarned = revEarned - ?, revClaimed = revClaimed - ?
+              WHERE wallet = ?`,
+          )
+          .run(o.lamports, o.lamports, o.lamports, o.wallet);
+        this.db
+          .prepare("DELETE FROM rakeback_payouts WHERE roundId = ? AND wallet = ?")
+          .run(o.roundId, o.wallet);
+      }
       for (const o of orphans) {
         // Net move that leaves the player exactly where they started: give
         // back the stake, take back anything already paid out for this round.

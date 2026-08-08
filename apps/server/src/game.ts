@@ -578,6 +578,37 @@ export class GameServer {
     this.round = new Round(this.config, rngFromSeedHex(this.seedHex), entrants);
     this.phase = "live";
     this.nextTickAt = Date.now() + this.config.timing.tickMs;
+
+    // Rakeback pays THE MOMENT the round seals, not at its end. The rake is
+    // already collected — every stake was debited at join — so the stream's
+    // amount is a settled fact the instant the field locks, and paying it
+    // here separates the two money moments a player experiences: guaranteed
+    // drip now, round result later. Ticket credit precedes the distribution
+    // (this round's entrants share in this round's stream, as certified by
+    // the sim), bots fund but never hold, and every payout is recorded per
+    // round so a crash mid-round claws the whole thing back. Weights are NOT
+    // persisted here: if the round dies, its credits must die with it.
+    const sealMs = Date.now();
+    for (const seat of this.seats.values()) {
+      if (!isBot(seat.wallet)) this.revShare.credit(this.ledgerId(seat.wallet), sealMs);
+    }
+    this.revShare.distribute(
+      this.seats.size * this.config.entry * this.config.rake.revShare,
+      sealMs,
+    );
+    for (const [wallet, id] of this.ledgerIds) {
+      const owed = this.revShare.earningsOf(id);
+      const claimed = toSol(this.db.revClaimed(wallet));
+      const delta = owed - claimed;
+      if (delta > 1e-12) {
+        const lamports = toLamports(delta);
+        if (lamports > 0) {
+          this.db.payRakeback(this.roundId, wallet, lamports, toLamports(owed));
+          for (const s of this.sessions) if (s.wallet === wallet) s.session += delta;
+        }
+      }
+    }
+
     this.broadcast(true);
   }
 
@@ -685,11 +716,10 @@ export class GameServer {
       // Practice bots fund both pools (their rake points flow in like any
       // entry) but hold no tickets in either — a bot must never win the
       // jackpot or skim the rakeback stream. Real players' odds only improve
-      // for having them at the table.
+      // for having them at the table. (Rev-share tickets were credited at
+      // the seal, alongside the stream they share in.)
       if (!isBot(seat.wallet)) {
-        const id = this.ledgerId(seat.wallet);
-        this.jackpot.credit(id, p.bonanzaTickets);
-        this.revShare.credit(id, now);
+        this.jackpot.credit(this.ledgerId(seat.wallet), p.bonanzaTickets);
       }
       if (!this.settled.has(p.id)) {
         this.settled.add(p.id);
@@ -704,27 +734,6 @@ export class GameServer {
     }
 
     this.jackpot.fund(res.toBonanza + res.wipeLeak);
-    this.revShare.distribute(res.toRevShare, now);
-
-    // The rakeback stream pays out continuously, including to players sitting
-    // the round out. Without this the house charges the rev-share rake and
-    // never returns it, which is a build advertising 98% while paying 96%.
-    //
-    // The credit and the claimed marker are one transaction: separately, a
-    // crash between them pays the money and forgets it was paid, and the next
-    // round pays the whole lifetime total again.
-    for (const [wallet, id] of this.ledgerIds) {
-      const owed = this.revShare.earningsOf(id);
-      const claimed = toSol(this.db.revClaimed(wallet));
-      const delta = owed - claimed;
-      if (delta > 1e-12) {
-        const lamports = toLamports(delta);
-        if (lamports > 0) {
-          this.db.payRakeback(wallet, lamports, toLamports(owed));
-          for (const s of this.sessions) if (s.wallet === wallet) s.session += delta;
-        }
-      }
-    }
 
     let best = 0;
     for (const p of res.players) best = Math.max(best, p.cashedOut / this.config.entry);
