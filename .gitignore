@@ -6,9 +6,6 @@ dist/
 .env
 .env.*
 !.env.example
-# The preview deploy's baked-in server address — public by definition, and it
-# must ship with the upload folder or Vercel builds the offline demo instead.
-!upload/zinc/.env.production
 
 # Server state: the ledger and the house hot wallet. Never committed.
 *.db
