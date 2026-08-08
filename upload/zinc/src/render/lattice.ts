@@ -31,6 +31,13 @@ export interface CellInput {
    * viewer's own plates, which already carry the cyan "you" treatment).
    */
   hue?: number;
+  /**
+   * Owner key (the wallet's display name). Cells sharing a group are laid
+   * out as one contiguous blob of adjacent hexes — the layout does the
+   * clustering itself, spatially, because any ordering-based scheme tears
+   * groups apart at column boundaries.
+   */
+  group?: string;
 }
 
 export interface LatticeSnapshot {
@@ -397,30 +404,183 @@ export class LatticeRenderer {
       });
     }
 
-    // Your plates claim the slots nearest the block's centroid — a geometric
-    // anchor, not a position in the join order. The first version parked the
-    // owner's run at the middle of the INPUT ARRAY, and every lobby arrival
-    // moved that midpoint while re-shaping the grid, so the "cluster" hopped
-    // columns all lobby long. Distance-to-centre is stable under reflow: the
-    // grid can re-pack all it likes and your plates re-land in the middle,
-    // adjacent, every time.
+    // ------------------------------------------------ owner-aware assignment
+    //
+    // The grid is a packed block; HOW cells map onto its slots decides
+    // whether a wallet's plates look like a holding or like confetti. Two
+    // failed schemes preceded this one, both ordering-based: array position
+    // maps onto column-major slot order, so any group straddling a column
+    // boundary tears — bottom of one column, top of the next — and the slots
+    // reserved for the viewer punch holes in everyone else's runs. Ordinal
+    // schemes cannot cluster a 2-D surface. So the mapping is spatial: each
+    // owner grows a compact blob by repeatedly claiming the free slot nearest
+    // to what it already holds. The viewer's blob grows from the block's
+    // centre; other groups, largest first, grow from the tiling frontier;
+    // singles fill whatever remains. Deterministic throughout — identical
+    // roster, identical layout.
     const cx = slots.reduce((a, s) => a + s.x, 0) / n;
     const cy = slots.reduce((a, s) => a + s.y, 0) / n;
-    const yourCount = inputs.reduce((a, c) => a + (c.you ? 1 : 0), 0);
-    const byDist = slots
-      .map((s, i) => ({ i, d: (s.x - cx) ** 2 + (s.y - cy) ** 2 }))
-      .sort((a, b) => a.d - b.d || a.i - b.i)
-      .map((s) => s.i);
-    const centerSlots = byDist.slice(0, yourCount);
-    const centerSet = new Set(centerSlots);
-    const restSlots: number[] = [];
-    for (let i = 0; i < n; i++) if (!centerSet.has(i)) restSlots.push(i);
+    const YOU_KEY = "<you>";
+    const groupsMap = new Map<string, CellInput[]>();
+    for (const input of inputs) {
+      const key = input.you ? YOU_KEY : (input.group ?? `solo:${input.id}`);
+      const members = groupsMap.get(key);
+      if (members) members.push(input);
+      else groupsMap.set(key, [input]);
+    }
+    const groups = [...groupsMap.entries()].sort((a, b) => {
+      if ((a[0] === YOU_KEY) !== (b[0] === YOU_KEY)) return a[0] === YOU_KEY ? -1 : 1;
+      if (a[1].length !== b[1].length) return b[1].length - a[1].length;
+      return a[0] < b[0] ? -1 : 1;
+    });
 
-    let yi = 0;
-    let oi = 0;
+    // Every neighbour in this packing — same-column or diagonal — sits at
+    // exactly sqrt(3)·r, so one distance threshold defines hex adjacency.
+    const adj: number[][] = slots.map(() => []);
+    const adjLimit = 3.2 * r * r;
+    for (let a = 0; a < n; a++) {
+      for (let b = a + 1; b < n; b++) {
+        const dx = slots[a]!.x - slots[b]!.x;
+        const dy = slots[a]!.y - slots[b]!.y;
+        if (dx * dx + dy * dy <= adjLimit) {
+          adj[a]!.push(b);
+          adj[b]!.push(a);
+        }
+      }
+    }
+
+    const unassigned = new Set<number>(slots.map((_, i) => i));
+    const slotOfCell = new Map<number, number>();
+
+    /** Connected regions of the free slots, under hex adjacency. */
+    const components = (): number[][] => {
+      const seen = new Set<number>();
+      const out: number[][] = [];
+      for (const s of unassigned) {
+        if (seen.has(s)) continue;
+        const comp: number[] = [];
+        const stack = [s];
+        seen.add(s);
+        while (stack.length > 0) {
+          const c = stack.pop()!;
+          comp.push(c);
+          for (const nb of adj[c]!) {
+            if (unassigned.has(nb) && !seen.has(nb)) {
+              seen.add(nb);
+              stack.push(nb);
+            }
+          }
+        }
+        out.push(comp);
+      }
+      return out;
+    };
+
+    for (const [key, members] of groups) {
+      members.sort((a, b) => a.id - b.id);
+      let need = members.length;
+      let mi = 0;
+      // Desired anchor: the viewer at the block's centre; other groups at the
+      // current scan-order frontier, so the tiling stays gap-free.
+      const first = unassigned.values().next().value;
+      if (first === undefined) break;
+      const anchor = key === YOU_KEY ? { x: cx, y: cy } : slots[first]!;
+      while (need > 0 && unassigned.size > 0) {
+        // Grow inside ONE connected free region that fits the whole group —
+        // a connected region always offers a free slot adjacent to the blob,
+        // so growth provably cannot strand or jump. A naive greedy over all
+        // free slots (the previous attempt) seeded into pockets smaller than
+        // the group and split ~2.5% of clusters. When no region fits (free
+        // space is all pockets), take the largest and spill the remainder —
+        // geometrically unavoidable, and rare because big groups place first.
+        const comps = components();
+        const fitting = comps.filter((c) => c.length >= need);
+        const pool =
+          fitting.length > 0
+            ? fitting
+            : [[...comps].sort((a, b) => b.length - a.length)[0]!];
+        let comp = pool[0]!;
+        let bestCompD = Infinity;
+        for (const c of pool) {
+          let d = Infinity;
+          for (const s of c) {
+            d = Math.min(d, (slots[s]!.x - anchor.x) ** 2 + (slots[s]!.y - anchor.y) ** 2);
+          }
+          if (d < bestCompD) {
+            bestCompD = d;
+            comp = c;
+          }
+        }
+        const compSet = new Set(comp);
+
+        // True when the region stays in one piece after `removed` leaves it.
+        // Claiming an articulation slot is what fragments the free space into
+        // pockets too small for the next group, so every claim prefers a
+        // non-articulation candidate and cuts only when there is no choice.
+        const stillConnected = (removed: number): boolean => {
+          let start = -1;
+          for (const v of compSet) {
+            if (v !== removed) {
+              start = v;
+              break;
+            }
+          }
+          if (start < 0) return true;
+          const seen = new Set([start]);
+          const stack = [start];
+          while (stack.length > 0) {
+            const c = stack.pop()!;
+            for (const nb of adj[c]!) {
+              if (compSet.has(nb) && nb !== removed && !seen.has(nb)) {
+                seen.add(nb);
+                stack.push(nb);
+              }
+            }
+          }
+          return seen.size === compSet.size - 1;
+        };
+
+        /** Claims the best-ranked slot that avoids cutting the region. */
+        const claim = (ranked: number[]): number => {
+          const pick = ranked.find((s) => stillConnected(s)) ?? ranked[0]!;
+          compSet.delete(pick);
+          unassigned.delete(pick);
+          return pick;
+        };
+
+        const byAnchor = [...compSet].sort(
+          (a, b) =>
+            (slots[a]!.x - anchor.x) ** 2 +
+              (slots[a]!.y - anchor.y) ** 2 -
+              ((slots[b]!.x - anchor.x) ** 2 + (slots[b]!.y - anchor.y) ** 2) || a - b,
+        );
+        const blob: number[] = [claim(byAnchor)];
+        while (blob.length < Math.min(need, comp.length)) {
+          // Candidates are the blob's FRONTIER — free slots touching it —
+          // because anything else would disconnect the blob itself. A
+          // connected region always has one while slots remain. Ranked by
+          // how many blob neighbours a slot touches (pocket-fillers first,
+          // for compact shapes), then index; the articulation veto in
+          // `claim` then keeps the leftover region whole when it can.
+          const touch = (s: number): number => {
+            let t = 0;
+            for (const m of blob) if (adj[s]!.includes(m)) t++;
+            return t;
+          };
+          const frontier = [...compSet]
+            .filter((s) => touch(s) > 0)
+            .sort((a, b) => touch(b) - touch(a) || a - b);
+          if (frontier.length === 0) break;
+          blob.push(claim(frontier));
+        }
+        for (const s of blob) slotOfCell.set(members[mi++]!.id, s);
+        need -= blob.length;
+      }
+    }
+
     const kept = new Map<number, Cell>();
     for (const input of inputs) {
-      const { x, y } = slots[input.you ? centerSlots[yi++]! : restSlots[oi++]!]!;
+      const { x, y } = slots[slotOfCell.get(input.id)!]!;
       const prev = this.cells.get(input.id);
       kept.set(input.id, {
         id: input.id,

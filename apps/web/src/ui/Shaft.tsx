@@ -43,20 +43,14 @@ export function Shaft({
   useEffect(() => {
     const r = renderer.current;
     if (!r) return;
-    // Everyone's plates group by owner, not just yours: multi-betting is only
-    // legible if a wallet holding four plates LOOKS like a wallet holding four
-    // plates. Sorting by (name, id) is deterministic for a fixed roster, and
-    // the layout packs adjacent array entries into adjacent slots. Your own
-    // plates are position-independent here — the layout pins anything marked
-    // `you` to the centre slots regardless of where it sits in this array.
-    const ordered = [...snap.players].sort((a, b) =>
-      a.name < b.name ? -1 : a.name > b.name ? 1 : a.id - b.id,
-    );
+    // The layout clusters spatially by `group`, so array order carries no
+    // meaning here any more — the renderer grows each owner a contiguous
+    // blob of hexes itself, with yours pinned to the centre.
     // Multi-plate owners get a rim tint hashed from the wallet name: stable
     // for the whole round, needs no palette bookkeeping, and steers clear of
     // the cyan band so nobody's stack masquerades as "you".
     const counts = new Map<string, number>();
-    for (const p of ordered) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
+    for (const p of snap.players) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
     const hueOf = (name: string): number => {
       let h = 0;
       for (let i = 0; i < name.length; i++) h = (Math.imul(h, 31) + name.charCodeAt(i)) >>> 0;
@@ -64,9 +58,10 @@ export function Shaft({
       return hue > 150 && hue < 210 ? (hue + 70) % 360 : hue;
     };
     r.update({
-      cells: ordered.map((p) => ({
+      cells: snap.players.map((p) => ({
         id: p.id,
         you: p.you,
+        group: p.name,
         hue: !p.you && (counts.get(p.name) ?? 0) > 1 ? hueOf(p.name) : undefined,
         state: (p.outcome === "dead"
           ? "dying"
