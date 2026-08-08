@@ -336,19 +336,39 @@ function PlayerCard({
         )}
       </div>
 
-      {/* The record, not the stopwatch. A round timer said nothing about
-          anybody; who someone IS at this table is their volume and their
-          lifetime result — rakeback and jackpots included, so the number is
-          their true standing against the house. */}
+      {/* The record, not the stopwatch.
+          Volume is ONE line: entry is fixed, so plates and SOL wagered are
+          the same fact and printing both was one number twice. The rows that
+          earn their space are the style tells — how often this wallet
+          finishes a plate ahead, and how far it has ever ridden one. Those
+          separate a nit from a degen, which is the thing worth knowing about
+          a stranger you are sharing a lattice with. */}
       {p.lifetime && (
         <div className="mt-1.5 space-y-0.5 border-t border-[var(--color-panel2)] pt-1.5">
           {line(
-            "plates bought",
-            <span className="tnum text-[11px]">{p.lifetime.plates.toLocaleString()}</span>,
+            "wagered",
+            <span className="tnum text-[11px]">
+              {p.lifetime.wagered.toFixed(1)} ◎
+              <span className="text-[var(--color-dim)]">
+                {" "}
+                · {p.lifetime.plates.toLocaleString()} plates
+              </span>
+            </span>,
           )}
           {line(
-            "total wagered",
-            <span className="tnum text-[11px]">{p.lifetime.wagered.toFixed(2)} ◎</span>,
+            "banked ahead",
+            <span className="tnum text-[11px] font-semibold">
+              {(p.lifetime.hitRate * 100).toFixed(0)}%
+            </span>,
+          )}
+          {line(
+            "best ride",
+            <span
+              className="tnum text-[11px] font-semibold"
+              style={p.lifetime.best >= 5 ? { color: "var(--color-gold)" } : undefined}
+            >
+              {p.lifetime.best > 0 ? `${p.lifetime.best.toFixed(2)}×` : "—"}
+            </span>,
           )}
           {line(
             "lifetime p/l",
@@ -363,6 +383,15 @@ function PlayerCard({
               {p.lifetime.net.toFixed(3)} ◎
             </span>,
           )}
+          {/* Only for the few who have actually taken one — a row of zeroes
+              on every other card would say nothing and cost a line. */}
+          {p.lifetime.jackpots > 0 &&
+            line(
+              "bonanza won",
+              <span className="tnum text-[11px] font-semibold text-[var(--color-gold)]">
+                +{p.lifetime.jackpots.toFixed(2)} ◎
+              </span>,
+            )}
         </div>
       )}
     </div>

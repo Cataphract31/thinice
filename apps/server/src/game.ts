@@ -51,7 +51,7 @@ interface Seat {
   name: string;
   charId: string;
   /** Lifetime record snapshot from join time, shown on the profile card. */
-  lifetime: { plates: number; wagered: number; net: number };
+  lifetime: NonNullable<NetPlayer["lifetime"]>;
 }
 
 /** A connected human. The socket layer owns the transport; this owns the money. */
@@ -345,6 +345,9 @@ export class GameServer {
         // Round settlements plus rakeback plus jackpot, minus stakes: the
         // wallet's true lifetime result against this house.
         net: toSol(row.returned + row.revEarned + (row.bonanzaWon ?? 0) - row.wagered),
+        hitRate: row.roundsPlayed > 0 ? row.roundsWon / row.roundsPlayed : 0,
+        best: row.bestMultiple,
+        jackpots: toSol(row.bonanzaWon ?? 0),
       },
     });
     this.seatsOf.set(s.wallet, [...mine, id]);

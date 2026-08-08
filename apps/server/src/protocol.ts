@@ -20,8 +20,23 @@ export interface NetPlayer {
    * The wallet's lifetime record as of joining this round, for the plate
    * profile card. Net includes rakeback and jackpot winnings — the honest
    * "versus the house" number, not just round settlements.
+   *
+   * `plates` and `wagered` are ONE fact at a fixed entry (wagered = plates ×
+   * entry), so the card prints them as one line. The style tells — how often
+   * they finish a plate ahead, and how far they have ever ridden one — are
+   * what actually distinguish one stranger from another.
    */
-  lifetime?: { plates: number; wagered: number; net: number };
+  lifetime?: {
+    plates: number;
+    wagered: number;
+    net: number;
+    /** Share of plates that came back at or above the entry, 0-1. */
+    hitRate: number;
+    /** Best multiple ever banked. */
+    best: number;
+    /** Lifetime jackpot winnings, shown only when they have taken one. */
+    jackpots: number;
+  };
 }
 
 /** Lifetime record, straight out of the database. */

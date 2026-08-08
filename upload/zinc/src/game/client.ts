@@ -68,8 +68,20 @@ export interface PlayerView {
    * Lifetime record as of joining this round, for the profile card. Net
    * includes rakeback and jackpot winnings — the wallet's true result
    * against the house, not just round settlements.
+   *
+   * `plates` and `wagered` are one fact at a fixed entry, so the card prints
+   * them on one line; `hitRate` and `best` are the style tells that actually
+   * separate a nit from someone who rides every plate into the red zone.
    */
-  lifetime?: { plates: number; wagered: number; net: number };
+  lifetime?: {
+    plates: number;
+    wagered: number;
+    net: number;
+    /** Share of plates that came back at or above the entry, 0-1. */
+    hitRate: number;
+    best: number;
+    jackpots: number;
+  };
 }
 
 /** Who the winner scene celebrates once a round ends. */
@@ -1203,6 +1215,9 @@ export class GameClient {
         plates: s.roundsPlayed,
         wagered: s.wagered,
         net: s.returned + s.revEarned + (s.bonanzaWon ?? 0) - s.wagered,
+        hitRate: s.roundsPlayed > 0 ? s.roundsWon / s.roundsPlayed : 0,
+        best: s.bestMultiple,
+        jackpots: s.bonanzaWon ?? 0,
       };
     }
     const name = this.names.get(id) ?? "player";
@@ -1211,7 +1226,20 @@ export class GameClient {
     const plates = 20 + (h % 4800);
     const wagered = plates * this.config.entry;
     const rtp = 0.9 + ((h >>> 8) % 1600) / 10000;
-    return { plates, wagered, net: wagered * (rtp - 1) };
+    // One style axis drives both tells, so the invented record is internally
+    // coherent: a nit banks often and never rides far, a degen almost never
+    // banks but has one enormous multiple to show for it. Independent random
+    // numbers would produce players who cash 70% of plates AND hold a 40×,
+    // which no exit strategy can actually produce.
+    const style = ((h >>> 18) % 1000) / 1000;
+    return {
+      plates,
+      wagered,
+      net: wagered * (rtp - 1),
+      hitRate: 0.74 - style * 0.56,
+      best: 1.6 + style * style * 38 + ((h >>> 4) % 100) / 100,
+      jackpots: (h >>> 28) === 0 ? 20 + ((h >>> 6) % 9000) / 100 : 0,
+    };
   }
 
   private viewOf(p: Player): PlayerView {
