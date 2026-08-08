@@ -229,6 +229,13 @@ export interface Snapshot {
    * demo and for guests — there is no chain identity to move money for.
    */
   bank?: BankState;
+  /**
+   * WHO the server actually seated, networked play only. The wallet button
+   * must render this — Phantom's own connect state can disagree with it (an
+   * expired session seats a guest while the extension still shows the
+   * address), and the seat is the identity money moves under.
+   */
+  seat?: { guest: boolean; address: string };
 }
 
 export interface BankState {
@@ -269,6 +276,11 @@ export interface PlayerStats {
  */
 const YOU_ID = 9999;
 const YOU_BASE = 9900;
+/**
+ * The restored crowd, as one ledger id. Plate ids are non-negative and YOU
+ * lives above YOU_BASE, so a negative id can never collide with either.
+ */
+const CROWD_ID = -2;
 const MAX_PLATES = 5;
 const isYou = (id: number): boolean => id >= YOU_BASE;
 
@@ -307,6 +319,17 @@ interface SaveState {
   teamWins?: Record<string, number>;
   roundId?: number;
   stats?: PlayerStats;
+  /** Round the jackpot last fired in, so the drought survives a reload. */
+  lastFire?: number;
+  /**
+   * The CROWD's side of both ledgers, as one aggregate each. Restoring only
+   * your own tickets and weight made you the sole holder after every reload:
+   * the popover showed 100% bonanza odds, and the first seal handed your
+   * whole historical weight the round's rakeback against one round of fresh
+   * bot tickets — reload-spam was a faucet.
+   */
+  crowdBTickets?: number;
+  crowdRevWeight?: number;
 }
 
 /**
@@ -337,6 +360,9 @@ function loadSave(): SaveState | null {
       revStreamed: num(s.revStreamed),
       autoTarget: num(s.autoTarget, 2),
       roundId: num(s.roundId),
+      lastFire: num(s.lastFire),
+      crowdBTickets: num(s.crowdBTickets),
+      crowdRevWeight: num(s.crowdRevWeight),
     };
   } catch {
     return null;
@@ -596,6 +622,13 @@ export class GameClient {
       this.session = save.session;
       if (save.bTickets > 0) this.jackpot.credit(YOU_ID, save.bTickets);
       this.revShare.restore(YOU_ID, save.revLifetime, save.revWeight, Date.now());
+      // The crowd's side comes back too, or you are the only holder in both
+      // economies after a reload — 100% displayed bonanza odds, and the next
+      // seal's rakeback distributed almost entirely to you (see SaveState).
+      if ((save.crowdBTickets ?? 0) > 0) this.jackpot.credit(CROWD_ID, save.crowdBTickets!);
+      if ((save.crowdRevWeight ?? 0) > 0) {
+        this.revShare.restore(CROWD_ID, 0, save.crowdRevWeight!, Date.now());
+      }
       if (typeof save.autoTarget === "number" && save.autoTarget >= 1.05) {
         this.auto.target = save.autoTarget;
       }
@@ -636,6 +669,9 @@ export class GameClient {
       if (typeof save.roundId === "number" && save.roundId > 0) {
         this.roundId = save.roundId;
       }
+      // Restored AFTER roundId so the drought (roundId - lastFireRound)
+      // reads the real gap, not the whole round count since day one.
+      this.lastFireRound = Math.min(num(save.lastFire), this.roundId);
     }
 
     this.openLobby();
@@ -801,8 +837,13 @@ export class GameClient {
       const char = CHARACTERS[Math.floor(this.rng.next() * CHARACTERS.length)]!.id;
       const strategy = this.makeOwnerStrategy(take);
       // Spread arrivals across most of the lobby so the shaft visibly fills
-      // rather than blinking into existence fully populated.
-      const arrive = now + this.rng.next() * this.config.timing.lobbyMs * 0.78;
+      // rather than blinking into existence fully populated. The draw leaves
+      // room for the stack stagger below: at 0.78 a late-drawn multi-plate
+      // stack's tail overran the lobby and popped in at the seal — the exact
+      // blink the stagger exists to prevent.
+      const spread =
+        this.config.timing.lobbyMs * 0.78 - (take - 1) * 420;
+      const arrive = now + this.rng.next() * Math.max(0, spread);
       for (let k = 0; k < take; k++, i++) {
         this.names.set(i, name);
         this.charMap.set(i, char);
@@ -1132,6 +1173,9 @@ export class GameClient {
         teamWins: this.teamWins,
         roundId: this.roundId,
         stats: this.stats,
+        lastFire: this.lastFireRound,
+        crowdBTickets: this.jackpot.totalTickets - this.jackpot.ticketsOf(YOU_ID),
+        crowdRevWeight: this.revShare.totalWeight(now) - this.revShare.weightOf(YOU_ID, now),
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(s));
     } catch {

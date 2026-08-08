@@ -57,6 +57,12 @@ export interface RoundRecord {
     totalTickets: number;
     /** Seat/ledger id paid, or null when the roll held. */
     winnerId: number | null;
+    /**
+     * The ordered ticket table the winner walk ran over. Rounds recorded
+     * before this field existed verify draws only; with it, the verifier
+     * replays the walk and the recorded winner is pinned too.
+     */
+    holders?: [number, number][];
   };
 }
 
@@ -146,7 +152,27 @@ export function verifyBonanzaDraw(rec: RoundRecord): boolean | null {
   const winner = rng.next();
   // Exact equality: both sides run the identical integer-only generator, so
   // any difference at all means the recorded draw is not the committed one.
-  return fire === rec.bonanza.fire && winner === rec.bonanza.winner;
+  if (fire !== rec.bonanza.fire || winner !== rec.bonanza.winner) return false;
+  // When the record carries the ordered ticket table, replay the walk that
+  // picked the winner — the exact loop from BonanzaPool.roll, including the
+  // last-holder fallback for float dust. Checking only the draws left the
+  // WINNER on faith: an operator could pay a confederate and both floats
+  // would still verify. Older records without the table verify draws only.
+  const holders = rec.bonanza.holders;
+  if (holders && rec.bonanza.winnerId !== null) {
+    let target = rec.bonanza.winner * rec.bonanza.totalTickets;
+    let walked = -1;
+    for (const [id, count] of holders) {
+      target -= count;
+      if (target <= 0) {
+        walked = id;
+        break;
+      }
+      walked = id;
+    }
+    if (walked !== rec.bonanza.winnerId) return false;
+  }
+  return true;
 }
 
 /**

@@ -375,7 +375,7 @@ function report(
   console.log(
     `    in-game RTP spread across strategies: ${(spread * 100).toFixed(3)} pts`,
   );
-  // If the martingale holds, every deviation from 93% is sampling noise, so
+  // If the martingale holds, every deviation from 95% is sampling noise, so
   // these z-scores should look like standard normals rather than a trend.
   const worst = ordered
     .map((s) => ({

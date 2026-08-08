@@ -6,7 +6,14 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { CONFIG, toLamports, toSol } from "./config.ts";
 import { Database } from "./db.ts";
 import { CHARS, GameServer, type Session } from "./game.ts";
-import { RPC_URL, houseBalance, loadHouse, sendWithdrawal, verifyDeposit } from "./chain.ts";
+import {
+  RPC_URL,
+  houseBalance,
+  loadHouse,
+  prepareWithdrawal,
+  verifyDeposit,
+  withdrawalStatus,
+} from "./chain.ts";
 import type { ClientMessage, NetChat, NetHistory, NetState, ServerMessage } from "./protocol.ts";
 
 const db = new Database();
@@ -97,12 +104,14 @@ wss.on("error", (err) => console.error("wss error", err));
 
 wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   // Behind the reverse proxy every socket is 127.0.0.1; the real address
-  // rides in X-Forwarded-For, which only the proxy can set — the game port
-  // itself is not reachable from outside the box.
+  // rides in X-Forwarded-For. The LAST entry, not the first: the proxy
+  // APPENDS the address it actually saw, while everything before it is
+  // whatever the client claimed — reading the first token let a scripted
+  // client rotate its own key freely while honest browsers (which cannot
+  // set the header at all) shared one.
+  const fwd = String(req.headers["x-forwarded-for"] ?? "");
   const ip =
-    String(req.headers["x-forwarded-for"] ?? "").split(",")[0]!.trim() ||
-    req.socket.remoteAddress ||
-    "?";
+    (fwd.split(",").pop() ?? "").trim() || req.socket.remoteAddress || "?";
   const ipCount = perIp.get(ip) ?? 0;
   if (wss.clients.size > MAX_SOCKETS || ipCount >= MAX_PER_IP) {
     ws.close(1013, "server full");
@@ -196,14 +205,15 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       });
       return;
     }
+    // Sign first, so the signature exists BEFORE any lamport can move and
+    // the intent row ties it to the debit. Nothing has been broadcast if
+    // preparation itself fails, so that one refund is genuinely safe.
+    let prep;
     try {
-      const sig = await sendWithdrawal(house, s.wallet, lamports);
-      db.recordWithdrawal(sig, s.wallet, lamports);
-      send({ t: "tx", kind: "withdraw", ok: true, sol, note: sig });
+      prep = await prepareWithdrawal(house, s.wallet, lamports);
     } catch (err) {
-      // The transfer never confirmed: put the money back where it was.
       db.adjustBalance(s.wallet, lamports);
-      console.error("withdrawal failed", s.wallet, err);
+      console.error("withdrawal prepare failed", s.wallet, err);
       send({
         t: "tx",
         kind: "withdraw",
@@ -211,6 +221,44 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         sol: 0,
         note: "chain transfer failed — is the house funded?",
       });
+      game.refresh(s);
+      return;
+    }
+    db.recordWithdrawalIntent(prep.sig, s.wallet, lamports);
+    try {
+      await prep.send();
+      db.setTransferStatus(prep.sig, "ok");
+      send({ t: "tx", kind: "withdraw", ok: true, sol, note: prep.sig });
+    } catch (err) {
+      // A confirmation failure is NOT proof the transfer failed: an HTTP
+      // timeout after the RPC node accepted it is a transfer that landed.
+      // Ask the chain, and refund only when it PROVES the money never moved.
+      console.error("withdrawal confirm failed", s.wallet, err);
+      const status = await withdrawalStatus(prep.sig, prep.lastValidBlockHeight);
+      if (status === "landed") {
+        db.setTransferStatus(prep.sig, "ok");
+        send({ t: "tx", kind: "withdraw", ok: true, sol, note: prep.sig });
+      } else if (status === "failed" || status === "expired") {
+        db.refundWithdrawal(prep.sig, s.wallet, lamports);
+        send({
+          t: "tx",
+          kind: "withdraw",
+          ok: false,
+          sol: 0,
+          note: "chain transfer failed — is the house funded?",
+        });
+      } else {
+        // Unknowable right now: the debit stands, flagged for the operator.
+        // Re-crediting here is the double-payout path.
+        db.setTransferStatus(prep.sig, "unknown");
+        send({
+          t: "tx",
+          kind: "withdraw",
+          ok: false,
+          sol: 0,
+          note: "transfer status unknown — balance held while it settles",
+        });
+      }
     }
     game.refresh(s);
   }
@@ -242,7 +290,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       return;
     }
     budget--;
-    if (typeof raw === "object" && "byteLength" in raw && raw.byteLength > 4096) return;
+    // Same ceiling as the socket layer's maxPayload: two disagreeing caps
+    // meant frames between them were accepted by one and silently dropped
+    // by the other.
+    if (typeof raw === "object" && "byteLength" in raw && raw.byteLength > 8192) return;
     let msg: ClientMessage;
     try {
       msg = JSON.parse(String(raw)) as ClientMessage;
@@ -262,7 +313,12 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
   function handle(msg: ClientMessage): void {
     switch (msg.t) {
-      case "auth":
+      case "auth": {
+        // Already seated: nothing here may run. Processing a late auth used
+        // to rotate the wallet's stored token BEFORE seat() no-opped, which
+        // silently logged out every other session resuming on the old token
+        // while the fresh token was discarded undelivered.
+        if (session) return;
         // A real wallet must prove ownership by signing the nonce. Without
         // this anyone could claim to be any address and spend its balance.
         if (nonceSpent || Date.now() - nonceAt > NONCE_TTL_MS) {
@@ -270,18 +326,20 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
           return;
         }
         nonceSpent = true;
-        if (!verify(String(msg.wallet ?? ""), nonce, String(msg.sig ?? ""))) {
+        // One coerced value used everywhere below — verifying one string and
+        // seating the raw, uncoerced payload is how type confusion starts.
+        const wallet = String(msg.wallet ?? "");
+        if (!verify(wallet, nonce, String(msg.sig ?? ""))) {
           send({ t: "error", message: "signature rejected" });
           return;
         }
-        {
-          // One signature mints a session token; every later connection
-          // resumes with it instead of re-prompting Phantom.
-          const token = randomBytes(24).toString("hex");
-          db.setAuthToken(msg.wallet, token);
-          seat(msg.wallet, false, token);
-        }
+        // One signature mints a session token; every later connection
+        // resumes with it instead of re-prompting Phantom.
+        const token = randomBytes(24).toString("hex");
+        db.setAuthToken(wallet, token);
+        seat(wallet, false, token);
         return;
+      }
 
       case "resume": {
         // Bearer resume: same trust level as a guest id. Namespaced wallets

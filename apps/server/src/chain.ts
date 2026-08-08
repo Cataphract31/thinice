@@ -5,8 +5,8 @@ import {
   PublicKey,
   SystemProgram,
   Transaction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
+import bs58 from "bs58";
 
 /**
  * The house wallet and the two on-chain money movements.
@@ -64,6 +64,13 @@ export interface DepositCheck {
  * Polls briefly because the client reports the signature the moment Phantom
  * submits it, typically a second or two before the cluster confirms.
  */
+// Every in-flight verification is a polling loop against a shared,
+// rate-limited RPC endpoint, and the per-socket busy flag only serializes
+// one client. A global ceiling keeps a burst of bogus signatures from
+// buying dozens of concurrent pollers at the server's expense.
+let verifying = 0;
+const MAX_VERIFYING = 4;
+
 export async function verifyDeposit(
   sig: string,
   senderWallet: string,
@@ -76,7 +83,26 @@ export async function verifyDeposit(
     return { ok: false, lamports: 0, reason: "bad wallet" };
   }
 
-  for (let attempt = 0; attempt < 15; attempt++) {
+  if (verifying >= MAX_VERIFYING) {
+    return { ok: false, lamports: 0, reason: "verifier busy — try again in a moment" };
+  }
+  verifying++;
+  try {
+    return await pollDeposit(sig, sender, house);
+  } finally {
+    verifying--;
+  }
+}
+
+async function pollDeposit(
+  sig: string,
+  sender: PublicKey,
+  house: PublicKey,
+): Promise<DepositCheck> {
+  // 8 x 2s, not 15: the client reports the signature after Phantom submits,
+  // so confirmation is normally seconds away — the long tail only ever paid
+  // RPC calls for signatures that would never land.
+  for (let attempt = 0; attempt < 8; attempt++) {
     const tx = await connection
       .getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })
       .catch(() => null);
@@ -100,19 +126,71 @@ export async function verifyDeposit(
   return { ok: false, lamports: 0, reason: "transaction not found — is Phantom on devnet?" };
 }
 
-/** Pays lamports from the house to a wallet. Throws on failure. */
-export async function sendWithdrawal(
+export interface PreparedWithdrawal {
+  /** Known BEFORE broadcast, so an intent row can be written first. */
+  sig: string;
+  lastValidBlockHeight: number;
+  /** Broadcasts and waits for confirmation. Throws when either step fails. */
+  send: () => Promise<void>;
+}
+
+/**
+ * Builds and SIGNS a withdrawal without broadcasting it, so the signature is
+ * known before any lamport can move. The old sendAndConfirmTransaction shape
+ * meant a throw was indistinguishable from "never happened" — but an HTTP
+ * timeout after the RPC node accepted the transaction is a transfer that
+ * LANDED, and re-crediting on it paid the player twice. Intent first, then
+ * broadcast, then judge failures with `withdrawalStatus`.
+ */
+export async function prepareWithdrawal(
   house: Keypair,
   toWallet: string,
   lamports: number,
-): Promise<string> {
+): Promise<PreparedWithdrawal> {
   const to = new PublicKey(toWallet);
   const tx = new Transaction().add(
     SystemProgram.transfer({ fromPubkey: house.publicKey, toPubkey: to, lamports }),
   );
-  return sendAndConfirmTransaction(connection, tx, [house], {
-    commitment: "confirmed",
-  });
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = house.publicKey;
+  tx.sign(house);
+  const sig = bs58.encode(tx.signature!);
+  return {
+    sig,
+    lastValidBlockHeight,
+    send: async () => {
+      await connection.sendRawTransaction(tx.serialize());
+      const conf = await connection.confirmTransaction(
+        { signature: sig, blockhash, lastValidBlockHeight },
+        "confirmed",
+      );
+      if (conf.value.err) {
+        throw new Error(`transaction failed on-chain: ${JSON.stringify(conf.value.err)}`);
+      }
+    },
+  };
+}
+
+/**
+ * The on-chain truth about a broadcast withdrawal, for deciding what a
+ * confirmation failure actually meant. "expired" is the only state that
+ * PROVES the transfer can never land (its blockhash is beyond reuse);
+ * "unknown" means nothing is proven and the debit must stand until it is.
+ */
+export async function withdrawalStatus(
+  sig: string,
+  lastValidBlockHeight: number,
+): Promise<"landed" | "failed" | "expired" | "unknown"> {
+  try {
+    const st = await connection.getSignatureStatuses([sig], { searchTransactionHistory: true });
+    const s = st.value[0];
+    if (s) return s.err ? "failed" : "landed";
+    const height = await connection.getBlockHeight("confirmed");
+    return height > lastValidBlockHeight ? "expired" : "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 export async function houseBalance(house: Keypair): Promise<number> {

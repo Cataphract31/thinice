@@ -307,9 +307,12 @@ export class NetClient {
     const ws = new WebSocket(this.url);
     this.ws = ws;
 
-    ws.onopen = () => {
-      this.retry = 0;
-    };
+    // No onopen handler on purpose — and specifically no backoff reset
+    // there. A "server full" rejection and a persistent server-side seating
+    // error both close AFTER a successful handshake, so resetting on raw
+    // open turned exponential backoff into a permanent 500ms retry storm
+    // aimed at a server that is already at its limit. The reset lives in
+    // the `ready` handler: the first moment the connection is actually usable.
 
     ws.onmessage = (ev) => {
       let m: Record<string, unknown>;
@@ -345,6 +348,7 @@ export class NetClient {
         return;
 
       case "ready":
+        this.retry = 0;
         this.extras = {
           ...this.extras,
           connected: true,
@@ -359,7 +363,15 @@ export class NetClient {
         this.bank = m.house
           ? { house: String(m.house), busy: false, note: "", ok: null }
           : null;
-        this.snap = { ...this.snap, bank: this.bank ?? undefined };
+        this.snap = {
+          ...this.snap,
+          bank: this.bank ?? undefined,
+          // WHO is actually seated, straight from the server. The wallet
+          // button renders THIS, not Phantom's connect state — the two can
+          // disagree (expired session seats a guest while Phantom still
+          // shows the address), and the seat is the one that holds money.
+          seat: { guest: Boolean(m.guest), address: String(m.wallet) },
+        };
         this.emit();
         return;
 
@@ -380,6 +392,9 @@ export class NetClient {
           history: this.history,
           connected: true,
           bank: this.bank ?? undefined,
+          seat: this.extras.connected
+            ? { guest: this.extras.guest, address: this.extras.address }
+            : undefined,
         };
         this.cue(prev, this.snap);
         this.emit();

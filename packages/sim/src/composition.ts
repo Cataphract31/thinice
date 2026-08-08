@@ -151,7 +151,7 @@ for (const share of [0.1, 0.25, 0.5, 0.75, 0.9, 0.98]) {
 }
 
 console.log("  " + "-".repeat(90));
-console.log("  total = in-game 93% + bonanza + flat 2% rev-share");
+console.log("  total = in-game 95% + bonanza + flat 2% rev-share");
 console.log("");
 
 console.log("=".repeat(92));

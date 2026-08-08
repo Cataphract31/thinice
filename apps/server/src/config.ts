@@ -66,6 +66,17 @@ if (CONFIG.bots > 0 && CONFIG.banking) {
   );
 }
 
+// Bots supply at most CONFIG.bots distinct wallets toward the seal minimum.
+// A minimum the bots cannot reach alone makes the around-the-clock room
+// silently wait for humans forever — worth a loud line at boot, because the
+// failure mode at runtime is just a lobby that never seals, with no log.
+if (CONFIG.bots > 0 && CONFIG.minEntrants > CONFIG.bots) {
+  console.warn(
+    `MIN_ENTRANTS=${CONFIG.minEntrants} exceeds BOTS=${CONFIG.bots}: ` +
+      "the room cannot seal without humans present.",
+  );
+}
+
 /**
  * The character roster. Lives here because both the game (whitelisting what a
  * client may pick) and the database (dealing a random face to a NEW player)

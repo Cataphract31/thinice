@@ -23,7 +23,19 @@ export class BonanzaPool {
    * from the revealed seed and check that the jackpot was not simply handed
    * to whoever the house preferred.
    */
-  lastDraws: { fire: number; winner: number; totalTickets: number } | null = null;
+  lastDraws: {
+    fire: number;
+    winner: number;
+    totalTickets: number;
+    /**
+     * The ordered ticket table the winner walk ran over, snapshotted at the
+     * roll. Without it the record proves the two draws came off the committed
+     * seed but the WINNER is unverifiable: an operator could record anyone
+     * and both floats would still match. With it, a verifier replays the walk
+     * and the winner is pinned by the same commitment as the draws.
+     */
+    holders: [number, number][];
+  } | null = null;
 
   constructor(private readonly config: BonanzaConfig, seedPool = 0) {
     this.pool = seedPool;
@@ -60,7 +72,15 @@ export class BonanzaPool {
     this.roundsSinceFire++;
     const fireDraw = rng.next();
     const winnerDraw = rng.next();
-    this.lastDraws = { fire: fireDraw, winner: winnerDraw, totalTickets: this.ticketTotal };
+    // Snapshot BEFORE any mutation below: a fire clears the map, and the
+    // record must hold the table the walk actually ran over. Map iteration
+    // order is insertion order, which is exactly the walk's order.
+    this.lastDraws = {
+      fire: fireDraw,
+      winner: winnerDraw,
+      totalTickets: this.ticketTotal,
+      holders: [...this.tickets],
+    };
     if (fireDraw >= this.config.fireProb) return null;
     if (this.ticketTotal <= 0 || this.pool <= 0) return null;
 

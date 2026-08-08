@@ -183,6 +183,11 @@ export class LatticeRenderer {
     this.rockG = null;
     this.keyG = null;
     this.atmosG = null;
+    // Relayout NOW, not on the next snapshot push: the frame loop keeps
+    // drawing between pushes, and until one arrived a resize or rotation
+    // showed the whole grid at coordinates computed for the old dimensions —
+    // misplaced in a corner of the new frame for up to a second.
+    if (this.snap.cells.length > 0) this.layout(this.snap.cells);
   }
 
   setSinkPoint(x: number, y: number): void {

@@ -217,7 +217,7 @@ export class GameServer {
    * entering a round, or restored as an existing ticket holder. It used to be
    * called from `stateFor`, i.e. on every broadcast for every connected
    * socket, which permanently enrolled anyone who merely opened the page: and
-   * both `finish` and `persistTickets` walk this map doing one synchronous
+   * both `finish` and the close-time ticket rows walk this map doing one synchronous
    * SELECT and one UPDATE per entry, every round, forever. Guest ids are free.
    */
   private ledgerId(wallet: string): number {
@@ -237,7 +237,45 @@ export class GameServer {
   start(): void {
     if (this.timer) return;
     this.openLobby();
-    this.timer = setInterval(() => this.loop(), 50);
+    // The catch is load-bearing. Without it a throw anywhere in the tick or
+    // close path unwinds to the process-level uncaughtException handler,
+    // which keeps the server alive — with the round wedged "live" forever
+    // and every stake locked, because the state that gates the next tick was
+    // already half-advanced. Staying up is only safe if the round dies too.
+    this.timer = setInterval(() => {
+      try {
+        this.loop();
+      } catch (err) {
+        this.abortRound(err);
+      }
+    }, 50);
+  }
+
+  /**
+   * The emergency exit for a round the loop could not finish: roll it back
+   * exactly like the startup sweep would after a crash — every entry
+   * refunded, cash-outs clawed back, the round row left open as the audit
+   * trail — then reopen the lobby. The in-memory ticket ledgers may briefly
+   * carry the aborted round's accruals (they re-sync from the database on
+   * the next restart); that dust is accepted, because the alternative was a
+   * room that sits in "live" forever with everyone's stake locked.
+   */
+  private abortRound(err: unknown): void {
+    console.error("round aborted", this.roundId, err);
+    try {
+      this.db.refundOpenEntries();
+    } catch (e) {
+      console.error("abort refund failed", e);
+    }
+    try {
+      this.round = null;
+      this.settled.clear();
+      this.phase = "result";
+      this.phaseEnd = Date.now() + this.config.timing.resultMs;
+      this.broadcast(true);
+    } catch (e) {
+      console.error("abort reset failed", e);
+    }
   }
 
   stop(): void {
@@ -604,7 +642,9 @@ export class GameServer {
 
   private settleExit(wallet: string, seat: number, sol: number, ticks: number, outcome: string): void {
     const lamports = toLamports(sol);
-    if (lamports > 0) this.db.adjustBalance(wallet, lamports);
+    // The balance credit rides INSIDE settleEntry's transaction: credited
+    // separately, a crash between the two made the startup sweep re-credit
+    // the stake on top of the payout (see settleEntry).
     const multiple = sol / this.config.entry;
     this.db.settleEntry(
       this.roundId,
@@ -863,7 +903,21 @@ export class GameServer {
     // Rolled BEFORE the round is written, so the draw goes into the record
     // and a player can recompute it from the revealed seed. A jackpot decided
     // after the record is sealed is a jackpot nobody can check.
-    const bonanzaTrace = this.rollBonanza();
+    const bon = this.rollBonanza();
+
+    // Ticket state as of AFTER the roll: on a fire the ledgers were just
+    // wiped, so these rows persist the wipe; on a held round they persist
+    // this round's accruals. Either way they commit WITH the close.
+    const now2 = Date.now();
+    const ticketRows: { wallet: string; bonanza: number; revLifetime: number; revWeight: number }[] = [];
+    for (const [wallet, id] of this.ledgerIds) {
+      ticketRows.push({
+        wallet,
+        bonanza: this.jackpot.ticketsOf(id),
+        revLifetime: this.revShare.lifetimeOf(id),
+        revWeight: this.revShare.weightOf(id, now2),
+      });
+    }
 
     this.db.closeRound(
       this.roundId,
@@ -879,12 +933,16 @@ export class GameServer {
         config: this.config,
         entrantIds: res.players.map((p) => p.id),
         cashOuts: res.cashOuts,
-        ...(bonanzaTrace ? { bonanza: bonanzaTrace } : {}),
+        ...(bon.trace ? { bonanza: bon.trace } : {}),
       }),
       outcomeDigest(res),
+      {
+        bonanza: bon.settle,
+        tickets: ticketRows,
+        bonanzaPool: String(toLamports(this.jackpot.pool)),
+        ...(bon.settle ? { lastFireRound: String(this.roundId) } : {}),
+      },
     );
-
-    this.persistTickets();
 
     this.phase = "result";
     // A fire earns the longer result phase the celebration was written for.
@@ -906,32 +964,41 @@ export class GameServer {
    * fixed by the same hash published before the round sealed, and they are
    * written into the round record so a player can recompute them.
    */
-  private rollBonanza(): { fire: number; winner: number; totalTickets: number; winnerId: number | null } | null {
+  private rollBonanza(): {
+    trace:
+      | {
+          fire: number;
+          winner: number;
+          totalTickets: number;
+          holders: [number, number][];
+          winnerId: number | null;
+        }
+      | null;
+    /** Fire payout for the close transaction. Null: the jackpot held. */
+    settle: { winner: string | null; lamports: number } | null;
+  } {
     const fire = this.jackpot.roll(deriveRng(this.seedHex, BONANZA_TAG));
     const draws = this.jackpot.lastDraws;
+    // The trace carries the ORDERED ticket snapshot, so the walk that picked
+    // the winner can be replayed from the record — without it a player could
+    // verify the two draws and still have to take the winner on faith.
     const trace = draws ? { ...draws, winnerId: fire?.winnerId ?? null } : null;
-    if (!fire) return trace;
+    if (!fire) return { trace, settle: null };
 
     let winnerWallet = "";
     for (const [wallet, id] of this.ledgerIds) {
       if (id === fire.winnerId) winnerWallet = wallet;
     }
-    // Credit, ticket wipe and the pool's persisted value move together or not
-    // at all. Split across three autocommits, a crash between the payout and
-    // the meta write left the winner paid AND the pool restored at full value
-    // on restart — the house minting an entire second jackpot from nothing.
-    this.db.settleBonanza(
-      winnerWallet || null,
-      winnerWallet ? toLamports(fire.amount) : 0,
-      String(toLamports(this.jackpot.pool)),
-    );
+    // No database writes here: the payout, ticket wipe, pool value and
+    // drought marker all ride the closeRound transaction, so a crash can
+    // never leave a paid jackpot on a round that was then refunded — or a
+    // fire with no verifiable record.
     if (winnerWallet) {
       for (const s of this.sessions) {
         if (s.wallet === winnerWallet) s.session += fire.amount;
       }
     }
     this.lastFireRound = this.roundId;
-    this.db.setMeta("lastFireRound", String(this.roundId));
     this.bonanzaWallet = winnerWallet || null;
     this.bonanza = {
       amount: fire.amount,
@@ -943,20 +1010,10 @@ export class GameServer {
       youWon: false,
       at: Date.now(),
     };
-    return trace;
-  }
-
-  private persistTickets(): void {
-    const now = Date.now();
-    for (const [wallet, id] of this.ledgerIds) {
-      this.db.setTickets(
-        wallet,
-        this.jackpot.ticketsOf(id),
-        this.revShare.lifetimeOf(id),
-        this.revShare.weightOf(id, now),
-      );
-    }
-    this.db.setMeta("bonanzaPool", String(toLamports(this.jackpot.pool)));
+    return {
+      trace,
+      settle: { winner: winnerWallet || null, lamports: winnerWallet ? toLamports(fire.amount) : 0 },
+    };
   }
 
   // ------------------------------------------------------------------ output

@@ -30,9 +30,28 @@ check("balance now exactly the held drip", db.balanceOf(W) === 500_000_000);
 check("held drip still refused", !db.debitForWithdrawal(W, 1));
 
 // Round closes: the drip settles and withdraws.
-db.closeRound(1, "seed", 2, 10, 1, null, null, 0, "{}", "digest");
+const noSettle = { bonanza: null, tickets: [], bonanzaPool: "0" };
+db.closeRound(1, "seed", 2, 10, 1, null, null, 0, "{}", "digest", noSettle);
 check("after close the drip withdraws", db.debitForWithdrawal(W, 500_000_000));
 check("balance zero, nothing minted or lost", db.balanceOf(W) === 0);
+
+// The SECOND class of reversible money: a mid-round cash-out's PROFIT. The
+// crash sweep claws back `returned - staked`, so profit banked in an open
+// round must be held exactly like unsettled rakeback — this was the gap the
+// original test never exercised, which is why the missing hold passed it.
+db.adjustBalance(W, 1_000_000_000);
+db.openRound(2, "commit2", Date.now());
+check("entry taken", db.takeEntry(2, W, 100_000_000, 1));
+check("staked, balance 0.9", db.balanceOf(W) === 900_000_000);
+db.settleEntry(2, W, 1, 260_000_000, 2.6, 10, "cashed", true);
+check("cash-out credited, balance 1.16", db.balanceOf(W) === 1_160_000_000);
+check("full withdrawal refused while round open", !db.debitForWithdrawal(W, 1_160_000_000));
+check("even settled+1 refused", !db.debitForWithdrawal(W, 1_000_000_001));
+check("settled part withdraws fine", db.debitForWithdrawal(W, 1_000_000_000));
+check("held profit still refused", !db.debitForWithdrawal(W, 1));
+db.closeRound(2, "seed2", 2, 10, 2.6, null, null, 0, "{}", "digest2", noSettle);
+check("after close the profit withdraws", db.debitForWithdrawal(W, 160_000_000));
+check("balance zero again, nothing minted or lost", db.balanceOf(W) === 0);
 
 db.close();
 console.log(bad === 0 ? "\n  WITHDRAWAL HOLD HOLDS\n" : `\n  ${bad} FAILED\n`);

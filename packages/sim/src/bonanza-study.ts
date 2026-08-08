@@ -13,7 +13,7 @@ import { STRATEGY_SET } from "./strategies.js";
  * What happens to the player experience if the bonanza is removed and its two
  * rake points are folded into the rakeback stream instead?
  *
- * The in-game 94% is untouched by that move — the jackpot and the stream are
+ * The in-game 95% is untouched by that move — the jackpot and the stream are
  * both player money carved off the same rake — so the question is purely about
  * the SHAPE of the returned 4%: one ~thousand-entry lottery ticket versus a
  * steady drip. This measures both shapes under identical rounds.
@@ -171,7 +171,7 @@ function run(sc: Scenario): void {
 }
 
 console.log("=".repeat(84));
-console.log("  BONANZA REMOVAL STUDY — same rounds, same 94% in-game, different 4% shape");
+console.log("  BONANZA REMOVAL STUDY — same rounds, same 95% in-game, different 4% shape");
 console.log("=".repeat(84));
 for (const sc of SCENARIOS) run(sc);
 console.log("");

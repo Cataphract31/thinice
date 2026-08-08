@@ -56,7 +56,7 @@ environments.
 The entire game protocol is one websocket. A default `proxy_pass` block does not
 forward the `Upgrade` and `Connection` headers, so the handshake fails and the
 client sits on "Reconnecting…" forever while the health endpoint reports fine.
-See the nginx block below — the four `proxy_set_header` lines are not optional.
+See the nginx block below — the five `proxy_set_header` lines are not optional.
 
 Also set a long `proxy_read_timeout`. The server sends a ping every 20s so an
 idle connection is not really idle, but a 60s proxy timeout will still cut
@@ -188,6 +188,10 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_set_header Host       $host;
         proxy_set_header X-Real-IP  $remote_addr;
+        # The server keys its per-IP cap on the LAST X-Forwarded-For entry.
+        # Without this line every player keys to 127.0.0.1 and the seventh
+        # concurrent socket site-wide is rejected as "server full".
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_read_timeout 3600s;
     }
 

@@ -141,6 +141,11 @@ export class Database {
         PRIMARY KEY (roundId, wallet)
       );
 
+      /* The withdrawal hold filters this table by wallet on every debit; the
+         primary key leads with roundId, so without this the hold scans a
+         table that grows without bound. */
+      CREATE INDEX IF NOT EXISTS rakeback_wallet ON rakeback_payouts(wallet);
+
       /* On-chain movements. The PRIMARY KEY on the signature is the entire
          double-credit defence for deposits: a transaction can be presented a
          thousand times and only the first insert credits anything. */
@@ -160,6 +165,9 @@ export class Database {
       "ALTER TABLE entries ADD COLUMN seat INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE players ADD COLUMN bonanzaWon INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE players ADD COLUMN autoPlates INTEGER NOT NULL DEFAULT 1",
+      // 'ok' rows are settled history; 'pending'/'unknown' mark a withdrawal
+      // whose on-chain fate was not yet proven when the process last saw it.
+      "ALTER TABLE transfers ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'",
     ]) {
       try {
         this.db.exec(sql);
@@ -274,6 +282,12 @@ export class Database {
    * the settled balance cannot cover it.
    */
   debitForWithdrawal(wallet: string, lamports: number): boolean {
+    // TWO classes of reversible money are held back, not one: unsettled
+    // rakeback, and the PROFIT portion of a cash-out whose round has not
+    // closed. Both are exactly what the crash sweep claws back — money that
+    // could leave on-chain and then be reversed into a negative balance by
+    // an ordinary restart. The stake portion of a cash-out needs no hold:
+    // the sweep returns the stake, so only the profit is reversible.
     const changed = this.db
       .prepare(
         `UPDATE players SET balance = balance - ?
@@ -281,7 +295,11 @@ export class Database {
             AND balance - ? >= COALESCE(
               (SELECT SUM(p.lamports)
                  FROM rakeback_payouts p JOIN rounds r ON r.id = p.roundId
-                WHERE p.wallet = players.wallet AND r.endedAt IS NULL), 0)`,
+                WHERE p.wallet = players.wallet AND r.endedAt IS NULL), 0)
+            + COALESCE(
+              (SELECT SUM(MAX(e.returned - e.staked, 0))
+                 FROM entries e JOIN rounds r ON r.id = e.roundId
+                WHERE e.wallet = players.wallet AND r.endedAt IS NULL), 0)`,
       )
       .run(lamports, wallet, lamports);
     return changed.changes > 0;
@@ -297,14 +315,6 @@ export class Database {
         "UPDATE players SET autoEnabled = ?, autoTarget = ?, autoPlates = ? WHERE wallet = ?",
       )
       .run(enabled ? 1 : 0, target, plates, wallet);
-  }
-
-  setTickets(wallet: string, bonanza: number, revLifetime: number, revWeight: number): void {
-    this.db
-      .prepare(
-        "UPDATE players SET bonanzaTickets = ?, revTickets = ?, revWeight = ? WHERE wallet = ?",
-      )
-      .run(Math.round(bonanza), Math.round(revLifetime), revWeight, wallet);
   }
 
   /**
@@ -333,38 +343,6 @@ export class Database {
     this.db
       .prepare("UPDATE players SET revClaimed = ? WHERE wallet = ?")
       .run(lamports, wallet);
-  }
-
-  /**
-   * Settles a jackpot fire: pay the winner, wipe every ticket, and record the
-   * pool's new value, all in one commit.
-   *
-   * These were three separate autocommitted writes. A crash between the payout
-   * and the pool write left the winner paid while the restart re-seeded the
-   * pool from its stale full value — the house minting a second jackpot out of
-   * nothing, the largest single money bug the ledger could have.
-   */
-  settleBonanza(winner: string | null, lamports: number, poolMeta: string): void {
-    this.db.exec("BEGIN");
-    try {
-      if (winner && lamports > 0) {
-        this.db
-          .prepare(
-            "UPDATE players SET balance = balance + ?, bonanzaWon = bonanzaWon + ? WHERE wallet = ?",
-          )
-          .run(lamports, lamports, winner);
-      }
-      this.db.exec("UPDATE players SET bonanzaTickets = 0");
-      this.db
-        .prepare(
-          "INSERT INTO meta (key, value) VALUES ('bonanzaPool', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        )
-        .run(poolMeta);
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
   }
 
   /**
@@ -577,26 +555,59 @@ export class Database {
     outcome: string,
     won: boolean,
   ): void {
-    // Keyed on the seat: with multi-plate entries a wallet has several rows
-    // in one round, and settling "the wallet's row" would settle one plate's
-    // money onto whichever row SQLite found first.
-    this.db
-      .prepare(
-        `UPDATE entries SET returned = ?, multiple = ?, ticks = ?, outcome = ?
-         WHERE roundId = ? AND wallet = ? AND seat = ?`,
-      )
-      .run(returnedLamports, multiple, ticks, outcome, roundId, wallet, seat);
-    this.db
-      .prepare(
-        `UPDATE players
-            SET returned = returned + ?,
-                bestMultiple = MAX(bestMultiple, ?),
-                roundsWon = roundsWon + ?
-          WHERE wallet = ?`,
-      )
-      .run(returnedLamports, multiple, won ? 1 : 0, wallet);
+    // ONE transaction: the balance credit, the entry row, and the stats move
+    // together or not at all. The credit used to be a separate autocommit in
+    // the caller — a crash between the two left the entry reading 'in', so
+    // the startup sweep re-credited the full stake ON TOP of the payout and
+    // then stamped the row 'refunded', hiding the minted money from every
+    // later reconciliation. The mirror-image path (takeEntry) was always
+    // wrapped; this one simply was not.
+    this.db.exec("BEGIN");
+    try {
+      if (returnedLamports > 0) {
+        this.db
+          .prepare("UPDATE players SET balance = balance + ? WHERE wallet = ?")
+          .run(returnedLamports, wallet);
+      }
+      // Keyed on the seat: with multi-plate entries a wallet has several rows
+      // in one round, and settling "the wallet's row" would settle one plate's
+      // money onto whichever row SQLite found first.
+      this.db
+        .prepare(
+          `UPDATE entries SET returned = ?, multiple = ?, ticks = ?, outcome = ?
+           WHERE roundId = ? AND wallet = ? AND seat = ?`,
+        )
+        .run(returnedLamports, multiple, ticks, outcome, roundId, wallet, seat);
+      this.db
+        .prepare(
+          `UPDATE players
+              SET returned = returned + ?,
+                  bestMultiple = MAX(bestMultiple, ?),
+                  roundsWon = roundsWon + ?
+            WHERE wallet = ?`,
+        )
+        .run(returnedLamports, multiple, won ? 1 : 0, wallet);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
+  /**
+   * Closes a round and settles EVERYTHING the close implies in one commit:
+   * the round record, the jackpot payout when it fired, every wallet's ticket
+   * state, the persisted pool, and the drought marker.
+   *
+   * These used to be a chain of independent autocommits (settleBonanza, then
+   * closeRound, then a per-wallet ticket loop, then two meta writes). Every
+   * gap in that chain was its own crash bug: killed between the fire and the
+   * close, the startup sweep refunded a round whose jackpot had already been
+   * paid and no verifiable record of the fire existed at all; killed between
+   * the close and the ticket writes, the round was final but the pool and
+   * every ticket count still held the previous round's values — the players'
+   * 2% collected and never owed. One transaction has no gaps.
+   */
   closeRound(
     id: number,
     seedHex: string,
@@ -608,27 +619,65 @@ export class Database {
     potLamports: number,
     record: string,
     digest: string,
+    settle: {
+      /** A fired jackpot: pay the winner and wipe every ticket. Null: no fire. */
+      bonanza: { winner: string | null; lamports: number } | null;
+      /** Post-round ticket state for every wallet in either economy. */
+      tickets: { wallet: string; bonanza: number; revLifetime: number; revWeight: number }[];
+      /** The pool's new persisted value, in lamports, as meta text. */
+      bonanzaPool: string;
+      /** Set only when the jackpot fired this round. */
+      lastFireRound?: string;
+    },
   ): void {
-    this.db
-      .prepare(
-        `UPDATE rounds SET seedHex = ?, entrants = ?, ticks = ?, bestMult = ?,
-                           winner = ?, winnerCh = ?, pot = ?, record = ?,
-                           digest = ?, endedAt = ?
-         WHERE id = ?`,
-      )
-      .run(
-        seedHex,
-        entrants,
-        ticks,
-        bestMult,
-        winner,
-        winnerCh,
-        potLamports,
-        record,
-        digest,
-        Date.now(),
-        id,
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare(
+          `UPDATE rounds SET seedHex = ?, entrants = ?, ticks = ?, bestMult = ?,
+                             winner = ?, winnerCh = ?, pot = ?, record = ?,
+                             digest = ?, endedAt = ?
+           WHERE id = ?`,
+        )
+        .run(
+          seedHex,
+          entrants,
+          ticks,
+          bestMult,
+          winner,
+          winnerCh,
+          potLamports,
+          record,
+          digest,
+          Date.now(),
+          id,
+        );
+      if (settle.bonanza) {
+        if (settle.bonanza.winner && settle.bonanza.lamports > 0) {
+          this.db
+            .prepare(
+              "UPDATE players SET balance = balance + ?, bonanzaWon = bonanzaWon + ? WHERE wallet = ?",
+            )
+            .run(settle.bonanza.lamports, settle.bonanza.lamports, settle.bonanza.winner);
+        }
+        this.db.exec("UPDATE players SET bonanzaTickets = 0");
+      }
+      const setT = this.db.prepare(
+        "UPDATE players SET bonanzaTickets = ?, revTickets = ?, revWeight = ? WHERE wallet = ?",
       );
+      for (const t of settle.tickets) {
+        setT.run(Math.round(t.bonanza), Math.round(t.revLifetime), t.revWeight, t.wallet);
+      }
+      const meta = this.db.prepare(
+        "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      );
+      meta.run("bonanzaPool", settle.bonanzaPool);
+      if (settle.lastFireRound !== undefined) meta.run("lastFireRound", settle.lastFireRound);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   lastRoundId(): number {
@@ -715,13 +764,42 @@ export class Database {
     }
   }
 
-  /** Books a completed withdrawal against the already-debited balance. */
-  recordWithdrawal(sig: string, wallet: string, lamports: number): void {
+  /**
+   * Books a withdrawal INTENT before the transaction is broadcast. Written
+   * first so that whatever happens next — landed, failed, or unknowable —
+   * there is always a row tying the signature to the debit. A failure that
+   * left no record was how a landed-but-unconfirmed transfer could be
+   * blind-refunded into a double payout.
+   */
+  recordWithdrawalIntent(sig: string, wallet: string, lamports: number): void {
     this.db
       .prepare(
-        "INSERT OR IGNORE INTO transfers (sig, wallet, direction, lamports, at) VALUES (?, ?, 'withdraw', ?, ?)",
+        "INSERT OR IGNORE INTO transfers (sig, wallet, direction, lamports, at, status) VALUES (?, ?, 'withdraw', ?, ?, 'pending')",
       )
       .run(sig, wallet, lamports, Date.now());
+  }
+
+  setTransferStatus(sig: string, status: "ok" | "failed" | "unknown"): void {
+    this.db.prepare("UPDATE transfers SET status = ? WHERE sig = ?").run(status, sig);
+  }
+
+  /**
+   * Reverses a withdrawal PROVEN not to have landed: the re-credit and the
+   * status stamp commit together, so a crash can never pay the refund while
+   * leaving the row claiming the transfer is still in flight.
+   */
+  refundWithdrawal(sig: string, wallet: string, lamports: number): void {
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare("UPDATE players SET balance = balance + ? WHERE wallet = ?")
+        .run(lamports, wallet);
+      this.db.prepare("UPDATE transfers SET status = 'failed' WHERE sig = ?").run(sig);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   /** Mints/rotates the wallet's session token. */

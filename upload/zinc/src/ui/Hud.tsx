@@ -44,8 +44,11 @@ function IconButton({
  */
 function VolumePopover(): JSX.Element {
   const [open, setOpen] = useState(false);
-  const [level, setLevel] = useState(() => getVolume());
+  // Load the stored preferences BEFORE reading the level: initializers run
+  // in order, and the old order captured the 0.7 default one line before
+  // the saved volume was actually loaded into the module.
   const [muteFlag, setMuteFlag] = useState(() => loadMutePreference());
+  const [level, setLevel] = useState(() => getVolume());
   // One definition of "silent", used by the icon, the label and the toggle.
   // These were three different expressions, so the button could read "Unmute"
   // and mute, or show 🔊 over a game whose volume was zero.
@@ -137,12 +140,20 @@ function phantom(): PhantomProvider | null {
 
 /**
  * Real Phantom connect, no wallet library: the extension injects its API into
- * the page. For now the connection only proves the flow and shows the address;
- * balances stay in the demo wallet until the server and program land.
+ * the page.
+ *
+ * In networked play the label renders the SEAT the server reported, never
+ * Phantom's connect state — the two can disagree, and when they did the
+ * button showed a cyan address over a session the server had expired down to
+ * a guest ledger. That mismatch now renders as an explicit "re-sign" state
+ * whose click runs the signature ceremony again.
  */
 function WalletButton({
+  seat,
   onChange,
 }: {
+  /** The server-reported seat identity; undefined in the local demo. */
+  seat?: { guest: boolean; address: string };
   /** Called with true after an explicit connect, false after a disconnect. */
   onChange?: (connected: boolean) => void;
 }): JSX.Element {
@@ -159,13 +170,20 @@ function WalletButton({
       .catch(() => {});
   }, []);
 
+  // The seat is the truth when there is one; the demo falls back to Phantom.
+  const seatAddr = seat && !seat.guest ? seat.address : null;
+  const shown = seat ? seatAddr : addr;
+  // Opted in, but the server seated a guest: the session token died and the
+  // wallet needs one fresh signature to get its ledger back.
+  const expired = seat !== undefined && seat.guest && walletOptedIn();
+
   const click = async (): Promise<void> => {
     const p = phantom();
     if (!p) {
       window.open("https://phantom.app", "_blank", "noopener");
       return;
     }
-    if (addr) {
+    if (shown) {
       await p.disconnect().catch(() => {});
       setWalletOptIn(false);
       setAddr(null);
@@ -186,9 +204,15 @@ function WalletButton({
     <button
       onClick={click}
       className="label rounded-sm bg-[var(--color-panel2)] px-2.5 py-1.5 hover:text-[var(--color-text)]"
-      style={addr ? { color: "var(--color-cyan)" } : undefined}
+      style={
+        shown
+          ? { color: "var(--color-cyan)" }
+          : expired
+            ? { color: "var(--color-warn)" }
+            : undefined
+      }
     >
-      {addr ? shortAddress(addr) : "connect"}
+      {shown ? shortAddress(shown) : expired ? "re-sign" : "connect"}
     </button>
   );
 }
@@ -442,7 +466,7 @@ export function TopBar({
               bank
             </button>
           )}
-          <WalletButton onChange={onWalletChange} />
+          <WalletButton seat={snap.seat} onChange={onWalletChange} />
           <IconButton label="How it works" onClick={onShowInfo}>
             ⓘ
           </IconButton>
