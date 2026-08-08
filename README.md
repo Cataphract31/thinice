@@ -233,11 +233,23 @@ credit is keyed on the transaction signature, so replaying one credits nothing.
 
 ---
 
-## Deploying the web client
+## Deploying
 
-The site is served from `upload/zinc`, a **standalone copy** that builds with no
+**See [DEPLOYMENT.md](DEPLOYMENT.md)** for putting this on your own
+infrastructure — static hosting, the Node process, nginx/Caddy websocket
+config, TLS, and the two failure modes that waste a day if nobody warns you
+(the server URL is baked in at build time, and a default reverse-proxy config
+silently breaks websockets).
+
+Nothing in the code is platform-specific. The `vercel.json` at the root exists
+only because the current free preview deploy runs there; any host can ignore it.
+
+### The `upload/zinc` preview copy
+
+`upload/zinc` is a **standalone copy** of the client that builds with no
 monorepo around it (it carries its own copy of the engine, aliased in its
-`vite.config.ts`). It is generated output:
+`vite.config.ts`), used for a zero-cost preview deploy. If you are building
+from this repo you do not need it. It is generated output:
 
 ```bash
 rm -rf upload/zinc/src upload/zinc/engine upload/zinc/public
@@ -251,10 +263,13 @@ cp    apps/web/index.html upload/zinc/index.html
 diverges from the real source, and has done so before. Re-sync after any client
 change and verify with `diff -rq apps/web/src upload/zinc/src`.
 
-That folder is copied into the `void-website` repo under `zinc/`. Nothing goes
-at that repo's root. Set `VITE_SERVER_URL` in the Vercel project or the build
-produces the offline demo — with no server URL, the entire networking and wallet
-layer is tree-shaken out and the deploy is single-player.
+For the current preview it is copied into the `void-website` repo under `zinc/`,
+and nothing goes at that repo's root.
+
+Set `VITE_SERVER_URL` at build time or you get the offline demo — with no server
+URL the entire networking and wallet layer is tree-shaken out and the deploy is
+single-player against simulated opponents. It looks like a working game, which
+is exactly what makes it worth stating twice.
 
 ---
 
