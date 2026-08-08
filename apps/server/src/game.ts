@@ -21,7 +21,7 @@ import type { Database } from "./db.ts";
 import type { NetChat, NetHistory, NetPlayer, NetState } from "./protocol.ts";
 
 /** The roster. Also the whitelist for what a client may set as its character. */
-export const CHARS = ["chad", "soyjak", "wojak", "ansem", "saylor", "pepe", "chud", "bogdanoff"];
+export { CHARS } from "./config.ts";
 
 export function shortAddress(addr: string): string {
   return addr.length <= 10 ? addr : `${addr.slice(0, 4)}…${addr.slice(-4)}`;

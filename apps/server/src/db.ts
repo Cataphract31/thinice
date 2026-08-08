@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { CONFIG, toLamports } from "./config.ts";
+import { CHARS, CONFIG, toLamports } from "./config.ts";
 
 /**
  * Persistence.
@@ -191,12 +191,17 @@ export class Database {
       .get(wallet) as unknown as PlayerRow | undefined;
     if (found) return found;
     const now = Date.now();
+    // Deal a random face rather than taking the column default: the demo has
+    // always randomised, but every wallet the SERVER met spawned as chad, so
+    // a real lobby was a wall of identical faces until people found the
+    // picker. Presentation-only randomness — nothing money-bearing near it.
+    const charId = CHARS[Math.floor(Math.random() * CHARS.length)]!;
     this.db
       .prepare(
-        `INSERT INTO players (wallet, balance, createdAt, seenAt)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT INTO players (wallet, balance, charId, createdAt, seenAt)
+         VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(wallet, toLamports(CONFIG.startingBalanceSol), now, now);
+      .run(wallet, toLamports(CONFIG.startingBalanceSol), charId, now, now);
     return this.db
       .prepare("SELECT * FROM players WHERE wallet = ?")
       .get(wallet) as unknown as PlayerRow;

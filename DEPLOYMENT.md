@@ -264,5 +264,7 @@ npm run test:server wss://your-host/ws # 29 end-to-end checks against it
 money moved exactly once, the fairness commitment covers the seed and the rules,
 a client cannot set fields the server owns, and chat is relayed, truncated and
 rate-limited. It is safe to run against a live server — it plays as ordinary
-guests — though it will appear in the lobby and in chat, so prefer running it
-before you announce.
+guests — but its chat checks leave test lines in the room's 50-line backlog,
+where every later visitor will read them. **Restart the service after probing
+production** (chat is memory-only, so a restart clears it), or probe before
+you announce.
