@@ -300,7 +300,7 @@ function Stats({ snap }: { snap: Snapshot }): JSX.Element {
         {gain && (
           <span
             key={gain.key}
-            className="gain-float tnum pointer-events-none absolute -top-3.5 right-0 text-[11px] font-bold text-[var(--color-profit)]"
+            className="gain-float tnum pointer-events-none absolute right-0 top-full z-10 mt-0.5 text-[11px] font-bold text-[var(--color-profit)]"
           >
             +{gain.amt.toFixed(4)} ◎
           </span>

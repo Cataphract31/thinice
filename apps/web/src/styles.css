@@ -169,24 +169,28 @@ body {
   animation: slide-in 220ms ease-out;
 }
 
-/* The rakeback drip landing in the wallet: a small "+x" floats up and fades.
-   The credit itself is silent and automatic, which wastes the entire point of
-   passive income — a number nobody sees move is a number that never went up. */
+/* The rakeback drip landing in the wallet: a small "+x" rises from below the
+   number INTO it, then fades — money flying in. It must travel toward the
+   stat, not away: the wallet sits at the very top of the page, and the first
+   version floated upward straight off the viewport edge, invisible. */
 @keyframes gain-float {
   0% {
     opacity: 0;
-    transform: translateY(5px);
+    transform: translateY(14px);
   }
-  16% {
+  20% {
+    opacity: 1;
+  }
+  80% {
     opacity: 1;
   }
   100% {
     opacity: 0;
-    transform: translateY(-16px);
+    transform: translateY(-2px);
   }
 }
 .gain-float {
-  animation: gain-float 2s ease-out both;
+  animation: gain-float 2.2s ease-out both;
 }
 
 @keyframes gold-breathe {
