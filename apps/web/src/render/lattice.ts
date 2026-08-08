@@ -25,6 +25,12 @@ export interface CellInput {
    * still yours, and a relayout that forgets that ejects it from your cluster.
    */
   you?: boolean;
+  /**
+   * Rim tint (0-360) shared by a multi-plate owner's cluster, so a stack
+   * reads as one holding at a glance. Undefined = no rim (singles, and the
+   * viewer's own plates, which already carry the cyan "you" treatment).
+   */
+  hue?: number;
 }
 
 export interface LatticeSnapshot {
@@ -49,6 +55,8 @@ interface Cell {
   seed: number;
   /** Spawn-in progress, 0-1. */
   born: number;
+  /** Owner rim tint for multi-plate clusters. See CellInput.hue. */
+  hue?: number;
 }
 
 interface Shard {
@@ -289,7 +297,11 @@ export class LatticeRenderer {
     let deaths = 0;
     for (const input of snap.cells) {
       const cell = this.cells.get(input.id);
-      if (!cell || cell.state === input.state) continue;
+      if (!cell) continue;
+      // Rim tint refreshes every push, before the state short-circuit — it is
+      // display-only and must never depend on a state change to arrive.
+      cell.hue = input.hue;
+      if (cell.state === input.state) continue;
       cell.state = input.state;
       cell.t = 0;
       if (input.state === "dying") {
@@ -420,6 +432,7 @@ export class LatticeRenderer {
         t: prev?.t ?? 0,
         seed: ((input.id * 2654435761) >>> 0) / 4294967296,
         born: prev?.born ?? 0,
+        hue: input.hue,
       });
     }
     this.cells = kept;
@@ -902,6 +915,20 @@ export class LatticeRenderer {
           );
           ctx.globalAlpha = alpha;
         }
+      }
+
+      // Owner rim: a multi-plate wallet's cluster shares one tinted outline,
+      // so a stack reads as one holding instead of coincidentally similar
+      // neighbours. Thin and dim on purpose — it labels, it does not compete
+      // with the hazard glow. Dying plates keep theirs while they fade, so a
+      // cluster visibly loses a member rather than a stranger.
+      if (c.hue !== undefined && c.state !== "cashed" && this.radius > 5) {
+        ctx.globalAlpha = alpha * 0.65;
+        ctx.strokeStyle = `hsl(${c.hue} 65% 60%)`;
+        ctx.lineWidth = Math.max(1, this.radius * 0.07);
+        hexPath(ctx, c.x + jx, c.y + jy + dy, this.radius * scale * 0.88);
+        ctx.stroke();
+        ctx.globalAlpha = alpha;
       }
 
       // Grace freeze-over: frost sweeps outward from the centre of the lattice

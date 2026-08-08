@@ -688,6 +688,25 @@ export class GameClient {
     };
   }
 
+  /**
+   * One decision per tick, shared by every plate an owner holds. A real
+   * multi-bettor's cash-out extracts all their plates together; letting each
+   * plate decide alone would split the stack and read as separate players.
+   */
+  private makeOwnerStrategy(plates: number): Strategy {
+    const base = this.makeBotStrategy();
+    if (plates <= 1) return base;
+    let decidedTick = -1;
+    let decision = false;
+    return (ctx) => {
+      if (ctx.tick !== decidedTick) {
+        decidedTick = ctx.tick;
+        decision = base(ctx);
+      }
+      return decision;
+    };
+  }
+
   private openLobby(): void {
     this.phase = "lobby";
     this.roundId++;
@@ -723,18 +742,30 @@ export class GameClient {
     this.lobbyEntrants = [];
     this.arrivals.clear();
     this.charMap.clear();
-    for (let i = 0; i < n; i++) {
+    // The field is generated as OWNERS, not plates: most walk in with one,
+    // but some are multi-bettors holding a stack — one wallet, one face, one
+    // shared cash-out — so the demo shows what other people's clusters look
+    // like, exactly as the live game renders a real multi-plate wallet.
+    let i = 0;
+    while (i < n) {
+      const take = Math.min(
+        n - i,
+        this.rng.next() < 0.8 ? 1 : 2 + Math.floor(this.rng.next() * 4),
+      );
       // Every player is a wallet, shown ends-only like any on-chain platform.
-      this.names.set(i, shortAddress(fakeAddress(() => this.rng.next())));
-      this.charMap.set(i, CHARACTERS[Math.floor(this.rng.next() * CHARACTERS.length)]!.id);
-      this.lobbyEntrants.push({
-        id: i,
-        strategyId: "bot",
-        strategy: this.makeBotStrategy(),
-      });
+      const name = shortAddress(fakeAddress(() => this.rng.next()));
+      const char = CHARACTERS[Math.floor(this.rng.next() * CHARACTERS.length)]!.id;
+      const strategy = this.makeOwnerStrategy(take);
       // Spread arrivals across most of the lobby so the shaft visibly fills
       // rather than blinking into existence fully populated.
-      this.arrivals.set(i, now + this.rng.next() * this.config.timing.lobbyMs * 0.82);
+      const arrive = now + this.rng.next() * this.config.timing.lobbyMs * 0.78;
+      for (let k = 0; k < take; k++, i++) {
+        this.names.set(i, name);
+        this.charMap.set(i, char);
+        this.lobbyEntrants.push({ id: i, strategyId: "bot", strategy });
+        // A stack's plates land seconds apart, like someone mashing bond.
+        this.arrivals.set(i, arrive + k * 420);
+      }
     }
     // Auto-entry walks in the moment the lobby opens, wallet permitting.
     if (this.auto.enabled) this.autoBuy();
