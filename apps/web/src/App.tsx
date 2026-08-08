@@ -30,7 +30,11 @@ export default function App(): JSX.Element {
   const [snap, setSnap] = useState<Snapshot>(() => client.snapshot());
   const [selected, setSelected] = useState<{ roundId: number; id: number } | null>(null);
   const [showInfo, setShowInfo] = useState(false);
-  const [showIntro, setShowIntro] = useState(() => !tutorialSeen());
+  // ?intro on the URL re-summons the walkthrough — it is otherwise a
+  // once-per-browser event, which makes reviewing copy changes impossible.
+  const [showIntro, setShowIntro] = useState(
+    () => !tutorialSeen() || new URLSearchParams(window.location.search).has("intro"),
+  );
   const [showChars, setShowChars] = useState(false);
   const [showBank, setShowBank] = useState(false);
   const [tab, setTab] = useState<Tab>("roster");
@@ -187,7 +191,12 @@ export default function App(): JSX.Element {
           }}
         />
       )}
-      {showIntro && <Tutorial onClose={() => setShowIntro(false)} />}
+      {showIntro && (
+        <Tutorial
+          onClose={() => setShowIntro(false)}
+          onShowInfo={() => setShowInfo(true)}
+        />
+      )}
       {showChars && (
         <CharSelect
           snap={snap}
@@ -384,7 +393,7 @@ function PlayerCard({
               className="tnum text-[11px] font-semibold"
               style={p.lifetime.best >= 5 ? { color: "var(--color-gold)" } : undefined}
             >
-              {p.lifetime.best > 0 ? `${p.lifetime.best.toFixed(2)}×` : "—"}
+              {p.lifetime.best > 0 ? `${p.lifetime.best.toFixed(2)}×` : "-"}
             </span>,
           )}
           {line(

@@ -155,7 +155,7 @@ Two ticket economies, both flat at 200 tickets per entry:
 - **Bonanza** — a winner-take-all jackpot, ~1/1500 chance per round. Tickets
   wipe for everyone when it fires, so each cycle is a fresh raffle.
 - **Rakeback** — 2% of every entry streams continuously to ticket holders,
-  including on rounds they sat out. Weight decays with a 60-day half-life
+  including on rounds they sat out. Weight decays with a 45-day half-life
   (continuously, per ticket, from the moment it was earned — there is no decay
   job and no interval), so the stream tracks recent volume instead of lifetime
   volume. Paid automatically into the balance the moment each round SEALS —

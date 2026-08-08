@@ -62,7 +62,7 @@ export function ChatPanel({
         {snap.chat.length === 0 && (
           <div className="label px-1 py-1">
             {client.isLocal
-              ? "offline demo — nobody can hear you"
+              ? "offline demo: nobody can hear you"
               : "quiet ice. say something."}
           </div>
         )}
