@@ -1,10 +1,12 @@
-"""Green-screen art -> transparent, palette-compressed game PNGs.
+"""Chroma-screen art -> transparent, palette-compressed game PNGs.
 
 Reads raw Gemini output from C:\\ZINC\\art-drop and writes into the web app's
-public folder. Keys out the solid green, despills the fringe JPEG leaves on
-outlines, crops to content, downscales with NEAREST so the chunky pixels stay
-crunchy, and quantizes to a palette — the source art is already limited-palette
-pixel art, so this is lossless to the eye and cuts the payload by ~4x.
+public folder. Keys out the solid backdrop (green OR red — detected per image
+by sampling the border, because green characters like Pepe are shot on red),
+despills the fringe JPEG leaves on outlines, crops to content, downscales with
+NEAREST so the chunky pixels stay crunchy, and quantizes to a palette — the
+source art is already limited-palette pixel art, so this is lossless to the
+eye and cuts the payload by ~4x.
 
 Tiles are rotated 90 degrees: Gemini draws pointy-top hexagons and the lattice
 renders flat-top ones. A quarter turn is pixel-exact, so the silhouettes line
@@ -21,29 +23,41 @@ from scipy import ndimage
 SRC = r"C:\ZINC\art-drop"
 DST = r"C:\ZINC\apps\web\public"
 POSES = {"head": 384, "win": 512, "lose": 512}
-CHARS = ["chad", "soyjak", "wojak", "ansem", "saylor", "pepe", "chud", "bogdanoff"]
+CHARS = ["chad", "soyjak", "wojak", "ansem", "saylor", "pepe", "chud", "bogdanoff", "bobo", "mumu"]
 TILES = ["base", "hairline", "heavy", "crack"]
 TILE_SIZE = 384
 COLORS = 96
 
 
-def key_green(img: Image.Image) -> Image.Image:
-    """Removes the backdrop only — never green that belongs to the character.
+def key_backdrop(img: Image.Image) -> Image.Image:
+    """Removes the backdrop only — never colour that belongs to the character.
 
     A plain colour test cannot tell a green screen from a green frog, and ate
-    Pepe alive. So the green test only decides candidates; what actually gets
-    removed is the candidate region CONNECTED TO THE BORDER. Character colour
-    is enclosed by its own outline, so it can never be reached from outside.
+    Pepe alive. Two defences: green characters are shot on RED (#ff0000)
+    instead, detected here by which chroma dominates the border; and the
+    colour test only decides candidates — what actually gets removed is the
+    candidate region CONNECTED TO THE BORDER. Character colour is enclosed by
+    its own outline, so it can never be reached from outside.
     """
     img = img.convert("RGBA")
     a = np.asarray(img).astype(np.int16)
     r, g, b = a[..., 0], a[..., 1], a[..., 2]
 
     # Generous: catches the JPEG smear that haloes every outline.
-    greenish = (g > 90) & (g > r * 1.35) & (g > b * 1.35)
+    keys = {
+        "green": (g, r, b, (g > 90) & (g > r * 1.35) & (g > b * 1.35)),
+        "red": (r, g, b, (r > 90) & (r > g * 1.35) & (r > b * 1.35)),
+    }
+    # The backdrop is whichever chroma owns the border of the frame.
+    def border_share(mask: np.ndarray) -> float:
+        return float(
+            np.concatenate([mask[0, :], mask[-1, :], mask[:, 0], mask[:, -1]]).mean()
+        )
+    color = max(keys, key=lambda k: border_share(keys[k][3]))
+    key, o1, o2, candidates = keys[color]
 
-    labels, count = ndimage.label(greenish)
-    bg = np.zeros(greenish.shape, dtype=bool)
+    labels, count = ndimage.label(candidates)
+    bg = np.zeros(candidates.shape, dtype=bool)
     if count:
         edge = np.concatenate(
             [labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]]
@@ -54,16 +68,18 @@ def key_green(img: Image.Image) -> Image.Image:
 
     # Pockets fully enclosed by the character (between an arm and a torso)
     # never touch the border, so they get a much stricter test of their own.
-    bg |= (g > 200) & (r < 130) & (b < 130)
+    bg |= (key > 200) & (o1 < 130) & (o2 < 130)
 
     out = np.asarray(img).copy()
     out[bg] = 0
     # Despill ONLY the pixels hugging the removed backdrop. Applied to the
-    # whole image it clamps green everywhere and turns Pepe olive: green that
-    # is more than a pixel or two from the backdrop is the character's own.
+    # whole image it clamps the key colour everywhere and turns Pepe olive:
+    # key colour more than a pixel or two from the backdrop is the character's.
     fringe = ndimage.binary_dilation(bg, iterations=2) & ~bg
-    cast = fringe & (g > np.maximum(r, b))
-    out[..., 1] = np.where(cast, np.maximum(r, b), out[..., 1])
+    others = np.maximum(o1, o2)
+    cast = fringe & (key > others)
+    ch = 1 if color == "green" else 0
+    out[..., ch] = np.where(cast, others, out[..., ch])
     return Image.fromarray(out, "RGBA")
 
 
@@ -163,7 +179,7 @@ def do_chars() -> int:
             src = find(os.path.join(SRC, char), pose)
             if not src:
                 continue
-            img = trim(strip_frame(trim(drop_specks(key_green(Image.open(src))))))
+            img = trim(strip_frame(trim(drop_specks(key_backdrop(Image.open(src))))))
             if pose == "head":
                 # The lattice blits heads square; pad rather than squash.
                 side = max(img.size)
@@ -183,7 +199,7 @@ def do_tiles() -> int:
         src = find(os.path.join(SRC, "tiles"), name)
         if not src:
             continue
-        img = key_green(Image.open(src))
+        img = key_backdrop(Image.open(src))
         # Pointy-top source -> flat-top lattice. Exactly a quarter turn.
         img = fit(trim(img.transpose(Image.ROTATE_90)), TILE_SIZE)
         kb = save(img, os.path.join(DST, "tiles", f"{name}.png"))

@@ -71,7 +71,18 @@ if (CONFIG.bots > 0 && CONFIG.banking) {
  * client may pick) and the database (dealing a random face to a NEW player)
  * need it, and game.ts already imports config — the reverse would be a cycle.
  */
-export const CHARS = ["chad", "soyjak", "wojak", "ansem", "saylor", "pepe", "chud", "bogdanoff"];
+export const CHARS = [
+  "chad",
+  "soyjak",
+  "wojak",
+  "ansem",
+  "saylor",
+  "pepe",
+  "chud",
+  "bogdanoff",
+  "bobo",
+  "mumu",
+];
 
 export const LAMPORTS = 1_000_000_000;
 
