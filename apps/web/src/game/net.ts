@@ -3,6 +3,7 @@ import {
   verifyEntry,
   type AutoSettings,
   type BankState,
+  type ChatMsg,
   type HistoryEntry,
   type Snapshot,
 } from "./client";
@@ -135,6 +136,7 @@ const IDLE: Snapshot = {
   winner: null,
   teamWins: {},
   tickets: { bonYours: 0, bonTotal: 0, bonShare: 0, revShare: 0, revStreamed: 0 },
+  chat: [],
   history: [],
   nextCommit: "",
   auto: { enabled: false, target: 2 },
@@ -177,6 +179,8 @@ export class NetClient {
   private commits = new Map<number, string>();
   /** Verification verdicts survive the server replacing the history array. */
   private receipts = new Map<number, Partial<HistoryEntry>>();
+  /** The room's talk. Server-relayed; the sender's echo is the receipt. */
+  private chat: ChatMsg[] = [];
 
   constructor(private url: string) {
     this.loadCommits();
@@ -294,6 +298,9 @@ export class NetClient {
         this.snap = {
           ...IDLE,
           ...s,
+          // Carried locally, not part of the state push — without these the
+          // spread of IDLE wipes them back to empty on every server tick.
+          chat: this.chat,
           history: this.history,
           connected: true,
           bank: this.bank ?? undefined,
@@ -334,9 +341,42 @@ export class NetClient {
         return;
       }
 
+      case "chat": {
+        const rows = (m.msgs ?? []) as Record<string, unknown>[];
+        for (const r of rows) {
+          this.pushChat({
+            id: Number(r.id ?? 0),
+            name: String(r.name ?? ""),
+            charId: String(r.charId ?? "chad"),
+            text: String(r.text ?? ""),
+            at: Number(r.at ?? Date.now()),
+            you: Boolean(r.you),
+          });
+        }
+        this.snap = { ...this.snap, chat: [...this.chat] };
+        this.emit();
+        return;
+      }
+
       case "error": {
         const message = String(m.message ?? "");
         console.warn("server:", message);
+        // Chat rejections belong in the chat feed, where the person who
+        // triggered one is actually looking — not in a console nobody reads.
+        if (message.startsWith("chat:")) {
+          this.pushChat({
+            id: -Date.now(),
+            name: "",
+            charId: "",
+            text: message.slice(5).trim(),
+            at: Date.now(),
+            you: false,
+            system: true,
+          });
+          this.snap = { ...this.snap, chat: [...this.chat] };
+          this.emit();
+          return;
+        }
         // An auth-phase rejection leaves the socket open, so `onclose` never
         // fires and nothing ever retries: the player sits on "Reconnecting…"
         // forever while nothing is reconnecting. Force the cycle.
@@ -455,6 +495,13 @@ export class NetClient {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 
+  /** Appends one line, deduplicating a reconnect's replayed backlog by id. */
+  private pushChat(m: ChatMsg): void {
+    if (m.id > 0 && this.chat.some((x) => x.id === m.id)) return;
+    this.chat.push(m);
+    if (this.chat.length > 80) this.chat.shift();
+  }
+
   private emit(): void {
     for (const fn of this.listeners) fn(this.snap);
   }
@@ -481,6 +528,17 @@ export class NetClient {
 
   walkOut(): void {
     this.send({ t: "cashout" });
+  }
+
+  /**
+   * A line for the room. No local echo: the server relays it back to every
+   * session including this one, so your own message appearing IS the receipt
+   * that the room actually heard it.
+   */
+  sendChat(text: string): void {
+    const t = text.trim().slice(0, 160);
+    if (!t) return;
+    this.send({ t: "chat", text: t });
   }
 
   /**

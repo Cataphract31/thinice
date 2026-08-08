@@ -42,7 +42,10 @@ const STEPS: Step[] = [
       // Not "takes someone": most ticks take nobody, and teaching a
       // one-death-per-tick model the first round then contradicts is a bad
       // way to meet a player. Info.tsx has always worded this correctly.
-      "Every half second the ice rolls, and it can take anyone standing on it.",
+      // "The dice roll", not "the ice rolls" — owner feedback: the old phrase
+      // read as the ice physically rolling, which means nothing. Dice say
+      // "random chance, every time" in one word to exactly this audience.
+      "Every half second the dice roll, and the ice can break under anyone standing on it.",
     ],
     visual: "ice",
   },
@@ -59,7 +62,7 @@ const STEPS: Step[] = [
     chip: "the danger",
     title: "Read the ring",
     body: [
-      "The ring fills every half second. When it fills, the ice rolls and anyone can break.",
+      "The ring fills every half second. When it fills, the dice roll — and anyone still standing can go through.",
       "Blue is calmer, crimson means get out. Calm is never safe: even quiet ice can take you on any tick.",
     ],
     visual: "ring",

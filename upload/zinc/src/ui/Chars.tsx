@@ -158,7 +158,7 @@ export function ShatterCard({ snap }: { snap: Snapshot }): JSX.Element | null {
       className="win-rise pointer-events-none absolute bottom-2 left-2 z-20 flex items-end gap-1.5"
     >
       {/* Same rule as the winner: the frame owns the bounds, not the art. */}
-      <div className="h-[64px] max-h-[30%] min-h-[34px]">
+      <div className="h-[64px] max-h-[30%] min-h-[34px] lg:h-[88px]">
         <CharArt charId={snap.charId} pose="lose" size={64} dim fill />
       </div>
       <span className="label pb-1 text-[var(--color-danger)]">you shattered</span>
@@ -192,24 +192,27 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
       {w ? (
         <div className="relative flex min-h-0 flex-col items-center">
           {/* Height is capped as a share of the frame, so the champion scales
-              down with the phone instead of spilling out of the lattice. */}
-          <div className="win-slam h-[168px] max-h-[42%] min-h-[70px] shrink">
+              down with the phone instead of spilling out of the lattice. The
+              base height steps up with the viewport: a champion sized for a
+              phone reads as a thumbnail on a 4K monitor's lattice. The art is
+              pixelated on purpose, so big is crunchy, never blurry. */}
+          <div className="win-slam h-[168px] max-h-[42%] min-h-[70px] shrink lg:h-[240px] 2xl:h-[320px]">
             <CharArt charId={w.charId} pose="win" size={168} fill />
           </div>
           <div
-            className="display win-rise mt-3 text-[15px] font-bold tracking-[0.22em]"
+            className="display win-rise mt-3 text-[15px] font-bold tracking-[0.22em] lg:text-[17px]"
             style={{ color: w.you ? "var(--color-cyan)" : "var(--color-text)" }}
           >
             {w.lastStanding ? "last one standing" : "best extraction"}
           </div>
           <div className="win-rise mt-1 flex items-baseline gap-2.5">
             <span
-              className="text-[13px] font-semibold"
+              className="text-[13px] font-semibold lg:text-[15px]"
               style={{ color: w.you ? "var(--color-cyan)" : "var(--color-text)" }}
             >
               {w.you ? "YOU" : w.name}
             </span>
-            <span className="tnum text-[17px] font-bold text-[var(--color-profit)]">
+            <span className="tnum text-[17px] font-bold text-[var(--color-profit)] lg:text-[20px]">
               {w.multiple.toFixed(2)}×
             </span>
             <span className="tnum label">{w.amount.toFixed(3)} ◎</span>
@@ -217,8 +220,8 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
         </div>
       ) : (
         <div className="relative flex flex-col items-center">
-          <div className="win-slam text-[64px] leading-none">❄️</div>
-          <div className="display win-rise mt-3 text-[15px] font-bold tracking-[0.22em] text-[var(--color-danger)]">
+          <div className="win-slam text-[64px] leading-none lg:text-[92px]">❄️</div>
+          <div className="display win-rise mt-3 text-[15px] font-bold tracking-[0.22em] text-[var(--color-danger)] lg:text-[17px]">
             the ice took everyone
           </div>
         </div>
@@ -228,14 +231,18 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
         <div className="win-rise relative mt-4 flex shrink-0 flex-col items-center gap-1.5">
           <span className="label">recent champions</span>
           <div className="flex items-center gap-1.5">
+            {/* The frame owns the size so the strip can scale with the
+                viewport; the art fits itself inside whatever its aspect is. */}
             {champs.map((h) => (
-              <CharArt
-                key={h.roundId}
-                charId={h.winnerChar!}
-                pose="head"
-                size={24}
-                dim={!h.winnerYou}
-              />
+              <div key={h.roundId} className="h-[24px] lg:h-[32px]">
+                <CharArt
+                  charId={h.winnerChar!}
+                  pose="head"
+                  size={24}
+                  dim={!h.winnerYou}
+                  fill
+                />
+              </div>
             ))}
           </div>
         </div>

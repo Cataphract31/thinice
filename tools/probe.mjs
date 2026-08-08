@@ -20,7 +20,7 @@ function player(name, id) {
   return new Promise((resolve) => {
     const ws = new WebSocket(URL);
     const p = {
-      name, ws, states: [], history: [], errors: [], ready: null,
+      name, ws, states: [], history: [], errors: [], chats: [], ready: null,
       send: (m) => ws.readyState === 1 && ws.send(JSON.stringify(m)),
       close: () => ws.close(),
     };
@@ -30,6 +30,7 @@ function player(name, id) {
       else if (m.t === "ready") { p.ready = m; resolve(p); }
       else if (m.t === "state") p.states.push(m.state);
       else if (m.t === "history") p.history = m.history;
+      else if (m.t === "chat") p.chats.push(...m.msgs);
       else if (m.t === "error") p.errors.push(m.message);
     });
   });
@@ -74,6 +75,40 @@ await sleep(300);
 if (bob.errors.some((e) => /unknown character/i.test(e))) {
   ok("server rejected an arbitrary charId instead of echoing it to everyone");
 } else fail("arbitrary charId was accepted");
+
+// ------------------------------------------------------------------- chat
+// Unique text per run: chat history survives in server memory between probe
+// runs, so a fixed string could match a stale line from a previous probe.
+const shortAddr = (a) => (a.length <= 10 ? a : a.slice(0, 4) + "…" + a.slice(-4));
+const line = `gm from the probe ${stamp}`;
+alice.send({ t: "chat", text: line });
+await sleep(500);
+
+const heard = bob.chats.find((c) => c.text === line);
+if (heard && heard.name === shortAddr(alice.ready.wallet) && !heard.you) {
+  ok(`chat relayed to the other player as "${heard.name}"`);
+} else fail(`chat not relayed (${heard ? "identity wrong" : "never arrived"})`);
+
+const echo = alice.chats.find((c) => c.text === line);
+if (echo && echo.you === true) ok("sender's own echo comes back marked as you");
+else fail("sender never received their own line back");
+
+alice.send({ t: "chat", text: "x".repeat(400) + stamp });
+await sleep(500);
+const long = bob.chats.find((c) => c.text.startsWith("xxx"));
+if (long && long.text.length <= 160) ok(`oversized message truncated to ${long.text.length} chars`);
+else fail(long ? `oversized message arrived at ${long.text.length} chars` : "truncated message never arrived");
+
+// The burst has to hit the chat limiter, not just the global one: every line
+// is a broadcast to the whole room, so gameplay-rate chat is a DoS on every
+// other player's screen.
+const before = bob.chats.length;
+for (let i = 0; i < 8; i++) alice.send({ t: "chat", text: `flood ${i} ${stamp}` });
+await sleep(700);
+const flooded = bob.chats.length - before;
+if (alice.errors.some((e) => /chat/i.test(e)) && flooded < 8) {
+  ok(`chat flood limited: ${flooded}/8 delivered, sender told to slow down`);
+} else fail(`chat flood not limited (${flooded}/8 delivered, error=${alice.errors.some((e) => /chat/i.test(e))})`);
 
 // ------------------------------------------------------------------ join
 const lobby = await waitFor(alice, (s) => s.phase === "lobby" && s.msToPhaseEnd > 2500);

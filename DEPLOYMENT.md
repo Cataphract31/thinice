@@ -229,11 +229,12 @@ deployment:
 
 ```bash
 curl https://your-host/health          # {"ok":true}
-npm run test:server wss://your-host/ws # 22 end-to-end checks against it
+npm run test:server wss://your-host/ws # 26 end-to-end checks against it
 ```
 
 `test:server` seats three real clients, plays a full round, and asserts the
 money moved exactly once, the fairness commitment covers the seed and the rules,
-and a client cannot set fields the server owns. It is safe to run against a live
-server — it plays as ordinary guests — though it will appear in the lobby, so
-prefer running it before you announce.
+a client cannot set fields the server owns, and chat is relayed, truncated and
+rate-limited. It is safe to run against a live server — it plays as ordinary
+guests — though it will appear in the lobby and in chat, so prefer running it
+before you announce.

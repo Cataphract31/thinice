@@ -13,6 +13,7 @@ import { ActionBar, AutoPanel, BonanzaBar, TopBar } from "@/ui/Hud";
 import { InfoOverlay } from "@/ui/Info";
 import { Tutorial, tutorialSeen } from "@/ui/Tutorial";
 import { CharArt, CharSelect, ShatterCard, WinnerOverlay } from "@/ui/Chars";
+import { ChatPanel } from "@/ui/Chat";
 import { initAudio } from "@/audio/sound";
 import { charById, initCharAssets } from "@/game/chars";
 import { initTileAssets } from "@/render/tiles";
@@ -22,7 +23,7 @@ import { DEFAULT_CONFIG } from "@zinc/engine";
 // the ring animation silently races the wrong clock the moment timing changes.
 const TICK_MS = DEFAULT_CONFIG.timing.tickMs;
 
-type Tab = "roster" | "history" | "stats";
+type Tab = "roster" | "history" | "stats" | "chat";
 
 export default function App(): JSX.Element {
   const client = getClient();
@@ -62,6 +63,11 @@ export default function App(): JSX.Element {
       : null;
   const select = (id: number | null): void =>
     setSelected(id === null ? null : { roundId: snap.roundId, id });
+
+  // One tab state serves both layouts, but only mobile offers "chat" as a tab
+  // — the desktop rail has a dedicated chat panel instead, so there the value
+  // falls back to the roster rather than rendering an unlisted tab.
+  const deskTab = tab === "chat" ? "roster" : tab;
 
   return (
     <div className="mx-auto flex h-full max-w-[1180px] flex-col">
@@ -120,16 +126,23 @@ export default function App(): JSX.Element {
             onWalkOut={() => client.walkOut()}
           />
           <AutoPanel snap={snap} onChange={(p) => client.setAuto(p)} />
-          <div className="min-h-0 flex-1">
-            <TabbedPanel snap={snap} tab={tab} onTab={setTab}>
-              {tab === "roster" ? (
+          {/* Chat lives on mobile as a fourth tab; on desktop it has its own
+              panel below, so the tab maps back to the roster here. */}
+          <div className="min-h-0 flex-[1.15]">
+            <TabbedPanel snap={snap} tab={deskTab} onTab={setTab}>
+              {deskTab === "roster" ? (
                 <Roster snap={snap} onSelect={select} />
-              ) : tab === "history" ? (
+              ) : deskTab === "history" ? (
                 <HistoryPanel snap={snap} client={client} />
               ) : (
                 <StatsPanel snap={snap} />
               )}
             </TabbedPanel>
+          </div>
+          {/* Always visible, never behind a tab: a PvP room where the other
+              players are silent and hidden reads as a single-player game. */}
+          <div className="min-h-0 flex-1">
+            <ChatPanel snap={snap} client={client} />
           </div>
         </aside>
       </div>
@@ -138,13 +151,15 @@ export default function App(): JSX.Element {
           is taken straight out of the lattice, which is the thing people came
           to look at. The roster scrolls, so height here is a luxury. */}
       <div className="mt-1.5 h-[148px] shrink-0 px-1.5 lg:hidden">
-        <TabbedPanel snap={snap} tab={tab} onTab={setTab}>
+        <TabbedPanel snap={snap} tab={tab} onTab={setTab} chat>
           {tab === "roster" ? (
             <Roster snap={snap} onSelect={select} />
           ) : tab === "history" ? (
             <HistoryPanel snap={snap} client={client} />
-          ) : (
+          ) : tab === "stats" ? (
             <StatsPanel snap={snap} />
+          ) : (
+            <ChatPanel snap={snap} client={client} bare />
           )}
         </TabbedPanel>
       </div>
@@ -382,11 +397,14 @@ function TabbedPanel({
   snap,
   tab,
   onTab,
+  chat = false,
   children,
 }: {
   snap: Snapshot;
   tab: Tab;
   onTab: (t: Tab) => void;
+  /** Offer chat as a tab — the mobile layout, which has no room for a rail. */
+  chat?: boolean;
   children: React.ReactNode;
 }): JSX.Element {
   const tabBtn = (id: Tab, label: string): JSX.Element => (
@@ -405,6 +423,7 @@ function TabbedPanel({
     <div className="flex h-full min-h-0 flex-col rounded-md bg-[var(--color-panel)]">
       <div className="flex shrink-0 items-center gap-1 px-1 pt-1">
         {tabBtn("roster", `roster · ${snap.liveCount} in`)}
+        {chat && tabBtn("chat", "chat")}
         {tabBtn("history", "history")}
         {tabBtn("stats", "stats")}
       </div>

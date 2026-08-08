@@ -85,6 +85,18 @@ export interface BonanzaEvent {
   at: number;
 }
 
+/** One line of table talk. */
+export interface ChatMsg {
+  id: number;
+  name: string;
+  charId: string;
+  text: string;
+  at: number;
+  you: boolean;
+  /** Server notices ("slow down") rendered dim, without an avatar. */
+  system?: boolean;
+}
+
 export interface AutoSettings {
   /** Enters every round automatically while the wallet covers the entry. */
   enabled: boolean;
@@ -152,6 +164,11 @@ export interface Snapshot {
     /** Everything the stream has ever paid you. */
     revStreamed: number;
   };
+  /**
+   * The room's talk, oldest first. Server-relayed in networked play; in the
+   * demo it is only your own echo, and the panel says so.
+   */
+  chat: ChatMsg[];
   /** Finished rounds, newest first, each replayable and verifiable. */
   history: HistoryEntry[];
   /** Fairness commitment for the round currently forming or running. */
@@ -487,6 +504,9 @@ export class GameClient {
 
   private bonanza: BonanzaEvent | null = null;
   private winner: WinnerInfo | null = null;
+  /** Demo chat is an echo chamber — there is nobody on the other end. */
+  private chatLog: ChatMsg[] = [];
+  private nextChatId = 1;
   private teamWins: Record<string, number> = {};
   /**
    * Your character. Drawn at random on a first visit rather than defaulting
@@ -990,6 +1010,26 @@ export class GameClient {
     this.emit();
   }
 
+  /**
+   * Local echo only. The demo's opponents are simulations and simulations do
+   * not speak — inventing replies would be faking a crowd, which is the one
+   * thing this product must never do. The panel labels the mode honestly.
+   */
+  sendChat(text: string): void {
+    const t = text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 160);
+    if (!t) return;
+    this.chatLog.push({
+      id: this.nextChatId++,
+      name: "YOU",
+      charId: this.charId,
+      text: t,
+      at: Date.now(),
+      you: true,
+    });
+    if (this.chatLog.length > 80) this.chatLog.shift();
+    this.emit();
+  }
+
   setAuto(patch: Partial<AutoSettings>): void {
     this.auto = { ...this.auto, ...patch };
     if (!Number.isFinite(this.auto.target) || this.auto.target < 1.05) {
@@ -1152,6 +1192,7 @@ export class GameClient {
       winner: this.winner,
       teamWins: this.teamWins,
       tickets: this.ticketStandings(),
+      chat: this.chatLog,
       history: this.history,
       nextCommit: this.roundCommit,
       auto: this.auto,

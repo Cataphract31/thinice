@@ -32,6 +32,21 @@ export interface NetStats {
   bonanzaWon: number;
 }
 
+/**
+ * One line of table talk. `you` is stamped per recipient at send time and is
+ * compared on the full wallet server-side — never the display name, which
+ * collapses to 4+4 characters two addresses can share. The wallet itself
+ * never leaves the server: a guest id is a bearer token for its balance.
+ */
+export interface NetChat {
+  id: number;
+  name: string;
+  charId: string;
+  text: string;
+  at: number;
+  you?: boolean;
+}
+
 export interface NetHistory {
   roundId: number;
   entrants: number;
@@ -117,6 +132,8 @@ export type ClientMessage =
   | { t: "cashout" }
   | { t: "setAuto"; enabled: boolean; target: number }
   | { t: "setChar"; charId: string }
+  /** A line for the room. Cleaned, capped and rate-limited server-side. */
+  | { t: "chat"; text: string }
   /** Presents a confirmed on-chain transaction to be credited. */
   | { t: "deposit"; sig: string }
   /** Asks the house to pay this much of the ledger balance on-chain. */
@@ -128,6 +145,8 @@ export type ServerMessage =
   | { t: "ready"; wallet: string; guest: boolean; house?: string }
   | { t: "state"; state: NetState }
   | { t: "history"; history: NetHistory[] }
+  /** New chat line(s). The backlog on connect and live lines use one shape. */
+  | { t: "chat"; msgs: NetChat[] }
   /** Outcome of a deposit or withdrawal, for the bank panel to display. */
   | { t: "tx"; kind: "deposit" | "withdraw"; ok: boolean; sol: number; note: string }
   | { t: "error"; message: string };

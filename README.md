@@ -3,7 +3,7 @@
 A PvP elimination casino game for [zinc.cash](https://zinc.cash), on Solana.
 
 Everyone pays the same entry and stands on a frozen lattice. Every half second
-the ice rolls and can take anyone still on it; whatever a fallen player was
+the dice roll and the ice can take anyone still on it; whatever a fallen player was
 holding is split among the survivors, so one shared multiplier climbs as the
 field empties. Cash out whenever you like and keep what you are holding, or get
 caught and keep nothing. Last one standing takes the rest.
@@ -93,7 +93,7 @@ npm run typecheck       # all three projects
 npm run sim:fairness    # RNG quality, replay determinism, jackpot derivation
 npm run sim:invariants  # the martingale + pot conservation, asserted
 npm run sim             # full economics: RTP by strategy, pacing, jackpot
-npm run test:server     # 22 end-to-end checks against a running server
+npm run test:server     # 26 end-to-end checks against a running server
 npm run test:crash      # kills the server mid-round, asserts nobody loses money
 npm run test:bank       # real devnet deposit + withdraw round trip
 ```
@@ -221,6 +221,10 @@ credit is keyed on the transaction signature, so replaying one credits nothing.
 
 ### Known and accepted, but worth knowing
 
+- **Chat has no moderation tooling.** Lines are rate-limited per socket,
+  length-capped, and stripped of control/bidi/zero-width codepoints, and chat
+  lives in memory only — but there is no mute, ban, or wordlist. Fine for
+  devnet; a public mainnet room wants at least an operator mute.
 - **`outcomeDigest` uses `Math.pow`**, whose precision ECMAScript does not
   specify. A last-ulp difference between engines could theoretically flip a
   digest and accuse an honest server. Roughly one in 10^7; fixing it invalidates

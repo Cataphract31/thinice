@@ -7,7 +7,7 @@ import { CONFIG, toLamports, toSol } from "./config.ts";
 import { Database } from "./db.ts";
 import { CHARS, GameServer, type Session } from "./game.ts";
 import { RPC_URL, houseBalance, loadHouse, sendWithdrawal, verifyDeposit } from "./chain.ts";
-import type { ClientMessage, NetHistory, NetState, ServerMessage } from "./protocol.ts";
+import type { ClientMessage, NetChat, NetHistory, NetState, ServerMessage } from "./protocol.ts";
 
 const db = new Database();
 const house = loadHouse();
@@ -109,6 +109,7 @@ wss.on("connection", (ws: WebSocket) => {
       session: 0,
       send: (state: NetState) => send({ t: "state", state }),
       sendHistory: (history: NetHistory[]) => send({ t: "history", history }),
+      sendChat: (msgs: NetChat[]) => send({ t: "chat", msgs }),
     };
     send({
       t: "ready",
@@ -170,6 +171,15 @@ wss.on("connection", (ws: WebSocket) => {
   const refill = setInterval(() => {
     budget = Math.min(40, budget + 20);
   }, 1000);
+
+  // Chat gets its own, far tighter bucket. The global budget is sized for
+  // gameplay traffic — twenty messages a second — and every chat line is a
+  // broadcast to the whole room, so at gameplay rates one keyboard is a
+  // denial of service against every other player's screen.
+  let chatBudget = 4;
+  const chatRefill = setInterval(() => {
+    chatBudget = Math.min(4, chatBudget + 1);
+  }, 1500);
 
   ws.on("message", (raw) => {
     // Clamped at zero and reported. Post-decrementing on every message drove
@@ -247,6 +257,29 @@ wss.on("connection", (ws: WebSocket) => {
         const raw = Number(msg.target);
         const target = Number.isFinite(raw) ? Math.min(1000, Math.max(1.05, raw)) : 2;
         db.setAuto(session.wallet, Boolean(msg.enabled), target);
+        return;
+      }
+
+      case "chat": {
+        if (!session) return;
+        // React escapes markup, so HTML is not the threat here — invisible
+        // and direction-flipping codepoints are: a zero-width or RTL-override
+        // payload is aimed at every other reader's screen. Strip control
+        // characters and the bidi/zero-width ranges, cap the length, and an
+        // empty result simply never happened.
+        const text = String(msg.text ?? "")
+          .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+          .trim()
+          .slice(0, 160);
+        if (!text) return;
+        if (chatBudget <= 0) {
+          // Prefixed so the client can route it into the chat feed itself
+          // rather than a console nobody reads.
+          send({ t: "error", message: "chat: slow down" });
+          return;
+        }
+        chatBudget--;
+        game.chat(session, text);
         return;
       }
 
@@ -335,6 +368,7 @@ wss.on("connection", (ws: WebSocket) => {
   ws.on("close", () => {
     clearInterval(ping);
     clearInterval(refill);
+    clearInterval(chatRefill);
     if (session) game.detach(session);
   });
 });

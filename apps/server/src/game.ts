@@ -18,7 +18,7 @@ import {
 } from "@zinc/engine";
 import { CONFIG, toLamports, toSol } from "./config.ts";
 import type { Database } from "./db.ts";
-import type { NetHistory, NetPlayer, NetState } from "./protocol.ts";
+import type { NetChat, NetHistory, NetPlayer, NetState } from "./protocol.ts";
 
 /** The roster. Also the whitelist for what a client may set as its character. */
 export const CHARS = ["chad", "soyjak", "wojak", "ansem", "saylor", "pepe", "chud", "bogdanoff"];
@@ -60,6 +60,7 @@ export interface Session {
   session: number;
   send(state: NetState): void;
   sendHistory(h: NetHistory[]): void;
+  sendChat(msgs: NetChat[]): void;
 }
 
 /**
@@ -112,6 +113,15 @@ export class GameServer {
   private bonanzaWallet: string | null = null;
   private lastBroadcast = 0;
   private teamWins: Record<string, number>;
+
+  /**
+   * The room's recent table talk, kept in memory only. Chat is atmosphere, not
+   * a ledger: it does not survive a restart and does not need to. The wallet
+   * rides along so `you` can be stamped per recipient — it is stripped before
+   * anything leaves the server.
+   */
+  private chatLog: Array<NetChat & { wallet: string }> = [];
+  private nextChatId = 1;
 
   constructor(private db: Database) {
     this.rulesHash = sha256Hex(canonicalConfig(this.config));
@@ -188,7 +198,38 @@ export class GameServer {
   attach(s: Session): void {
     this.sessions.add(s);
     this.pushHistory(s);
+    // The backlog, so a fresh arrival lands in a room mid-conversation
+    // instead of one that looks empty until somebody happens to speak.
+    if (this.chatLog.length > 0) {
+      s.sendChat(this.chatLog.map((m) => this.chatView(m, s.wallet)));
+    }
     s.send(this.stateFor(s));
+  }
+
+  /**
+   * A line for the room. The text arrives already cleaned and capped by the
+   * socket layer; this fans it out to everyone connected, sender included —
+   * the sender's own copy coming back is the delivery receipt.
+   */
+  chat(s: Session, text: string): void {
+    const row = this.db.player(s.wallet);
+    const msg: NetChat & { wallet: string } = {
+      id: this.nextChatId++,
+      wallet: s.wallet,
+      name: shortAddress(s.wallet),
+      charId: row.charId,
+      text,
+      at: Date.now(),
+    };
+    this.chatLog.push(msg);
+    if (this.chatLog.length > 50) this.chatLog.shift();
+    for (const sess of this.sessions) sess.sendChat([this.chatView(msg, sess.wallet)]);
+  }
+
+  /** The recipient's copy: `you` on the full wallet, the wallet itself dropped. */
+  private chatView(m: NetChat & { wallet: string }, wallet: string): NetChat {
+    const { wallet: w, ...pub } = m;
+    return { ...pub, you: w === wallet };
   }
 
   /** Pushes a fresh state to one session — after a deposit or withdrawal. */
