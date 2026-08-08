@@ -1001,14 +1001,20 @@ export class GameClient {
         if (mult >= 1) this.stats.roundsWon++;
       }
 
-      // The winner scene's subject: the last one standing, or when the ice
-      // took everyone before a sole survivor emerged, the best extraction.
+      // The winner scene's subject, same crown priority as the server: the
+      // engine's survivor; else a sole-owner ending's owner; else the best
+      // extraction with ties going to the longest stander, so the face on
+      // the scene matches the plates still visibly up on the board.
       // A total wipe (nobody banked anything) leaves no winner at all.
+      const cashedPlayers = res.players.filter((p) => p.outcome === "cashed");
       const champ =
         res.players.find((p) => p.lastStanding) ??
-        [...res.players]
-          .filter((p) => p.outcome === "cashed")
-          .sort((a, b) => b.cashedOut - a.cashedOut)[0];
+        (this.soleOwnerKey !== null
+          ? cashedPlayers.find((p) => this.ownerOf(p.id) === this.soleOwnerKey)
+          : undefined) ??
+        [...cashedPlayers].sort(
+          (a, b) => b.cashedOut - a.cashedOut || b.ticksSurvived - a.ticksSurvived,
+        )[0];
       // Distinct owners at the champion's exact extraction — same rule as
       // the server: a shared top exit renders "dead heat", never a coin-flip
       // "best", and one owner's multi-plate cash-out never ties itself.

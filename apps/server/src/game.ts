@@ -802,9 +802,21 @@ export class GameServer {
 
     let best = 0;
     for (const p of res.players) best = Math.max(best, p.cashedOut / this.config.entry);
+    // Crown priority: the engine's survivor; else a sole-owner ending's
+    // owner (they outlasted every other WALLET, the same claim the survivor
+    // flag makes); else best extraction, ties broken by ticks survived so
+    // the face on the scene is the plate still visibly standing on the
+    // board. Seat-order ties crowned a wallet that left ten ticks earlier
+    // while the board showed someone else's plates as the last ones up.
+    const cashed = res.players.filter((p) => p.outcome === "cashed");
     const champ =
       res.players.find((p) => p.lastStanding) ??
-      [...res.players].filter((p) => p.outcome === "cashed").sort((a, b) => b.cashedOut - a.cashedOut)[0];
+      (this.soleOwnerWallet !== null
+        ? cashed.find((p) => this.seats.get(p.id)?.wallet === this.soleOwnerWallet)
+        : undefined) ??
+      [...cashed].sort(
+        (a, b) => b.cashedOut - a.cashedOut || b.ticksSurvived - a.ticksSurvived,
+      )[0];
     const champSeat = champ ? this.seats.get(champ.id) : undefined;
     this.winnerWallet = champSeat?.wallet ?? null;
 
