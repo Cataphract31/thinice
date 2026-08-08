@@ -112,6 +112,8 @@ export class GameServer {
   private winner: NetState["winner"] = null;
   /** Full wallet of the winner — identity is never matched by display name. */
   private winnerWallet: string | null = null;
+  /** Set when the round ended because one wallet owned every live plate. */
+  private soleOwnerWallet: string | null = null;
   private bonanza: NetState["bonanza"] = null;
   private bonanzaWallet: string | null = null;
   private lastBroadcast = 0;
@@ -255,6 +257,7 @@ export class GameServer {
     this.nextSeatId = 1;
     this.winner = null;
     this.winnerWallet = null;
+    this.soleOwnerWallet = null;
     this.bonanza = null;
     this.bonanzaWallet = null;
     this.phaseEnd = Date.now() + this.config.timing.lobbyMs;
@@ -373,6 +376,8 @@ export class GameServer {
       this.settleExit(s.wallet, id, banked, p?.ticksSurvived ?? round.currentTick, "cashed");
     }
     if (!any) return;
+    // This exit may have left every live plate in one wallet's hands.
+    if (!round.finished) this.bankSoleOwner();
     // An exit that empties the lattice ends the round right here, between
     // ticks. `finish` is otherwise only reachable from `tick`, and the tick
     // loop refuses to run a finished round — so without this the server sits
@@ -381,6 +386,35 @@ export class GameServer {
     // cashing out last is enough to freeze the whole game.
     if (round.finished) this.finish();
     else this.broadcast(true);
+  }
+
+  /**
+   * Ends the hollow endgame: once every live plate belongs to ONE wallet, the
+   * round's outcome is already decided. A death among their plates only moves
+   * money between their own hands, and the survivor rule guarantees the last
+   * plate banks — so the sole owner takes exactly the same money whether the
+   * clock runs out or not, and making them watch it run is dead air. Mirrors
+   * the engine's sole-SURVIVOR rule, one level up: no opponent, no game.
+   *
+   * Implemented as genuine engine cash-outs, never a shortcut settlement:
+   * each exit lands in the round's cash-out log, so the fairness record
+   * replays byte-for-byte and the ceremony never learns the word "owner".
+   */
+  private bankSoleOwner(): void {
+    const round = this.round;
+    if (!round || round.finished || this.phase !== "live") return;
+    const live = round.players.filter((p) => p.outcome === "in");
+    if (live.length === 0) return;
+    const owners = new Set(live.map((p) => this.seats.get(p.id)?.wallet ?? `?${p.id}`));
+    if (owners.size !== 1) return;
+    this.soleOwnerWallet = [...owners][0]!;
+    for (const p of live) {
+      const banked = round.cashOut(p.id);
+      if (banked === null) continue;
+      this.settled.add(p.id);
+      const seat = this.seats.get(p.id);
+      if (seat) this.settleExit(seat.wallet, p.id, banked, p.ticksSurvived, "cashed");
+    }
   }
 
   private settleExit(wallet: string, seat: number, sol: number, ticks: number, outcome: string): void {
@@ -497,6 +531,10 @@ export class GameServer {
       }
     }
 
+    // Deaths or auto-exits this tick may have left one wallet owning every
+    // live plate; the round is decided, so it ends now.
+    if (!round.finished) this.bankSoleOwner();
+
     if (round.finished) this.finish();
   }
 
@@ -563,7 +601,13 @@ export class GameServer {
           you: false,
           multiple: champ.cashedOut / this.config.entry,
           amount: champ.cashedOut,
-          lastStanding: champ.lastStanding === true,
+          // A sole-owner ending is "last one standing" in spirit: they
+          // outlasted every other WALLET. Only claimed when the champion IS
+          // that wallet — an earlier extraction at a higher multiple still
+          // wins the scene as an extraction.
+          lastStanding:
+            champ.lastStanding === true ||
+            (this.soleOwnerWallet !== null && champSeat.wallet === this.soleOwnerWallet),
         }
       : null;
 

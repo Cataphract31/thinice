@@ -183,6 +183,28 @@ if (last(bob).phase === "live" && last(bob).you.outcome === "in") {
   );
 }
 
+// ------------------------------------------------- sole-owner auto-end
+// With bob out, carol's exit leaves every live plate in alice's hands. The
+// round is decided at that instant and must end itself — alice never sends
+// a thing. Her plates are auto-banked (or fell to the ice first; either way
+// none may still be standing in a one-wallet round).
+carol.send({ t: "cashout" });
+const solo = await waitFor(alice, (s) => s.phase === "result", 6000);
+const aSolo = last(alice);
+if (
+  solo &&
+  aSolo.you.outcome !== "in" &&
+  (aSolo.you.plates?.cashed ?? 0) + (aSolo.you.plates?.dead ?? 0) === 2
+) {
+  ok(
+    `sole-owner round ended itself: alice ${aSolo.you.outcome} on ${aSolo.you.plates.cashed} banked / ${aSolo.you.plates.dead} lost plates, untouched`,
+  );
+} else {
+  fail(
+    `sole-owner round did not end (phase=${aSolo.phase}, you=${JSON.stringify(aSolo.you)})`,
+  );
+}
+
 const done = await waitFor(alice, (s) => s.phase === "result", 90000);
 if (!done) fail("round never resolved");
 else ok(`round #${done.roundId} resolved after ${done.tick} ticks, winner ${done.winner?.charId ?? "-"}`);

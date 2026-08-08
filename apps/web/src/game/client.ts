@@ -543,6 +543,8 @@ export class GameClient {
 
   private bonanza: BonanzaEvent | null = null;
   private winner: WinnerInfo | null = null;
+  /** Set when the round ended because one owner held every live plate. */
+  private soleOwnerKey: string | null = null;
   /** Demo chat is an echo chamber — there is nobody on the other end. */
   private chatLog: ChatMsg[] = [];
   private nextChatId = 1;
@@ -728,6 +730,7 @@ export class GameClient {
     this.phase = "lobby";
     this.roundId++;
     this.youPlates = 0;
+    this.soleOwnerKey = null;
     this.round = null;
     this.names.clear();
     this.phaseEnd = Date.now() + this.config.timing.lobbyMs;
@@ -882,11 +885,37 @@ export class GameClient {
       }
     }
 
+    // This tick may have left every live plate with one owner; the round is
+    // decided, so it ends now (same rule as the server).
+    if (!round.finished) this.bankSoleOwner();
+
     if (round.finished) {
       this.finish();
       return;
     }
     this.emit();
+  }
+
+  /** Owner identity for the sole-owner rule: you, or the bot wallet name. */
+  private ownerOf(id: number): string {
+    return isYou(id) ? "YOU" : (this.names.get(id) ?? String(id));
+  }
+
+  /**
+   * Ends the hollow endgame, same rule as the server: once one owner holds
+   * every live plate the outcome is decided (their deaths only pass money
+   * between their own plates), so all their plates bank now. Genuine engine
+   * cash-outs, so the round's record replays exactly as it was played.
+   */
+  private bankSoleOwner(): void {
+    const round = this.round;
+    if (!round || round.finished || this.phase !== "live") return;
+    const live = round.players.filter((p) => p.outcome === "in");
+    if (live.length === 0) return;
+    const owners = new Set(live.map((p) => this.ownerOf(p.id)));
+    if (owners.size !== 1) return;
+    this.soleOwnerKey = [...owners][0]!;
+    for (const p of live) round.cashOut(p.id);
   }
 
   private currentMultiplier(): number {
@@ -959,7 +988,11 @@ export class GameClient {
             you: isYou(champ.id),
             multiple: champ.cashedOut / this.config.entry,
             amount: champ.cashedOut,
-            lastStanding: champ.lastStanding === true,
+            // Sole-owner endings are last-one-standing in spirit — but only
+            // when the champion IS that owner, not an earlier bigger exit.
+            lastStanding:
+              champ.lastStanding === true ||
+              (this.soleOwnerKey !== null && this.ownerOf(champ.id) === this.soleOwnerKey),
           }
         : null;
       if (this.winner) {
@@ -1163,6 +1196,8 @@ export class GameClient {
     }
     if (!any) return;
     sfxExtract();
+    // Your exit may have left a single bot owner holding the whole field.
+    if (!round.finished) this.bankSoleOwner();
     if (round.finished) this.finish();
     else this.emit();
   }

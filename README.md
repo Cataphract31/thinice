@@ -93,7 +93,7 @@ npm run typecheck       # all three projects
 npm run sim:fairness    # RNG quality, replay determinism, jackpot derivation
 npm run sim:invariants  # the martingale + pot conservation, asserted
 npm run sim             # full economics: RTP by strategy, pacing, jackpot
-npm run test:server     # 28 end-to-end checks against a running server
+npm run test:server     # 29 end-to-end checks against a running server
 npm run test:crash      # kills the server mid-round, asserts nobody loses money
 npm run test:bank       # real devnet deposit + withdraw round trip
 ```
@@ -133,7 +133,11 @@ and redistribute per plate), and `npm run sim:multi` measures it. What it buys
 is breadth: k plates in one round is actually *lower* variance than the same k
 entries across k rounds, because when one of your plates breaks, your own
 surviving plates recover their pro-rata share of it. A round still needs two
-DISTINCT wallets to seal — one person's plates against themselves is not PvP.
+DISTINCT wallets to seal — one person's plates against themselves is not PvP —
+and the moment every live plate belongs to one wallet the round ends itself,
+banking that owner on the spot: their deaths would only pass money between
+their own hands, so nothing is left to play for. The ending is implemented as
+genuine engine cash-outs, so the fairness record replays unchanged.
 
 Two ticket economies, both flat at 200 tickets per entry:
 

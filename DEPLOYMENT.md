@@ -229,7 +229,7 @@ deployment:
 
 ```bash
 curl https://your-host/health          # {"ok":true}
-npm run test:server wss://your-host/ws # 28 end-to-end checks against it
+npm run test:server wss://your-host/ws # 29 end-to-end checks against it
 ```
 
 `test:server` seats three real clients, plays a full round, and asserts the
