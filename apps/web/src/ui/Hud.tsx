@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from "react";
+import { DEFAULT_CONFIG } from "@zinc/engine";
 import type { AutoSettings, Snapshot } from "@/game/client";
 import { setWalletOptIn, walletOptedIn } from "@/game/net";
 import { shortAddress } from "@/game/names";
@@ -139,7 +140,12 @@ function phantom(): PhantomProvider | null {
  * the page. For now the connection only proves the flow and shows the address;
  * balances stay in the demo wallet until the server and program land.
  */
-function WalletButton({ onChange }: { onChange?: () => void }): JSX.Element {
+function WalletButton({
+  onChange,
+}: {
+  /** Called with true after an explicit connect, false after a disconnect. */
+  onChange?: (connected: boolean) => void;
+}): JSX.Element {
   const [addr, setAddr] = useState<string | null>(null);
 
   // Reconnect silently ONLY for players who explicitly connected before.
@@ -163,14 +169,14 @@ function WalletButton({ onChange }: { onChange?: () => void }): JSX.Element {
       await p.disconnect().catch(() => {});
       setWalletOptIn(false);
       setAddr(null);
-      onChange?.();
+      onChange?.(false);
       return;
     }
     try {
       const r = await p.connect();
       setWalletOptIn(true);
       setAddr(r.publicKey.toString());
-      onChange?.();
+      onChange?.(true);
     } catch {
       // Player closed the Phantom prompt; nothing to do.
     }
@@ -269,9 +275,17 @@ function TicketsStat({
                 {pct(t.bonShare)}
               </span>
             </div>
+            <div className="mt-1 flex items-baseline justify-between">
+              <span className="label">dry streak</span>
+              <span className="tnum text-[12px] font-bold text-[var(--color-gold)]">
+                {snap.bonanzaDrought.toLocaleString()} rounds
+              </span>
+            </div>
             <div className="mt-1 text-[10.5px] leading-snug text-[var(--color-dim)]">
-              Your odds of taking the whole pool when it fires. Every entry earns
-              tickets, all tickets wipe on a fire.
+              Fires about 1 round in{" "}
+              {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()},
+              same odds every round. Your share is your odds of taking the whole
+              pool; all tickets wipe on a fire.
             </div>
 
             <div className="label mt-3 text-[var(--color-cyan)]">rev share</div>
@@ -391,8 +405,9 @@ export function TopBar({
   onShowInfo: () => void;
   onShowChars: () => void;
   /** Networked play authenticates at socket open, so a wallet that connects
-      after that needs the handshake re-run or it stays seated as a guest. */
-  onWalletChange?: () => void;
+      after that needs the handshake re-run or it stays seated as a guest.
+      True = the player just connected (run the signature ceremony once). */
+  onWalletChange?: (connected: boolean) => void;
   /** Present only when the server offers banking (real wallet, networked). */
   onShowBank?: () => void;
 }): JSX.Element {
@@ -525,8 +540,16 @@ export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
       <span className="tnum text-[17px] font-bold text-[var(--color-gold)]">
         {pool.toFixed(digits)} ◎
       </span>
+      {/* The drought is the sales pitch: every dry round is one more the
+          pool grew and one more it did not fire. Odds stay printed next to
+          it so the number reads as chance, never as "due". */}
       <span className="label ml-auto hidden sm:inline">
-        one ticket takes all
+        <span className="tnum text-[var(--color-gold)]">
+          {snap.bonanzaDrought.toLocaleString()}
+        </span>{" "}
+        rounds dry · 1 in{" "}
+        {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()} every
+        round · one ticket takes all
       </span>
     </div>
   );

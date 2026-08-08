@@ -129,6 +129,8 @@ export interface NetState {
   wallet: number;
   session: number;
   bonanzaPool: number;
+  /** Rounds finished since the jackpot last fired, for the drought counter. */
+  bonanzaDrought: number;
   bonanzaTickets: number;
   revShareTickets: number;
   bonanza: { amount: number; winner: string; youWon: boolean; at: number } | null;
@@ -160,6 +162,13 @@ export interface NetState {
 
 export type ClientMessage =
   | { t: "auth"; wallet: string; sig: string }
+  /**
+   * Resumes a wallet session with the bearer token minted at the last
+   * signature. Same trust model as guest ids (which are bearer tokens for
+   * their balances already): fine for play money, revisit for mainnet.
+   * Kills the Phantom popup on every reload, reconnect and server restart.
+   */
+  | { t: "resume"; wallet: string; token: string }
   | { t: "guest"; id: string }
   | { t: "join" }
   /** Steps off during the lobby: every plate refunded, as if never bought. */
@@ -176,8 +185,10 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { t: "challenge"; nonce: string }
-  /** `house` is where deposits go. Absent for guests, who have no chain identity. */
-  | { t: "ready"; wallet: string; guest: boolean; house?: string }
+  /** `house` is where deposits go. Absent for guests, who have no chain identity.
+      `token` arrives once, after a fresh signature: the client stores it and
+      resumes with it instead of asking Phantom to sign every connection. */
+  | { t: "ready"; wallet: string; guest: boolean; house?: string; token?: string }
   | { t: "state"; state: NetState }
   | { t: "history"; history: NetHistory[] }
   /** New chat line(s). The backlog on connect and live lines use one shape. */

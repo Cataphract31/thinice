@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage } from "node:http";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import bs58 from "bs58";
 import nacl from "tweetnacl";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -136,7 +136,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
   send({ t: "challenge", nonce });
 
-  const seat = (wallet: string, guest: boolean): void => {
+  const seat = (wallet: string, guest: boolean, token?: string): void => {
     if (session) return;
     db.player(wallet);
     db.touch(wallet);
@@ -155,6 +155,9 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // No house account offered, no bank panel rendered: the client shows
       // banking only when this field arrives.
       ...(guest || !house ? {} : { house: house.publicKey.toBase58() }),
+      // Minted only on a fresh signature. The client stores it and resumes
+      // with it, so one Phantom prompt covers every future connection.
+      ...(token ? { token } : {}),
     });
     game.attach(session);
   };
@@ -271,8 +274,31 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
           send({ t: "error", message: "signature rejected" });
           return;
         }
-        seat(msg.wallet, false);
+        {
+          // One signature mints a session token; every later connection
+          // resumes with it instead of re-prompting Phantom.
+          const token = randomBytes(24).toString("hex");
+          db.setAuthToken(msg.wallet, token);
+          seat(msg.wallet, false, token);
+        }
         return;
+
+      case "resume": {
+        // Bearer resume: same trust level as a guest id. Namespaced wallets
+        // (guests, bots) can never be resumed into — they have no signature
+        // ceremony, so nothing may claim them by token either.
+        const wallet = String(msg.wallet ?? "");
+        const offered = String(msg.token ?? "");
+        const stored = wallet.includes(":") ? null : db.authTokenOf(wallet);
+        const a = Buffer.from(offered);
+        const b = Buffer.from(stored ?? "");
+        if (!stored || a.length !== b.length || !timingSafeEqual(a, b)) {
+          send({ t: "error", message: "session expired" });
+          return;
+        }
+        seat(wallet, false);
+        return;
+      }
 
       case "guest": {
         // Devnet convenience: play without a wallet under a local id. Namespaced

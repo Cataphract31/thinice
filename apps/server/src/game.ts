@@ -150,6 +150,8 @@ export class GameServer {
   private winner: NetState["winner"] = null;
   /** Full wallet of the winner — identity is never matched by display name. */
   private winnerWallet: string | null = null;
+  /** Round the jackpot last fired in, for the drought counter. Persisted. */
+  private lastFireRound = 0;
   /** Set when the round ended because one wallet owned every live plate. */
   private soleOwnerWallet: string | null = null;
   /** Practice bots this lobby aims for (drawn per round), and their brains. */
@@ -174,6 +176,7 @@ export class GameServer {
     this.rulesHash = sha256Hex(canonicalConfig(this.config));
     this.roundId = db.lastRoundId();
     this.teamWins = db.teamWins();
+    this.lastFireRound = Number(db.getMeta("lastFireRound") ?? 0);
     this.jackpot = new BonanzaPool(
       this.config.bonanza,
       toSol(Number(db.getMeta("bonanzaPool") ?? 0)),
@@ -927,6 +930,8 @@ export class GameServer {
         if (s.wallet === winnerWallet) s.session += fire.amount;
       }
     }
+    this.lastFireRound = this.roundId;
+    this.db.setMeta("lastFireRound", String(this.roundId));
     this.bonanzaWallet = winnerWallet || null;
     this.bonanza = {
       amount: fire.amount,
@@ -1108,6 +1113,7 @@ export class GameServer {
       wallet: toSol(row.balance),
       session: s.session,
       bonanzaPool: this.jackpot.pool,
+      bonanzaDrought: Math.max(0, this.roundId - this.lastFireRound),
       bonanzaTickets: bonYours,
       revShareTickets: id === undefined ? 0 : this.revShare.lifetimeOf(id),
       // Both of these are compared on the full wallet, never the display name:

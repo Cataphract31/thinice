@@ -184,6 +184,8 @@ export interface Snapshot {
   wallet: number;
   session: number;
   bonanzaPool: number;
+  /** Rounds finished since the jackpot last fired: the drought counter. */
+  bonanzaDrought: number;
   bonanzaTickets: number;
   revShareTickets: number;
   /** Set for a few seconds after the jackpot fires, then cleared. */
@@ -563,6 +565,8 @@ export class GameClient {
 
   private bonanza: BonanzaEvent | null = null;
   private winner: WinnerInfo | null = null;
+  /** Round the demo jackpot last fired in, for the drought counter. */
+  private lastFireRound = 0;
   /** Set when the round ended because one owner held every live plate. */
   private soleOwnerKey: string | null = null;
   /** Demo chat is an echo chamber — there is nobody on the other end. */
@@ -1154,6 +1158,7 @@ export class GameClient {
       this.session += fire.amount;
       this.stats.bonanzaWon = (this.stats.bonanzaWon ?? 0) + fire.amount;
     }
+    this.lastFireRound = this.roundId;
     this.bonanza = {
       amount: fire.amount,
       winner: this.names.get(fire.winnerId) ?? "a ticket holder",
@@ -1467,6 +1472,7 @@ export class GameClient {
       wallet: this.wallet,
       session: this.session,
       bonanzaPool: this.jackpot.pool,
+      bonanzaDrought: Math.max(0, this.roundId - this.lastFireRound),
       bonanzaTickets: this.jackpot.ticketsOf(YOU_ID),
       revShareTickets: this.revShare.lifetimeOf(YOU_ID),
       bonanza: this.bonanza,

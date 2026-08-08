@@ -117,6 +117,17 @@ export class Database {
         value TEXT NOT NULL
       );
 
+      /* Wallet session tokens, minted on a successful signature and replayed
+         on later connects so Phantom is not asked to sign every socket. A
+         bearer credential with exactly the trust level of a guest id, which
+         is already a bearer credential for its balance: play-money grade.
+         Revisit before real money. */
+      CREATE TABLE IF NOT EXISTS wallet_tokens (
+        wallet TEXT PRIMARY KEY,
+        token  TEXT NOT NULL,
+        at     INTEGER NOT NULL
+      );
+
       /* Per-round rakeback payouts. Exists so a crashed round can be fully
          reversed: rakeback pays at SEAL (the rake is already collected), so
          a round that dies mid-play has already streamed money that the
@@ -711,6 +722,23 @@ export class Database {
         "INSERT OR IGNORE INTO transfers (sig, wallet, direction, lamports, at) VALUES (?, ?, 'withdraw', ?, ?)",
       )
       .run(sig, wallet, lamports, Date.now());
+  }
+
+  /** Mints/rotates the wallet's session token. */
+  setAuthToken(wallet: string, token: string): void {
+    this.db
+      .prepare(
+        "INSERT INTO wallet_tokens (wallet, token, at) VALUES (?, ?, ?) " +
+          "ON CONFLICT(wallet) DO UPDATE SET token = excluded.token, at = excluded.at",
+      )
+      .run(wallet, token, Date.now());
+  }
+
+  authTokenOf(wallet: string): string | null {
+    const r = this.db
+      .prepare("SELECT token FROM wallet_tokens WHERE wallet = ?")
+      .get(wallet) as { token: string } | undefined;
+    return r?.token ?? null;
   }
 
   getMeta(key: string): string | null {

@@ -107,6 +107,8 @@ type PhantomProvider = {
  * clicking connect sets the flag, disconnecting clears it.
  */
 const WALLET_OPTIN_KEY = "zinc.walletOptIn";
+/** {wallet, token} minted by the server on a successful signature. */
+const WALLET_SESSION_KEY = "zinc.walletSession";
 
 export function walletOptedIn(): boolean {
   try {
@@ -119,9 +121,42 @@ export function walletOptedIn(): boolean {
 export function setWalletOptIn(on: boolean): void {
   try {
     if (on) localStorage.setItem(WALLET_OPTIN_KEY, "1");
-    else localStorage.removeItem(WALLET_OPTIN_KEY);
+    // Disconnecting drops the stored session with the flag: staying
+    // resumable after an explicit disconnect would make the button a lie.
+    else {
+      localStorage.removeItem(WALLET_OPTIN_KEY);
+      localStorage.removeItem(WALLET_SESSION_KEY);
+    }
   } catch {
     /* session-only opt-in still works via the fresh handshake */
+  }
+}
+
+function walletSession(): { wallet: string; token: string } | null {
+  try {
+    const raw = localStorage.getItem(WALLET_SESSION_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw) as { wallet?: unknown; token?: unknown };
+    if (typeof s.wallet !== "string" || typeof s.token !== "string") return null;
+    return { wallet: s.wallet, token: s.token };
+  } catch {
+    return null;
+  }
+}
+
+function saveWalletSession(wallet: string, token: string): void {
+  try {
+    localStorage.setItem(WALLET_SESSION_KEY, JSON.stringify({ wallet, token }));
+  } catch {
+    /* resumes fall back to a signature next visit */
+  }
+}
+
+function clearWalletSession(): void {
+  try {
+    localStorage.removeItem(WALLET_SESSION_KEY);
+  } catch {
+    /* nothing to clear */
   }
 }
 
@@ -161,6 +196,7 @@ const IDLE: Snapshot = {
   wallet: 0,
   session: 0,
   bonanzaPool: 0,
+  bonanzaDrought: 0,
   bonanzaTickets: 0,
   revShareTickets: 0,
   bonanza: null,
@@ -193,6 +229,9 @@ export class NetClient {
   private retry = 0;
   private reconnectTimer: number | null = null;
   private closed = false;
+  /** One-shot: the next challenge runs the Phantom signature ceremony. Set
+      only by the connect button — nothing else may summon the popup. */
+  private signatureWanted = false;
   /** Local deadline for the current phase, so countdowns run between pushes. */
   private phaseEndAt = 0;
   private clock: number | null = null;
@@ -312,6 +351,11 @@ export class NetClient {
           guest: Boolean(m.guest),
           address: String(m.wallet),
         };
+        // A fresh signature minted a session token: store it, and every
+        // later connection resumes silently instead of prompting Phantom.
+        if (typeof m.token === "string" && m.token) {
+          saveWalletSession(String(m.wallet), m.token);
+        }
         this.bank = m.house
           ? { house: String(m.house), busy: false, note: "", ok: null }
           : null;
@@ -409,6 +453,9 @@ export class NetClient {
           this.emit();
           return;
         }
+        // A dead session token must not loop forever: clear it so the next
+        // cycle seats us as a guest, exactly the pre-wallet experience.
+        if (message === "session expired") clearWalletSession();
         // An auth-phase rejection leaves the socket open, so `onclose` never
         // fires and nothing ever retries: the player sits on "Reconnecting…"
         // forever while nothing is reconnecting. Force the cycle.
@@ -433,12 +480,22 @@ export class NetClient {
     // the wallet holder silently ends up seated as a guest.
     const origin = this.ws;
     const stillOurs = (): boolean => this.ws === origin && origin?.readyState === WebSocket.OPEN;
-    // Guest until proven otherwise: the wallet path only runs for players
-    // who explicitly connected one. Beta is guest-first.
-    const p = walletOptedIn() ? phantom() : null;
+
+    // Silent first: a stored session token resumes the wallet with no
+    // Phantom involvement at all — across reloads, reconnects and server
+    // restarts. Phantom is only ever spoken to on the turn the player
+    // explicitly presses connect (the one-shot flag below).
+    const stored = walletSession();
+    if (stored && !this.signatureWanted) {
+      this.send({ t: "resume", wallet: stored.wallet, token: stored.token });
+      return;
+    }
+
+    const p = this.signatureWanted ? phantom() : null;
+    this.signatureWanted = false;
     if (p) {
       try {
-        const res = await p.connect({ onlyIfTrusted: true }).catch(() => null);
+        const res = await p.connect({ onlyIfTrusted: true }).catch(() => p.connect());
         const pubkey = res?.publicKey ?? p.publicKey;
         if (pubkey) {
           const msg = new TextEncoder().encode(`THIN ICE login\nnonce: ${nonce}`);
@@ -590,7 +647,8 @@ export class NetClient {
    * happens at socket open, so without a fresh handshake the player who just
    * approved their wallet would remain seated as a guest until they reloaded.
    */
-  reauth(): void {
+  reauth(wantSignature = false): void {
+    this.signatureWanted = wantSignature;
     this.retry = 0;
     this.ws?.close();
   }

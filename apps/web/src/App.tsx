@@ -82,8 +82,8 @@ export default function App(): JSX.Element {
         snap={snap}
         onShowInfo={() => setShowInfo(true)}
         onShowChars={() => setShowChars(true)}
-        onWalletChange={() => {
-          if (!client.isLocal) client.reauth();
+        onWalletChange={(connected) => {
+          if (!client.isLocal) client.reauth(connected);
         }}
         onShowBank={snap.bank ? () => setShowBank(true) : undefined}
       />
