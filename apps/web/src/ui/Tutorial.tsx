@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import { DEFAULT_CONFIG } from "@zinc/engine";
 import { CharArt } from "./Chars";
 
@@ -43,7 +43,7 @@ interface Step {
 const STEPS: Step[] = [
   {
     chip: "introduction",
-    title: "Welcome onto THIN ICE",
+    title: "YOU'RE ON THIN ICE",
     body: [
       "Same entry for everyone. You and a crowd of strangers, standing on ice.",
       "Twice a second, the ice tests everyone on it. Anyone can go under.",
@@ -90,31 +90,50 @@ const STEPS: Step[] = [
   },
 ];
 
-function Visual({ kind }: { kind: Step["visual"] }): JSX.Element {
-  if (kind === "drip") {
-    // The wallet ticking up on its own: three rakeback drips on a staggered
-    // loop, rising into the number exactly like the real in-game float.
-    return (
-      <div className="relative flex flex-col items-center gap-1.5">
-        <span className="label">your wallet</span>
-        <span className="tnum text-[40px] font-bold leading-none text-[var(--color-zinc-hi)]">
-          3.278 ◎
-        </span>
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="drip tnum absolute text-[13px] font-bold text-[var(--color-cyan)]"
-            style={{ left: `${24 + i * 21}%`, animationDelay: `${i * 1.1}s` }}
-          >
-            +0.004 ◎
-          </span>
-        ))}
-        <span className="label mt-3 rounded-sm bg-[var(--color-cyan)]/10 px-2 py-1 text-[var(--color-cyan)]">
-          every round · even offline
+/**
+ * The wallet actually ticking up. One drip at a time rises into the number,
+ * and the number grows as it lands with a small pop — the "goes up while you
+ * sleep" pitch happening for real, not looping decoration. The old version
+ * ran three staggered CSS loops on fixed offsets over a static number: the
+ * floats crossed each other and the chip, and the balance never moved.
+ */
+function DripVisual(): JSX.Element {
+  const [wallet, setWallet] = useState(3.278);
+  const [beat, setBeat] = useState(0);
+  useEffect(() => {
+    // Each beat: the previous drip has just reached the number, so the
+    // balance banks it and the next drip launches. Keyed by beat, so every
+    // cycle restarts the one-shot animation cleanly instead of loops drifting
+    // out of phase.
+    const t = setInterval(() => {
+      setWallet((w) => w + 0.004);
+      setBeat((b) => b + 1);
+    }, 1700);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="relative flex flex-col items-center gap-1.5">
+      <span className="label">your wallet</span>
+      <span
+        key={beat}
+        className="tnum tick-pop text-[40px] font-bold leading-none text-[var(--color-zinc-hi)]"
+      >
+        {wallet.toFixed(3)} ◎
+      </span>
+      <div className="pointer-events-none absolute inset-x-0 bottom-[34px] flex justify-center">
+        <span key={`d${beat}`} className="drip tnum text-[13px] font-bold text-[var(--color-cyan)]">
+          +0.004 ◎
         </span>
       </div>
-    );
-  }
+      <span className="label mt-3 rounded-sm bg-[var(--color-cyan)]/10 px-2 py-1 text-[var(--color-cyan)]">
+        every round · even offline
+      </span>
+    </div>
+  );
+}
+
+function Visual({ kind }: { kind: Step["visual"] }): JSX.Element {
+  if (kind === "drip") return <DripVisual />;
   if (kind === "number") {
     return (
       <div className="flex flex-col items-center gap-2">

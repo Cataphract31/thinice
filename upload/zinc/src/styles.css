@@ -292,34 +292,54 @@ body {
   animation: win-rise 420ms 200ms ease-out both;
 }
 
-/* The tutorial's rakeback drip: a small credit rising into the wallet
-   number, looping — the "number goes up while you sleep" pitch as motion. */
+/* The tutorial's rakeback drip: one credit rising into the wallet number.
+   One-shot, restarted by React each beat, so exactly one drip is ever in
+   flight and it lands right as the balance ticks up — the looping version
+   ran three out-of-phase floats that crossed each other and the chip. */
 @keyframes drip-rise {
   0% {
     opacity: 0;
-    transform: translateY(36px);
+    transform: translateY(34px);
   }
-  16% {
+  18% {
     opacity: 1;
   }
-  68% {
+  78% {
     opacity: 1;
   }
   100% {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-2px);
   }
 }
 .drip {
-  bottom: 40px;
-  animation: drip-rise 3.4s ease-out infinite;
+  animation: drip-rise 1.55s ease-out both;
+}
+
+/* The wallet banking a drip: a quick swell as the credit lands. */
+@keyframes tick-pop {
+  0% {
+    transform: scale(1.07);
+    color: var(--color-cyan);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.tick-pop {
+  animation: tick-pop 420ms ease-out both;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .win-slam,
   .win-rise,
+  .tick-pop {
+    animation: none !important;
+  }
+  /* Hidden, not frozen: a static drip would sit mid-flight over the chip. */
   .drip {
     animation: none !important;
+    opacity: 0;
   }
   .win-flash {
     animation: none !important;

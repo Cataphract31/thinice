@@ -276,9 +276,9 @@ function TicketsStat({
               </span>
             </div>
             <div className="mt-1 flex items-baseline justify-between">
-              <span className="label">dry streak</span>
+              <span className="label">last hit</span>
               <span className="tnum text-[12px] font-bold text-[var(--color-gold)]">
-                {snap.bonanzaDrought.toLocaleString()} rounds
+                {snap.bonanzaDrought.toLocaleString()} rounds ago
               </span>
             </div>
             <div className="mt-1 text-[10.5px] leading-snug text-[var(--color-dim)]">
@@ -544,10 +544,11 @@ export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
           pool grew and one more it did not fire. Odds stay printed next to
           it so the number reads as chance, never as "due". */}
       <span className="label ml-auto hidden sm:inline">
+        last hit{" "}
         <span className="tnum text-[var(--color-gold)]">
           {snap.bonanzaDrought.toLocaleString()}
         </span>{" "}
-        rounds dry · 1 in{" "}
+        rounds ago · 1 in{" "}
         {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()} every
         round · one ticket takes all
       </span>

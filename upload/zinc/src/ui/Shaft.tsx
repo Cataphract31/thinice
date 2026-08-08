@@ -63,6 +63,10 @@ export function Shaft({
         you: p.you,
         group: p.name,
         hue: !p.you && (counts.get(p.name) ?? 0) > 1 ? hueOf(p.name) : undefined,
+        // Only exits carry their banked multiple onto the board; the state
+        // mapping below keeps a last-stander out of "cashed", so the print
+        // lands on leavers alone.
+        multiple: p.outcome === "cashed" ? p.multiple : undefined,
         // "Cashed" states two different endings: LEAVING mid-round, or being
         // auto-banked as the one who outlasted everyone. The board must not
         // conflate them — on the end screen the leavers ghost out and the
@@ -84,6 +88,7 @@ export function Shaft({
       phase: snap.phase,
       bonanzaAt: snap.bonanza?.at ?? null,
       youOutcome: snap.you.joined ? snap.you.outcome : "out",
+      youCharId: snap.charId,
     });
   }, [snap]);
 
