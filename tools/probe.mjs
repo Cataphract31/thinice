@@ -128,12 +128,23 @@ const debited = +(startA - a1.wallet).toFixed(9);
 if (Math.abs(debited - entry) < 1e-9) ok(`entry debited exactly once: -${debited} ◎`);
 else fail(`entry debit wrong: expected ${entry}, got ${debited}`);
 
-// double join must not double charge
+// A second join is a second PLATE, not a no-op: multi-betting buys breadth.
 const balBefore = last(alice).wallet;
 alice.send({ t: "join" });
-await sleep(400);
-if (Math.abs(last(alice).wallet - balBefore) < 1e-9) ok("double join did not charge twice");
-else fail("double join charged a second entry");
+bob.send({ t: "join" });
+await sleep(500);
+const a2 = last(alice);
+if (
+  Math.abs(a2.wallet - (balBefore - entry)) < 1e-9 &&
+  a2.you.plates?.total === 2 &&
+  last(bob).you.plates?.total === 2
+) {
+  ok(`second join bought a second plate (debited again, alice+bob hold 2 each)`);
+} else {
+  fail(
+    `second join wrong (wallet ${a2.wallet}, alice plates ${JSON.stringify(a2.you.plates)}, bob plates ${JSON.stringify(last(bob).you.plates)})`,
+  );
+}
 
 const commit = a1.nextCommit;
 if (/^[0-9a-f]{64}$/.test(commit)) ok(`commitment published before seal: ${commit.slice(0, 20)}…`);
@@ -160,6 +171,10 @@ if (last(bob).phase === "live" && last(bob).you.outcome === "in") {
     bobCashed = true;
     ok(`bob extracted at ${b.you.multiple.toFixed(2)}×`);
   } else fail("cashout did not register");
+  // One press, every plate: cashout-all is the whole management model.
+  if (b.you.plates?.cashed === 2 && b.you.plates?.alive === 0) {
+    ok("one cashout extracted both of bob's plates together");
+  } else fail(`cashout left plates behind: ${JSON.stringify(b.you.plates)}`);
 } else {
   // Not a skip. If the probe cannot reach a cash-out it has not tested the
   // payout path, and a run that tested nothing must not report success.
@@ -177,10 +192,12 @@ await sleep(1200);
 // ------------------------------------------------------------- settlement
 const bEnd = last(bob);
 if (bobCashed) {
-  const expect = +(startB - entry + bEnd.you.multiple * entry).toFixed(6);
+  // Two plates staked, and the blended multiple is quoted over BOTH stakes,
+  // so the payout is multiple × 2 entries.
+  const expect = +(startB - 2 * entry + bEnd.you.multiple * 2 * entry).toFixed(6);
   const actual = +bEnd.wallet.toFixed(6);
   // rakeback streams in on top, so the balance must be at least the payout
-  if (actual + 1e-9 >= expect) ok(`bob paid out: ${actual} ◎ (>= ${expect} staked+won)`);
+  if (actual + 1e-9 >= expect) ok(`bob paid out on both plates: ${actual} ◎ (>= ${expect} staked+won)`);
   else fail(`bob underpaid: ${actual} ◎ < ${expect} ◎`);
 } else {
   fail("settlement never checked — bob did not cash out");
@@ -226,10 +243,12 @@ else {
     ok(`jackpot draw recorded (fire ${rec.bonanza.fire.toFixed(6)}) — checkable from the seed`);
   } else fail("no jackpot draw in the record: the biggest payout is unverifiable");
 
-  // Your own seat, so the payout line can be checked against the replay.
-  if (typeof row.yourSeat === "number" && row.yourSeat > 0) {
-    ok(`history carries your seat (#${row.yourSeat}) so your payout is checkable`);
-  } else fail(`history has no seat id: your own result cannot be verified`);
+  // Every one of your seats, so the payout line can be checked against the
+  // replay — alice bought two plates, so anything less than two seats here
+  // means one plate's money is unverifiable.
+  if (Array.isArray(row.yourSeats) && row.yourSeats.length === 2 && row.yourSeats.every((s) => s > 0)) {
+    ok(`history carries both your seats (#${row.yourSeats.join(", #")}) so every plate is checkable`);
+  } else fail(`history seats wrong: ${JSON.stringify(row.yourSeats)} (expected 2 seats)`);
 }
 
 function canonical(v) {

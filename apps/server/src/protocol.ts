@@ -55,12 +55,12 @@ export interface NetHistory {
   yourOutcome: "none" | "cashed" | "dead";
   yourMultiple: number | null;
   /**
-   * The seat this player held in that round. Without it the replay proves the
-   * round happened as committed but says nothing about YOUR result: the row
-   * claiming what you were paid stays pure server assertion, unverifiable
-   * against the round it supposedly came from.
+   * Every seat this wallet held in that round (multi-betting is several).
+   * Without them the replay proves the round happened as committed but says
+   * nothing about YOUR result: the row claiming what you were paid stays pure
+   * server assertion, unverifiable against the round it supposedly came from.
    */
-  yourSeat: number | null;
+  yourSeats: number[];
   commit: string;
   seedHex: string;
   winnerChar: string | null;
@@ -94,6 +94,8 @@ export interface NetState {
     balance: number;
     multiple: number;
     lockedMultiple: number | null;
+    /** The wallet's plates this round, and the per-round ceiling. */
+    plates: { total: number; alive: number; cashed: number; dead: number; max: number };
   };
   wallet: number;
   session: number;

@@ -24,8 +24,21 @@ export const CONFIG = {
   dbPath: process.env.DB_PATH ?? "zinc.db",
   /** Devnet demo credit granted to a wallet the first time it is seen. */
   startingBalanceSol: num("STARTING_BALANCE", 5, 0, 1000),
-  /** A round needs this many entrants to seal; below it the lobby rolls over. */
+  /**
+   * A round needs this many DISTINCT wallets to seal; below it the lobby rolls
+   * over. Distinct, not seats: with multi-plate entries one wallet can fill
+   * several seats, and a "PvP round" whose every plate is one person is not a
+   * game, it is one player paying rake to pass money between their own hands.
+   */
   minEntrants: num("MIN_ENTRANTS", 2, 2, 400),
+  /**
+   * Plates one wallet may hold in a single round. The ceiling is a fairness
+   * ceiling on the LOBBY, not the odds — EV per plate is identical no matter
+   * who holds what (see packages/sim/src/multi-study.ts) — but the field is
+   * capped, and without a per-wallet limit one whale can fill the lattice and
+   * lock everyone else out of the round.
+   */
+  maxPlatesPerWallet: num("MAX_PLATES_PER_WALLET", 5, 1, 50),
 } as const;
 
 export const LAMPORTS = 1_000_000_000;

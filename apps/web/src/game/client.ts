@@ -136,8 +136,11 @@ export interface Snapshot {
     joined: boolean;
     outcome: "out" | "in" | "cashed" | "dead";
     balance: number;
+    /** Blended across your plates: total value over total staked. */
     multiple: number;
     lockedMultiple: number | null;
+    /** Your plates this round. Multi-betting is buying more than one. */
+    plates: { total: number; alive: number; cashed: number; dead: number; max: number };
   };
   wallet: number;
   session: number;
@@ -217,7 +220,16 @@ export interface PlayerStats {
   bonanzaWon?: number;
 }
 
+/**
+ * The ledger identity for "you" in the demo, and the base id for your plates.
+ * Multi-betting gives you several PLATE ids in a round (YOU_BASE + i), but
+ * tickets and rakeback accrue under the single YOU_ID so persistence and the
+ * standings read one player, however many plates they stood on.
+ */
 const YOU_ID = 9999;
+const YOU_BASE = 9900;
+const MAX_PLATES = 5;
+const isYou = (id: number): boolean => id >= YOU_BASE;
 
 /**
  * sha256 as lowercase hex, or null where the browser will not provide it.
@@ -314,14 +326,20 @@ export async function verifyEntry(h: HistoryEntry, expected: GameConfig): Promis
     h.replayOk = outcomeDigest(replay) === h.digest;
 
     // Your own money, checked against the round rather than taken on trust.
-    if (h.yourSeat == null) {
+    // Multi-betting means several seats; the claim is the BLENDED multiple,
+    // so the check sums every one of your plates in the replay.
+    const seats = h.yourSeats ?? [];
+    if (seats.length === 0) {
       h.payoutOk = null;
     } else {
-      const mine = replay.players.find((p) => p.id === h.yourSeat);
+      const mine = replay.players.filter((p) => seats.includes(p.id));
       const claimed = h.yourMultiple ?? 0;
-      const actual = mine ? mine.cashedOut / rules.entry : -1;
+      const actual =
+        mine.length > 0
+          ? mine.reduce((a, p) => a + p.cashedOut, 0) / (rules.entry * seats.length)
+          : -1;
       // Lamport-scale tolerance: both sides are floats derived by division.
-      h.payoutOk = mine !== undefined && Math.abs(actual - claimed) < 1e-6;
+      h.payoutOk = mine.length === seats.length && Math.abs(actual - claimed) < 1e-6;
     }
 
     // THE binding check. The replay runs on record.seedHex; the commitment is
@@ -431,8 +449,8 @@ export interface HistoryEntry {
    * describing your own result remains an unchecked claim.
    */
   payoutOk: boolean | null;
-  /** Your plate in that round, from the server's entry row. */
-  yourSeat?: number | null;
+  /** Your plates in that round, from the server's entry rows. */
+  yourSeats?: number[] | null;
   /**
    * True when no verdict is honest at all: the browser cannot hash (insecure
    * origin), or the round's record could not be parsed. Not a mismatch.
@@ -480,7 +498,8 @@ export class GameClient {
   // openLobby increments first, so the first round players see is #1.
   private roundId = 0;
   private names = new Map<number, string>();
-  private joined = false;
+  /** How many plates you bought this round. 0 = spectating. */
+  private youPlates = 0;
   private lobbyEntrants: Entrant[] = [];
   /** Wall-clock time each bot walks into the lobby, so the room fills visibly. */
   private arrivals = new Map<number, number>();
@@ -668,7 +687,7 @@ export class GameClient {
   private openLobby(): void {
     this.phase = "lobby";
     this.roundId++;
-    this.joined = false;
+    this.youPlates = 0;
     this.round = null;
     this.names.clear();
     this.phaseEnd = Date.now() + this.config.timing.lobbyMs;
@@ -746,9 +765,10 @@ export class GameClient {
   }
 
   private seal(): void {
-    if (this.joined) {
-      this.names.set(YOU_ID, "YOU");
-      this.lobbyEntrants.push({ id: YOU_ID, strategyId: "you", strategy: () => false });
+    for (let i = 0; i < this.youPlates; i++) {
+      const id = YOU_BASE + i;
+      this.names.set(id, "YOU");
+      this.lobbyEntrants.push({ id, strategyId: "you", strategy: () => false });
     }
     this.roundRules = this.config;
     this.round = new Round(this.config, rngFromSeedHex(this.roundSeedHex), this.lobbyEntrants);
@@ -774,7 +794,7 @@ export class GameClient {
       if (was === p.outcome) continue;
       if (p.outcome === "dead") {
         deaths++;
-        if (p.id === YOU_ID) youDied = true;
+        if (isYou(p.id)) youDied = true;
       }
     }
     if (deaths > 0) {
@@ -793,8 +813,9 @@ export class GameClient {
     // steps are discrete, so this banks the actual crossing value: never
     // under the target, sometimes above it.
     if (this.auto.enabled && !round.finished) {
-      const you = round.players.find((p) => p.id === YOU_ID);
-      if (you?.outcome === "in" && you.balance / this.config.entry >= this.auto.target) {
+      // Any live plate reads the shared multiple; walkOut extracts them all.
+      const you = round.players.find((p) => isYou(p.id) && p.outcome === "in");
+      if (you && you.balance / this.config.entry >= this.auto.target) {
         this.walkOut();
         if (this.round?.finished) return;
       }
@@ -830,18 +851,21 @@ export class GameClient {
       // funded with the wipe leak included — the sim counts that money as
       // player money, so the client must not destroy it.
       for (const p of res.players) {
-        this.jackpot.credit(p.id, p.bonanzaTickets);
-        this.revShare.credit(p.id, nowMs);
+        // Your plates all credit the ONE ledger identity, so tickets and the
+        // rakeback stream see a single player however many plates they held.
+        const ledgerId = isYou(p.id) ? YOU_ID : p.id;
+        this.jackpot.credit(ledgerId, p.bonanzaTickets);
+        this.revShare.credit(ledgerId, nowMs);
       }
       this.jackpot.fund(res.toBonanza + res.wipeLeak);
       this.revShare.distribute(res.toRevShare, nowMs);
 
-      const you = res.players.find((p) => p.id === YOU_ID);
-      if (you) {
-        this.wallet += you.cashedOut;
-        this.session += you.cashedOut - this.config.entry;
-        const mult = you.cashedOut / this.config.entry;
-        this.stats.returned += you.cashedOut;
+      const yours = res.players.filter((p) => isYou(p.id));
+      for (const p of yours) {
+        this.wallet += p.cashedOut;
+        this.session += p.cashedOut - this.config.entry;
+        const mult = p.cashedOut / this.config.entry;
+        this.stats.returned += p.cashedOut;
         this.stats.bestMultiple = Math.max(this.stats.bestMultiple, mult);
         if (mult >= 1) this.stats.roundsWon++;
       }
@@ -871,7 +895,7 @@ export class GameClient {
         ? {
             name: this.names.get(champ.id) ?? "player",
             charId: this.charOf(champ.id),
-            you: champ.id === YOU_ID,
+            you: isYou(champ.id),
             multiple: champ.cashedOut / this.config.entry,
             amount: champ.cashedOut,
             lastStanding: champ.lastStanding === true,
@@ -889,10 +913,19 @@ export class GameClient {
         roundId: this.roundId,
         entrants: res.players.length,
         ticks: res.ticks,
-        joined: this.joined,
-        yourOutcome: !you ? "none" : you.outcome === "cashed" ? "cashed" : "dead",
-        yourMultiple: you ? you.cashedOut / this.config.entry : null,
-        yourSeat: you ? YOU_ID : null,
+        joined: yours.length > 0,
+        yourOutcome:
+          yours.length === 0
+            ? "none"
+            : yours.some((p) => p.cashedOut > 0)
+              ? "cashed"
+              : "dead",
+        // Blended across your plates, matching the server's aggregation.
+        yourMultiple:
+          yours.length > 0
+            ? yours.reduce((a, p) => a + p.cashedOut, 0) / (this.config.entry * yours.length)
+            : null,
+        yourSeats: yours.length > 0 ? yours.map((p) => p.id) : null,
         bestMultiple: best,
         commit: this.roundCommit,
         observedCommit: this.roundCommit,
@@ -1036,27 +1069,33 @@ export class GameClient {
       this.auto.target = 1.05;
     }
     // Flipping auto on mid-lobby should not miss the current round.
-    if (this.auto.enabled && this.phase === "lobby" && !this.joined) this.join();
+    if (this.auto.enabled && this.phase === "lobby" && this.youPlates === 0) this.join();
     this.saveState();
     this.emit();
   }
 
+  /** Buys a plate — or another one, up to the cap. Same price every time. */
   join(): void {
-    if (this.phase !== "lobby" || this.joined) return;
+    if (this.phase !== "lobby" || this.youPlates >= MAX_PLATES) return;
     if (this.wallet < this.config.entry) return;
     this.wallet -= this.config.entry;
-    this.joined = true;
+    this.youPlates++;
     this.stats.roundsPlayed++;
     this.stats.wagered += this.config.entry;
     sfxJoin();
     this.emit();
   }
 
+  /** Extracts every live plate you hold, together, at the shared multiple. */
   walkOut(): void {
     const round = this.round;
     if (!round || this.phase !== "live") return;
-    const got = round.cashOut(YOU_ID);
-    if (got === null) return;
+    let any = false;
+    for (const p of round.players) {
+      if (!isYou(p.id) || p.outcome !== "in") continue;
+      if (round.cashOut(p.id) !== null) any = true;
+    }
+    if (!any) return;
     sfxExtract();
     if (round.finished) this.finish();
     else this.emit();
@@ -1092,14 +1131,14 @@ export class GameClient {
 
   /** Yours is read live so a mid-lobby switch shows everywhere instantly. */
   private charOf(id: number): string {
-    return id === YOU_ID ? this.charId : (this.charMap.get(id) ?? CHARACTERS[0]!.id);
+    return isYou(id) ? this.charId : (this.charMap.get(id) ?? CHARACTERS[0]!.id);
   }
 
   private viewOf(p: Player): PlayerView {
     return {
       id: p.id,
       name: this.names.get(p.id) ?? "player",
-      you: p.id === YOU_ID,
+      you: isYou(p.id),
       charId: this.charOf(p.id),
       outcome: p.outcome,
       multiple: (p.outcome === "in" ? p.balance : p.cashedOut) / this.config.entry,
@@ -1129,26 +1168,32 @@ export class GameClient {
               balance: cfg.entry * (1 - totalRake(cfg)),
               ticksSurvived: 0,
             })),
-            ...(this.joined
-              ? [
-                  {
-                    id: YOU_ID,
-                    name: "YOU",
-                    you: true,
-                    charId: this.charId,
-                    outcome: "in" as const,
-                    multiple: 1 - totalRake(cfg),
-                    balance: cfg.entry * (1 - totalRake(cfg)),
-                    ticksSurvived: 0,
-                  },
-                ]
-              : []),
+            ...Array.from({ length: this.youPlates }, (_, i) => ({
+              id: YOU_BASE + i,
+              name: "YOU",
+              you: true,
+              charId: this.charId,
+              outcome: "in" as const,
+              multiple: 1 - totalRake(cfg),
+              balance: cfg.entry * (1 - totalRake(cfg)),
+              ticksSurvived: 0,
+            })),
           ]
         : [];
     const live = players.filter((p) => p.outcome === "in").length;
     const dead = players.filter((p) => p.outcome === "dead").length;
     const cashed = players.filter((p) => p.outcome === "cashed").length;
-    const you = round?.players.find((p) => p.id === YOU_ID);
+    // Same aggregation the server runs: live plates share one balance, so the
+    // blended multiple IS the per-plate multiple while any are standing.
+    const yours = round ? round.players.filter((p) => isYou(p.id)) : [];
+    const aliveMine = yours.filter((p) => p.outcome === "in").length;
+    const cashedMine = yours.filter((p) => p.outcome === "cashed").length;
+    const deadMine = yours.filter((p) => p.outcome === "dead").length;
+    const myTotal = yours.reduce(
+      (a, p) => a + (p.outcome === "in" ? p.balance : p.cashedOut),
+      0,
+    );
+    const myStake = this.youPlates * cfg.entry;
 
     const graceLeft = round
       ? Math.max(0, cfg.hazard.graceTicks - round.currentTick)
@@ -1173,14 +1218,28 @@ export class GameClient {
       potInPlay: round ? round.pot : 0,
       entry: cfg.entry,
       you: {
-        joined: this.joined,
-        outcome: !this.joined ? "out" : (you?.outcome ?? "in"),
-        balance: you ? (you.outcome === "in" ? you.balance : you.cashedOut) : 0,
-        multiple: you
-          ? (you.outcome === "in" ? you.balance : you.cashedOut) / cfg.entry
-          : 0,
+        joined: this.youPlates > 0,
+        outcome:
+          this.youPlates === 0
+            ? "out"
+            : yours.length === 0 || aliveMine > 0
+              ? "in"
+              : cashedMine > 0
+                ? "cashed"
+                : "dead",
+        balance: myTotal,
+        multiple: yours.length > 0 && myStake > 0 ? myTotal / myStake : 0,
         lockedMultiple:
-          you && you.outcome === "cashed" ? you.cashedOut / cfg.entry : null,
+          yours.length > 0 && aliveMine === 0 && cashedMine > 0 && myStake > 0
+            ? myTotal / myStake
+            : null,
+        plates: {
+          total: this.youPlates,
+          alive: round ? aliveMine : this.youPlates,
+          cashed: cashedMine,
+          dead: deadMine,
+          max: MAX_PLATES,
+        },
       },
       wallet: this.wallet,
       session: this.session,

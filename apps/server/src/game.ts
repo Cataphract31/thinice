@@ -82,7 +82,8 @@ export class GameServer {
   private timer: NodeJS.Timeout | null = null;
 
   private seats = new Map<number, Seat>();
-  private seatOf = new Map<string, number>();
+  /** Every seat a wallet holds this round. Multi-betting is several plates. */
+  private seatsOf = new Map<string, number[]>();
   /** Seat ids already paid out this round. Exits must book exactly once. */
   private settled = new Set<number>();
   private nextSeatId = 1;
@@ -248,7 +249,7 @@ export class GameServer {
     this.roundId++;
     this.round = null;
     this.seats.clear();
-    this.seatOf.clear();
+    this.seatsOf.clear();
     this.nextSeatId = 1;
     this.winner = null;
     this.winnerWallet = null;
@@ -296,10 +297,19 @@ export class GameServer {
     }
   }
 
-  /** A human buys a seat. The debit happens here or the seat does not exist. */
+  /**
+   * A human buys a seat — or another one. Pressing bond again while already
+   * standing buys an additional plate, up to the per-wallet cap. EV per plate
+   * is identical however many one wallet holds (multi-study.ts measures it);
+   * the cap protects the LOBBY, because the field is finite and one whale
+   * filling it locks everyone else out of the round.
+   */
   join(s: Session): string | null {
     if (this.phase !== "lobby") return "the lattice is already sealed";
-    if (this.seatOf.has(s.wallet)) return null;
+    const mine = this.seatsOf.get(s.wallet) ?? [];
+    if (mine.length >= CONFIG.maxPlatesPerWallet) {
+      return `plate limit is ${CONFIG.maxPlatesPerWallet} per round`;
+    }
     // The lobby cap is a game rule, not a simulation detail: the hazard curve
     // reads crowding off the field size, and every economic guarantee is
     // certified over the configured range. An uncapped lobby runs the game
@@ -318,20 +328,30 @@ export class GameServer {
       name: shortAddress(s.wallet),
       charId: row.charId,
     });
-    this.seatOf.set(s.wallet, id);
+    this.seatsOf.set(s.wallet, [...mine, id]);
     this.broadcast(true);
     return null;
   }
 
+  /**
+   * One press extracts EVERY live plate the wallet holds, at the same tick and
+   * therefore the same multiple — live plates always share one balance, so
+   * per-plate management would be buttons with nothing to decide.
+   */
   cashOut(s: Session): void {
     const round = this.round;
-    const id = this.seatOf.get(s.wallet);
-    if (!round || id === undefined || this.phase !== "live") return;
-    const banked = round.cashOut(id);
-    if (banked === null) return;
-    this.settled.add(id);
-    const p = round.players.find((x) => x.id === id);
-    this.settleExit(s.wallet, banked, p?.ticksSurvived ?? round.currentTick, "cashed");
+    const mine = this.seatsOf.get(s.wallet);
+    if (!round || !mine || this.phase !== "live") return;
+    let any = false;
+    for (const id of mine) {
+      const banked = round.cashOut(id);
+      if (banked === null) continue;
+      any = true;
+      this.settled.add(id);
+      const p = round.players.find((x) => x.id === id);
+      this.settleExit(s.wallet, id, banked, p?.ticksSurvived ?? round.currentTick, "cashed");
+    }
+    if (!any) return;
     // An exit that empties the lattice ends the round right here, between
     // ticks. `finish` is otherwise only reachable from `tick`, and the tick
     // loop refuses to run a finished round — so without this the server sits
@@ -342,13 +362,14 @@ export class GameServer {
     else this.broadcast(true);
   }
 
-  private settleExit(wallet: string, sol: number, ticks: number, outcome: string): void {
+  private settleExit(wallet: string, seat: number, sol: number, ticks: number, outcome: string): void {
     const lamports = toLamports(sol);
     if (lamports > 0) this.db.adjustBalance(wallet, lamports);
     const multiple = sol / this.config.entry;
     this.db.settleEntry(
       this.roundId,
       wallet,
+      seat,
       lamports,
       multiple,
       ticks,
@@ -380,9 +401,11 @@ export class GameServer {
     if (this.phase === "lobby") {
       this.autoEnter();
       if (now >= this.phaseEnd) {
-        if (this.seats.size >= CONFIG.minEntrants) this.seal();
-        // Too thin to be a game: roll the lobby rather than run a round in
-        // which the only entrant is guaranteed their money back.
+        // Distinct WALLETS, not seats: with multi-betting one wallet can hold
+        // several plates, and a round whose every plate is one person is not
+        // PvP — it is one player paying rake to shuffle money between their
+        // own hands. Too thin to be a game: roll the lobby instead.
+        if (this.seatsOf.size >= CONFIG.minEntrants) this.seal();
         else this.phaseEnd = now + this.config.timing.lobbyMs;
       }
     } else if (this.phase === "live") {
@@ -407,10 +430,11 @@ export class GameServer {
     this.broadcast();
   }
 
-  /** Late auto-players who connected mid-lobby still get pulled in. */
+  /** Late auto-players who connected mid-lobby still get pulled in.
+      Auto play buys exactly ONE plate per round; extra breadth is a choice. */
   private autoEnter(): void {
     for (const s of this.uniqueSessions()) {
-      if (this.seatOf.has(s.wallet)) continue;
+      if (this.seatsOf.has(s.wallet)) continue;
       const row = this.db.player(s.wallet);
       if (row.autoEnabled) this.join(s);
     }
@@ -428,7 +452,7 @@ export class GameServer {
       if (p.outcome === "dead" && !this.settled.has(p.id)) {
         this.settled.add(p.id);
         const seat = this.seats.get(p.id);
-        if (seat) this.settleExit(seat.wallet, 0, p.ticksSurvived, "dead");
+        if (seat) this.settleExit(seat.wallet, p.id, 0, p.ticksSurvived, "dead");
       }
     }
 
@@ -445,7 +469,7 @@ export class GameServer {
         const banked = round.cashOut(seat.id);
         if (banked !== null) {
           this.settled.add(seat.id);
-          this.settleExit(seat.wallet, banked, p.ticksSurvived, "cashed");
+          this.settleExit(seat.wallet, seat.id, banked, p.ticksSurvived, "cashed");
         }
       }
     }
@@ -471,6 +495,7 @@ export class GameServer {
         this.settled.add(p.id);
         this.settleExit(
           seat.wallet,
+          p.id,
           p.cashedOut,
           p.ticksSurvived,
           p.outcome === "dead" ? "dead" : "cashed",
@@ -626,9 +651,13 @@ export class GameServer {
         entrants: r.entrants,
         ticks: r.ticks,
         bestMultiple: r.bestMult,
-        yourOutcome: r.outcome === "dead" ? "dead" : "cashed",
-        yourMultiple: r.multiple,
-        yourSeat: r.seat > 0 ? r.seat : null,
+        yourOutcome: r.anyBanked > 0 ? "cashed" : "dead",
+        // Blended across the wallet's plates: total out over total in.
+        yourMultiple: r.staked > 0 ? r.returned / r.staked : null,
+        yourSeats: String(r.seats ?? "")
+          .split(",")
+          .map((x) => Number(x))
+          .filter((x) => Number.isFinite(x) && x > 0),
         commit: r.commit,
         seedHex: r.seedHex,
         winnerChar: r.winnerCh,
@@ -675,9 +704,29 @@ export class GameServer {
     const dead = players.filter((p) => p.outcome === "dead").length;
     const cashed = players.filter((p) => p.outcome === "cashed").length;
 
-    const seatId = this.seatOf.get(s.wallet);
-    const you = seatId === undefined ? undefined : round?.players.find((p) => p.id === seatId);
-    const joined = seatId !== undefined;
+    // All the wallet's plates, aggregated: live plates always share one
+    // balance, so the blended multiple is the per-plate multiple while any
+    // are standing, and total-out over total-in once they are not.
+    const mySeats = this.seatsOf.get(s.wallet) ?? [];
+    const joined = mySeats.length > 0;
+    const myPlayers = round
+      ? mySeats.flatMap((id) => round.players.filter((p) => p.id === id))
+      : [];
+    const alive = myPlayers.filter((p) => p.outcome === "in").length;
+    const cashedMine = myPlayers.filter((p) => p.outcome === "cashed").length;
+    const deadMine = myPlayers.filter((p) => p.outcome === "dead").length;
+    const myTotal = myPlayers.reduce(
+      (a, p) => a + (p.outcome === "in" ? p.balance : p.cashedOut),
+      0,
+    );
+    const myStake = mySeats.length * cfg.entry;
+    const youOutcome: "out" | "in" | "cashed" | "dead" = !joined
+      ? "out"
+      : myPlayers.length === 0 || alive > 0
+        ? "in"
+        : cashedMine > 0
+          ? "cashed"
+          : "dead";
 
     const graceLeft = round ? Math.max(0, cfg.hazard.graceTicks - round.currentTick) : cfg.hazard.graceTicks;
     const hazard =
@@ -721,10 +770,18 @@ export class GameServer {
       entry: cfg.entry,
       you: {
         joined,
-        outcome: !joined ? "out" : (you?.outcome ?? "in"),
-        balance: you ? (you.outcome === "in" ? you.balance : you.cashedOut) : 0,
-        multiple: you ? (you.outcome === "in" ? you.balance : you.cashedOut) / cfg.entry : 0,
-        lockedMultiple: you && you.outcome === "cashed" ? you.cashedOut / cfg.entry : null,
+        outcome: youOutcome,
+        balance: myTotal,
+        multiple: myPlayers.length > 0 && myStake > 0 ? myTotal / myStake : 0,
+        lockedMultiple:
+          joined && alive === 0 && cashedMine > 0 && myStake > 0 ? myTotal / myStake : null,
+        plates: {
+          total: mySeats.length,
+          alive: round ? alive : mySeats.length,
+          cashed: cashedMine,
+          dead: deadMine,
+          max: CONFIG.maxPlatesPerWallet,
+        },
       },
       wallet: toSol(row.balance),
       session: s.session,

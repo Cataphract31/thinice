@@ -100,7 +100,10 @@ export class Database {
         /* Which plate this player stood on, so their own result can be checked
            against the replay rather than merely asserted by the server. */
         seat     INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (roundId, wallet)
+        /* One ROW per PLATE: a wallet may hold several seats in one round.
+           The wallet stays in the key because rows from before the seat
+           column existed all carry seat 0 and are unique by wallet alone. */
+        PRIMARY KEY (roundId, wallet, seat)
       );
 
       CREATE INDEX IF NOT EXISTS entries_wallet ON entries(wallet, roundId DESC);
@@ -137,6 +140,40 @@ export class Database {
       } catch (err) {
         if (!/duplicate column/i.test(String(err))) throw err;
       }
+    }
+
+    // Multi-plate migration. Databases created before multi-betting carry
+    // PRIMARY KEY (roundId, wallet), which structurally forbids a second seat
+    // for the same wallet. SQLite cannot alter a primary key, so the table is
+    // rebuilt once, in a transaction. Old rows survive verbatim — their
+    // pre-seat-column entries are all seat 0 and unique by wallet, which is
+    // exactly why wallet stays in the new key.
+    const entriesSql = (
+      this.db
+        .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entries'")
+        .get() as { sql: string } | undefined
+    )?.sql;
+    if (entriesSql && /PRIMARY KEY \(roundId, wallet\)/.test(entriesSql)) {
+      this.db.exec(`
+        BEGIN;
+        ALTER TABLE entries RENAME TO entries_old;
+        CREATE TABLE entries (
+          roundId  INTEGER NOT NULL REFERENCES rounds(id),
+          wallet   TEXT    NOT NULL,
+          staked   INTEGER NOT NULL,
+          returned INTEGER NOT NULL DEFAULT 0,
+          multiple REAL    NOT NULL DEFAULT 0,
+          ticks    INTEGER NOT NULL DEFAULT 0,
+          outcome  TEXT    NOT NULL DEFAULT 'in',
+          seat     INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (roundId, wallet, seat)
+        );
+        INSERT INTO entries (roundId, wallet, staked, returned, multiple, ticks, outcome, seat)
+          SELECT roundId, wallet, staked, returned, multiple, ticks, outcome, seat FROM entries_old;
+        DROP TABLE entries_old;
+        CREATE INDEX IF NOT EXISTS entries_wallet ON entries(wallet, roundId DESC);
+        COMMIT;
+      `);
     }
   }
 
@@ -316,7 +353,7 @@ export class Database {
   refundOpenEntries(): number {
     const orphans = this.db
       .prepare(
-        `SELECT e.roundId, e.wallet, e.staked, e.returned, e.outcome
+        `SELECT e.roundId, e.wallet, e.staked, e.returned, e.outcome, e.seat
            FROM entries e JOIN rounds r ON r.id = e.roundId
           WHERE r.endedAt IS NULL AND e.outcome <> 'refunded'`,
       )
@@ -326,6 +363,7 @@ export class Database {
       staked: number;
       returned: number;
       outcome: string;
+      seat: number;
     }[];
     if (orphans.length === 0) return 0;
     this.db.exec("BEGIN");
@@ -346,12 +384,14 @@ export class Database {
               WHERE wallet = ?`,
           )
           .run(delta, o.staked, o.returned, wonBack, o.wallet);
+        // Per seat, not per wallet: a multi-plate wallet has one row per
+        // plate in the orphaned round and each is its own refund.
         this.db
           .prepare(
             `UPDATE entries SET outcome = 'refunded', returned = staked, multiple = 1
-              WHERE roundId = ? AND wallet = ?`,
+              WHERE roundId = ? AND wallet = ? AND seat = ?`,
           )
-          .run(o.roundId, o.wallet);
+          .run(o.roundId, o.wallet, o.seat);
       }
       this.db.exec("COMMIT");
     } catch (err) {
@@ -390,10 +430,7 @@ export class Database {
         return false;
       }
       this.db
-        .prepare(
-          `INSERT INTO entries (roundId, wallet, staked, seat) VALUES (?, ?, ?, ?)
-           ON CONFLICT(roundId, wallet) DO NOTHING`,
-        )
+        .prepare(`INSERT INTO entries (roundId, wallet, staked, seat) VALUES (?, ?, ?, ?)`)
         .run(roundId, wallet, stakedLamports, seat);
       this.db
         .prepare(
@@ -411,18 +448,22 @@ export class Database {
   settleEntry(
     roundId: number,
     wallet: string,
+    seat: number,
     returnedLamports: number,
     multiple: number,
     ticks: number,
     outcome: string,
     won: boolean,
   ): void {
+    // Keyed on the seat: with multi-plate entries a wallet has several rows
+    // in one round, and settling "the wallet's row" would settle one plate's
+    // money onto whichever row SQLite found first.
     this.db
       .prepare(
         `UPDATE entries SET returned = ?, multiple = ?, ticks = ?, outcome = ?
-         WHERE roundId = ? AND wallet = ?`,
+         WHERE roundId = ? AND wallet = ? AND seat = ?`,
       )
-      .run(returnedLamports, multiple, ticks, outcome, roundId, wallet);
+      .run(returnedLamports, multiple, ticks, outcome, roundId, wallet, seat);
     this.db
       .prepare(
         `UPDATE players
@@ -483,7 +524,12 @@ export class Database {
     return out;
   }
 
-  /** A player's own recent rounds, newest first. */
+  /**
+   * A player's own recent rounds, newest first — one row per ROUND, with the
+   * wallet's plates aggregated. `seats` is comma-joined so the client can
+   * check every one of its plates against the replay, and `multiple` is the
+   * blended total-out over total-in, which is what the player actually made.
+   */
   historyFor(wallet: string, limit = 40): {
     roundId: number;
     entrants: number;
@@ -492,23 +538,28 @@ export class Database {
     commit: string;
     seedHex: string;
     returned: number;
-    multiple: number;
-    outcome: string;
+    staked: number;
+    plates: number;
+    anyBanked: number;
     winnerCh: string | null;
     winner: string | null;
     record: string;
     digest: string;
-    seat: number;
+    seats: string;
   }[] {
     return this.db
       .prepare(
         /* "commit" is a reserved word; unquoted it is a syntax error. */
         `SELECT r.id AS roundId, r.entrants, r.ticks, r.bestMult, r.commit_ AS "commit",
                 r.seedHex, r.winnerCh, r.winner, r.record, r.digest,
-                e.returned, e.multiple, e.outcome, e.seat
+                SUM(e.returned) AS returned, SUM(e.staked) AS staked,
+                COUNT(*) AS plates,
+                MAX(CASE WHEN e.returned > 0 THEN 1 ELSE 0 END) AS anyBanked,
+                GROUP_CONCAT(e.seat) AS seats
            FROM rounds r
            JOIN entries e ON e.roundId = r.id
           WHERE e.wallet = ? AND r.endedAt IS NOT NULL
+          GROUP BY r.id
           ORDER BY r.id DESC LIMIT ?`,
       )
       .all(wallet, limit) as never;

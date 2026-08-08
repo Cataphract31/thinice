@@ -459,29 +459,44 @@ export function ActionBar({
     );
   }
 
+  const k = snap.you.plates.total;
   if (snap.phase === "lobby") {
-    if (snap.you.joined) {
-      label = `Bonded, sealing in ${secs}s`;
-    } else if (snap.wallet < snap.entry) {
-      // Both clients drop a join they cannot fund, and the server's refusal
-      // reaches the browser as a console warning nobody sees. A full-colour
-      // primary CTA that silently does nothing is the worst thing the money
-      // button can do, so it says why instead.
-      label = "Not enough balance";
-    } else {
-      label = `Bond in · ${snap.entry.toFixed(3)} ◎`;
+    if (!snap.you.joined) {
+      if (snap.wallet < snap.entry) {
+        // Both clients drop a join they cannot fund, and the server's refusal
+        // reaches the browser as a console warning nobody sees. A full-colour
+        // primary CTA that silently does nothing is the worst thing the money
+        // button can do, so it says why instead.
+        label = "Not enough balance";
+      } else {
+        label = `Bond in · ${snap.entry.toFixed(3)} ◎`;
+        action = onJoin;
+        tone = "go";
+      }
+    } else if (k < snap.you.plates.max && snap.wallet >= snap.entry) {
+      // Multi-betting: the same button buys the next plate. EV per plate is
+      // identical however many you hold — this buys breadth, not odds.
+      label = `Bond another · ${snap.entry.toFixed(3)} ◎ (${k} in)`;
       action = onJoin;
       tone = "go";
+    } else {
+      label = `Bonded ×${k}, sealing in ${secs}s`;
     }
   } else if (snap.phase === "live") {
     if (snap.you.outcome === "in") {
-      label = `Extract · ${snap.you.multiple.toFixed(2)}×`;
+      // One press extracts every live plate at the shared multiple. The
+      // multiple shown is blended across ALL your plates (dead ones count as
+      // zero), so the button never advertises more than pressing it banks.
+      label =
+        k > 1
+          ? `Extract ×${snap.you.plates.alive} · ${snap.you.multiple.toFixed(2)}×`
+          : `Extract · ${snap.you.multiple.toFixed(2)}×`;
       action = onWalkOut;
       tone = "cash";
     } else if (snap.you.outcome === "cashed") {
       label = `Banked ${snap.you.multiple.toFixed(2)}×`;
     } else if (snap.you.outcome === "dead") {
-      label = "Plate shattered";
+      label = k > 1 ? "All plates shattered" : "Plate shattered";
     } else {
       label = "Spectating";
     }

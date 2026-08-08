@@ -56,9 +56,11 @@ export function StatsPanel({ snap }: { snap: Snapshot }): JSX.Element {
         {row("rakeback earned", `+${s.revEarned.toFixed(4)} ◎`, "var(--color-cyan)")}
         {bonanzaWon > 0 &&
           row("bonanza won", `+${bonanzaWon.toFixed(3)} ◎`, "var(--color-gold)")}
-        {row("rounds played", String(s.roundsPlayed))}
+        {/* Plates, not rounds: with multi-betting one round can hold several
+            of your entries, and every counter here ticks once per plate. */}
+        {row("plates bought", String(s.roundsPlayed))}
         {row(
-          "rounds in profit",
+          "plates in profit",
           `${s.roundsWon} · ${hitRate.toFixed(0)}%`,
         )}
         {row(

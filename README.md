@@ -93,7 +93,7 @@ npm run typecheck       # all three projects
 npm run sim:fairness    # RNG quality, replay determinism, jackpot derivation
 npm run sim:invariants  # the martingale + pot conservation, asserted
 npm run sim             # full economics: RTP by strategy, pacing, jackpot
-npm run test:server     # 26 end-to-end checks against a running server
+npm run test:server     # 27 end-to-end checks against a running server
 npm run test:crash      # kills the server mid-round, asserts nobody loses money
 npm run test:bank       # real devnet deposit + withdraw round trip
 ```
@@ -124,6 +124,16 @@ conserved and every live player holds the same balance, so no exit timing beats
 any other — strategy buys variance, never expected value. This is asserted, not
 assumed: `sim:invariants` fails the build if the spread across strategies drifts
 or if conservation leaves 100.000%.
+
+**Multi-betting.** One wallet may hold up to five plates in a round — press
+bond again to buy another; one cash-out extracts every live plate together at
+the shared multiple. This changes no odds: EV per plate is identical however
+many one wallet holds (ownership does not exist in the engine — deaths roll
+and redistribute per plate), and `npm run sim:multi` measures it. What it buys
+is breadth: k plates in one round is actually *lower* variance than the same k
+entries across k rounds, because when one of your plates breaks, your own
+surviving plates recover their pro-rata share of it. A round still needs two
+DISTINCT wallets to seal — one person's plates against themselves is not PvP.
 
 Two ticket economies, both flat at 200 tickets per entry:
 

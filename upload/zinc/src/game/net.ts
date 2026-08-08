@@ -125,7 +125,14 @@ const IDLE: Snapshot = {
   cashedCount: 0,
   potInPlay: 0,
   entry: DEFAULT_CONFIG.entry,
-  you: { joined: false, outcome: "out", balance: 0, multiple: 0, lockedMultiple: null },
+  you: {
+    joined: false,
+    outcome: "out",
+    balance: 0,
+    multiple: 0,
+    lockedMultiple: null,
+    plates: { total: 0, alive: 0, cashed: 0, dead: 0, max: 5 },
+  },
   wallet: 0,
   session: 0,
   bonanzaPool: 0,
@@ -472,7 +479,9 @@ export class NetClient {
       joined: true,
       yourOutcome: r.yourOutcome as HistoryEntry["yourOutcome"],
       yourMultiple: r.yourMultiple === null ? null : Number(r.yourMultiple),
-      yourSeat: r.yourSeat == null ? null : Number(r.yourSeat),
+      yourSeats: Array.isArray(r.yourSeats)
+        ? (r.yourSeats as unknown[]).map(Number).filter((x) => Number.isFinite(x) && x > 0)
+        : null,
       bestMultiple: Number(r.bestMultiple),
       commit: String(r.commit ?? ""),
       observedCommit: this.commits.get(roundId),
