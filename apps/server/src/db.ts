@@ -252,6 +252,30 @@ export class Database {
     return true;
   }
 
+  /**
+   * Debits a withdrawal, refusing to touch UNSETTLED money. Rakeback pays at
+   * the seal of a round that can still crash, and a crashed round claws its
+   * payouts back — which is impossible once the lamports have left on-chain.
+   * So the ledger holds back every payout whose round has not closed: the
+   * balance check and the hold live in ONE statement, because a separate
+   * check-then-debit would reopen the exact race it exists to close (round
+   * crashes between the check and the debit). Returns false untouched when
+   * the settled balance cannot cover it.
+   */
+  debitForWithdrawal(wallet: string, lamports: number): boolean {
+    const changed = this.db
+      .prepare(
+        `UPDATE players SET balance = balance - ?
+          WHERE wallet = ?
+            AND balance - ? >= COALESCE(
+              (SELECT SUM(p.lamports)
+                 FROM rakeback_payouts p JOIN rounds r ON r.id = p.roundId
+                WHERE p.wallet = players.wallet AND r.endedAt IS NULL), 0)`,
+      )
+      .run(lamports, wallet, lamports);
+    return changed.changes > 0;
+  }
+
   setChar(wallet: string, charId: string): void {
     this.db.prepare("UPDATE players SET charId = ? WHERE wallet = ?").run(charId, wallet);
   }

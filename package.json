@@ -24,6 +24,7 @@
     "sim:rake": "tsx packages/sim/src/rake.ts",
     "sim:multi": "tsx packages/sim/src/multi-study.ts",
     "test:bank": "cd tools && node banktest.mjs",
+    "test:hold": "tsx tools/holdtest.mts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json"
   },
   "devDependencies": {

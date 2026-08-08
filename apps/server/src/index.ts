@@ -180,10 +180,17 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   async function handleWithdraw(s: Session, sol: number): Promise<void> {
     if (!house) return;
     const lamports = toLamports(sol);
-    // Debit first, atomically — the balance check and the debit are one SQL
-    // statement, so two racing withdrawals cannot both pass on one balance.
-    if (!db.adjustBalance(s.wallet, -lamports)) {
-      send({ t: "tx", kind: "withdraw", ok: false, sol: 0, note: "not enough balance" });
+    // Debit first, atomically — balance check, unsettled-rakeback hold and
+    // debit are one SQL statement, so neither two racing withdrawals nor a
+    // round crashing mid-request can let clawback-able money leave on-chain.
+    if (!db.debitForWithdrawal(s.wallet, lamports)) {
+      send({
+        t: "tx",
+        kind: "withdraw",
+        ok: false,
+        sol: 0,
+        note: "not enough settled balance — rakeback from a round in play unlocks when it ends",
+      });
       return;
     }
     try {

@@ -103,6 +103,7 @@ npm run sim:invariants  # the martingale + pot conservation, asserted
 npm run sim             # full economics: RTP by strategy, pacing, jackpot
 npm run test:server     # 30 end-to-end checks against a running server
 npm run test:crash      # kills the server mid-round, asserts nobody loses money
+npm run test:hold       # unsettled seal-time rakeback cannot be withdrawn
 npm run test:bank       # real devnet deposit + withdraw round trip
 ```
 
