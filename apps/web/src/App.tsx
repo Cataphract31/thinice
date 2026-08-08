@@ -34,6 +34,9 @@ export default function App(): JSX.Element {
   const [showChars, setShowChars] = useState(false);
   const [showBank, setShowBank] = useState(false);
   const [tab, setTab] = useState<Tab>("roster");
+  // Mobile only: the bottom panel folds to its tab row so the lattice gets
+  // the height back. Desktop's rail ignores this entirely.
+  const [panelOpen, setPanelOpen] = useState(true);
 
   useEffect(() => client.subscribe(setSnap), [client]);
   useEffect(() => {
@@ -151,8 +154,18 @@ export default function App(): JSX.Element {
       {/* Mobile panel. Kept deliberately short: on a phone every row of chrome
           is taken straight out of the lattice, which is the thing people came
           to look at. The roster scrolls, so height here is a luxury. */}
-      <div className="mt-1 h-[124px] shrink-0 px-1.5 lg:hidden">
-        <TabbedPanel snap={snap} tab={tab} onTab={setTab} chat>
+      <div className={`mt-1 shrink-0 px-1.5 lg:hidden ${panelOpen ? "h-[124px]" : ""}`}>
+        <TabbedPanel
+          snap={snap}
+          tab={tab}
+          onTab={(t) => {
+            setTab(t);
+            setPanelOpen(true);
+          }}
+          chat
+          open={panelOpen}
+          onToggleOpen={() => setPanelOpen((o) => !o)}
+        >
           {tab === "roster" ? (
             <Roster snap={snap} onSelect={select} />
           ) : tab === "history" ? (
@@ -452,6 +465,8 @@ function TabbedPanel({
   tab,
   onTab,
   chat = false,
+  open,
+  onToggleOpen,
   children,
 }: {
   snap: Snapshot;
@@ -459,15 +474,19 @@ function TabbedPanel({
   onTab: (t: Tab) => void;
   /** Offer chat as a tab — the mobile layout, which has no room for a rail. */
   chat?: boolean;
+  /** Collapse support (mobile): false hides the body, leaving the tab row. */
+  open?: boolean;
+  onToggleOpen?: () => void;
   children: React.ReactNode;
 }): JSX.Element {
+  const shown = open !== false;
   const tabBtn = (id: Tab, label: string): JSX.Element => (
     <button
       onClick={() => onTab(id)}
       className="label rounded-sm px-2 py-1"
       style={{
-        color: tab === id ? "var(--color-text)" : undefined,
-        background: tab === id ? "var(--color-panel2)" : undefined,
+        color: tab === id && shown ? "var(--color-text)" : undefined,
+        background: tab === id && shown ? "var(--color-panel2)" : undefined,
       }}
     >
       {label}
@@ -475,13 +494,24 @@ function TabbedPanel({
   );
   return (
     <div className="flex h-full min-h-0 flex-col rounded-md bg-[var(--color-panel)]">
-      <div className="flex shrink-0 items-center gap-1 px-1 pt-1">
+      <div className="flex shrink-0 items-center gap-1 px-1 py-1">
         {tabBtn("roster", `roster · ${snap.liveCount} in`)}
         {chat && tabBtn("chat", "chat")}
         {tabBtn("history", "history")}
         {tabBtn("stats", "stats")}
+        {/* The give-me-my-screen-back button: collapses the panel to this
+            row so the lattice takes the height. Tapping any tab reopens. */}
+        {onToggleOpen && (
+          <button
+            onClick={onToggleOpen}
+            aria-label={shown ? "Hide panel" : "Show panel"}
+            className="label ml-auto rounded-sm px-2.5 py-1"
+          >
+            {shown ? "▾" : "▴"}
+          </button>
+        )}
       </div>
-      <div className="min-h-0 flex-1 p-1">{children}</div>
+      {shown && <div className="min-h-0 flex-1 p-1">{children}</div>}
     </div>
   );
 }

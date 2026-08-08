@@ -51,6 +51,13 @@ export function StatsPanel({ snap }: { snap: Snapshot }): JSX.Element {
       </div>
 
       <div className="mt-1.5">
+        {/* The phone top row dropped the session counter to stay thin, so
+            this tab is where it lives — same number desktop shows up top. */}
+        {row(
+          "session p/l",
+          `${snap.session >= 0 ? "+" : ""}${snap.session.toFixed(3)} ◎`,
+          snap.session >= 0 ? "var(--color-profit)" : "var(--color-danger)",
+        )}
         {row("total wagered", `${s.wagered.toFixed(3)} ◎`)}
         {row("total returned", `${s.returned.toFixed(3)} ◎`)}
         {row("rakeback earned", `+${s.revEarned.toFixed(4)} ◎`, "var(--color-cyan)")}

@@ -181,6 +181,20 @@ function WalletButton({ onChange }: { onChange?: () => void }): JSX.Element {
   );
 }
 
+/**
+ * Adaptive pool precision: a young pool grows by thousandths per round, and
+ * at one decimal it sat frozen at "0.0" through its entire infancy — the one
+ * number whose whole job is visibly growing.
+ */
+function poolDigits(pool: number): number {
+  return pool < 1 ? 3 : pool < 100 ? 2 : 1;
+}
+
+/** 37,200 → "37.2k": phone-width numbers for counters that run long. */
+function kfmt(n: number): string {
+  return n >= 10_000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : n.toLocaleString();
+}
+
 function Stat({
   label,
   value,
@@ -205,11 +219,19 @@ function Stat({
  * in both economies. This is the demo's showcase that holding pays — the rev
  * slice streams to you every round whether you entered it or not.
  */
-function TicketsStat({ snap }: { snap: Snapshot }): JSX.Element {
+function TicketsStat({
+  snap,
+  compact = false,
+}: {
+  snap: Snapshot;
+  /** Phone-width display: five-figure counters as 37.2k, not 37,200. */
+  compact?: boolean;
+}): JSX.Element {
   const [open, setOpen] = useState(false);
   const t = snap.tickets;
   const pct = (x: number): string =>
     x > 0 && x < 0.0001 ? "<0.01%" : `${(x * 100).toFixed(2)}%`;
+  const num = (n: number): string => (compact ? kfmt(n) : n.toLocaleString());
 
   return (
     <div className="relative">
@@ -218,13 +240,9 @@ function TicketsStat({ snap }: { snap: Snapshot }): JSX.Element {
         {/* Rev-share tickets never reset, so they run into five figures fast —
             grouped, or the number stops being readable. */}
         <div className="tnum text-[13px] font-semibold">
-          <span className="text-[var(--color-gold)]">
-            {snap.bonanzaTickets.toLocaleString()}
-          </span>
+          <span className="text-[var(--color-gold)]">{num(snap.bonanzaTickets)}</span>
           <span className="text-[var(--color-dim)]"> / </span>
-          <span className="text-[var(--color-cyan)]">
-            {snap.revShareTickets.toLocaleString()}
-          </span>
+          <span className="text-[var(--color-cyan)]">{num(snap.revShareTickets)}</span>
         </div>
       </button>
 
@@ -274,7 +292,19 @@ function TicketsStat({ snap }: { snap: Snapshot }): JSX.Element {
   );
 }
 
-function Stats({ snap }: { snap: Snapshot }): JSX.Element {
+function Stats({
+  snap,
+  mobile = false,
+}: {
+  snap: Snapshot;
+  /**
+   * The phone top row carries only what has nowhere better to live: the
+   * wallet (with its money floats), the bonanza pool (whose bar is hidden
+   * on phones), and the tickets pair. Session P/L moved into the stats tab
+   * — "focus on gameplay" means the chrome above the lattice stays thin.
+   */
+  mobile?: boolean;
+}): JSX.Element {
   // Two money moments float over the wallet, in the game's own colours.
   // The rakeback drip (cyan — the rev-share colour) lands at the SEAL, the
   // instant the rake is collected; the round's own result (profit green /
@@ -321,12 +351,20 @@ function Stats({ snap }: { snap: Snapshot }): JSX.Element {
           </span>
         )}
       </div>
-      <Stat
-        label="session"
-        value={`${snap.session >= 0 ? "+" : ""}${snap.session.toFixed(3)} ◎`}
-        color={snap.session >= 0 ? "var(--color-profit)" : "var(--color-danger)"}
-      />
-      <TicketsStat snap={snap} />
+      {mobile ? (
+        <Stat
+          label="bonanza"
+          value={`${snap.bonanzaPool.toFixed(poolDigits(snap.bonanzaPool))} ◎`}
+          color="var(--color-gold)"
+        />
+      ) : (
+        <Stat
+          label="session"
+          value={`${snap.session >= 0 ? "+" : ""}${snap.session.toFixed(3)} ◎`}
+          color={snap.session >= 0 ? "var(--color-profit)" : "var(--color-danger)"}
+        />
+      )}
+      <TicketsStat snap={snap} compact={mobile} />
     </>
   );
 }
@@ -391,9 +429,9 @@ export function TopBar({
         </div>
       </div>
 
-      {/* Mobile: stats get their own row instead of overflowing sideways. */}
+      {/* Mobile: one thin money row — wallet, bonanza pool, tickets. */}
       <div className="mt-1.5 flex items-center justify-between gap-3 sm:hidden">
-        <Stats snap={snap} />
+        <Stats snap={snap} mobile />
       </div>
     </div>
   );
@@ -471,14 +509,12 @@ export function AutoPanel({
 }
 
 export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
-  // Adaptive precision: a young pool grows by thousandths per round, and at
-  // one decimal it sat frozen at "0.0" through its entire infancy — the one
-  // number whose whole job is visibly growing. More digits while it is
-  // small, fewer as it gets big enough to move its own display.
+  // Hidden on phones: there the pool lives as a stat in the top money row,
+  // and this whole bar was a row of chrome between the player and the ice.
   const pool = snap.bonanzaPool;
-  const digits = pool < 1 ? 3 : pool < 100 ? 2 : 1;
+  const digits = poolDigits(pool);
   return (
-    <div className="breathe mx-3 flex items-center gap-3 rounded-sm bg-gradient-to-r from-[#1b1608] to-[#0f1319] px-3 py-1.5">
+    <div className="breathe mx-3 flex items-center gap-3 rounded-sm bg-gradient-to-r from-[#1b1608] to-[#0f1319] px-3 py-1.5 max-sm:hidden">
       <span className="label text-[var(--color-gold)]">bonanza</span>
       <span className="tnum text-[17px] font-bold text-[var(--color-gold)]">
         {pool.toFixed(digits)} ◎

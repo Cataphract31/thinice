@@ -38,6 +38,31 @@ export function shortAddress(addr: string): string {
 const BOT_NAMES = [
   "frosty", "glacier", "tundra", "drift", "floe", "shiver", "hail", "slush",
 ];
+
+/**
+ * A fixed temperament per bot name, so the table reads as characters rather
+ * than one policy in eight hats — and so an endgame has texture: scared money
+ * scrambles out the moment it is heads-up while the degen sits on a big
+ * target, instead of every bot bailing the instant a 1v1 formed and tying
+ * the human's exit into yet another dead heat.
+ *
+ * target: exit multiple range, drawn fresh each round. panic: the hazard
+ * level where nerves start. nerve: how hard they act on those nerves.
+ * guts: heads-up spine — low folds fast, high holds for the target.
+ */
+const BOT_STYLE: Record<
+  string,
+  { t0: number; t1: number; panic: number; nerve: number; guts: number }
+> = {
+  frosty: { t0: 1.12, t1: 1.55, panic: 0.028, nerve: 0.95, guts: 0.1 },
+  glacier: { t0: 1.35, t1: 2.1, panic: 0.042, nerve: 0.55, guts: 0.35 },
+  tundra: { t0: 1.7, t1: 3.0, panic: 0.055, nerve: 0.4, guts: 0.6 },
+  drift: { t0: 2.4, t1: 5.0, panic: 0.085, nerve: 0.15, guts: 0.95 },
+  floe: { t0: 1.2, t1: 3.8, panic: 0.05, nerve: 0.6, guts: 0.5 },
+  shiver: { t0: 1.25, t1: 1.8, panic: 0.034, nerve: 0.85, guts: 0.2 },
+  hail: { t0: 1.9, t1: 3.4, panic: 0.068, nerve: 0.25, guts: 0.8 },
+  slush: { t0: 1.45, t1: 2.5, panic: 0.048, nerve: 0.5, guts: 0.45 },
+};
 const isBot = (wallet: string): boolean => wallet.startsWith("bot:");
 
 function sha256Hex(s: string): string {
@@ -312,7 +337,10 @@ export class GameServer {
     let seated = 0;
     for (const w of this.seatsOf.keys()) if (isBot(w)) seated++;
     if (seated >= this.botTarget) return;
-    this.nextBotAt = now + 1000 + this.rng.next() * 2200;
+    // Quick enough that the FULL target seats inside one lobby window: at
+    // the old 1-3.2s spacing a 7s lobby only ever seated two or three of
+    // five, and the room never looked as populated as it was configured to.
+    this.nextBotAt = now + 450 + this.rng.next() * 750;
 
     const name = BOT_NAMES[seated % BOT_NAMES.length]!;
     const wallet = `bot:${name}`;
@@ -348,30 +376,31 @@ export class GameServer {
       },
     });
     this.seatsOf.set(wallet, [id]);
-    this.botStrategies.set(id, this.makeBotBrain());
+    this.botStrategies.set(id, this.makeBotBrain(name));
     this.broadcast(true);
   }
 
   /**
-   * A practice bot's exit policy: a target multiple plus nerves that fray as
-   * the hazard climbs. Draws ONLY from the presentation RNG — a strategy that
-   * touched the round's committed stream would shift the elimination sequence
-   * and break every player's replay verification.
+   * A practice bot's exit policy: its named temperament, a target multiple
+   * drawn from that temperament's range, and nerves that fray as the hazard
+   * climbs. Draws ONLY from the presentation RNG — a strategy that touched
+   * the round's committed stream would shift the elimination sequence and
+   * break every player's replay verification.
    */
-  private makeBotBrain(): Strategy {
-    const r = this.rng.next();
-    const target =
-      r < 0.35
-        ? 1.15 + this.rng.next() * 0.4
-        : 1.5 + -Math.log(Math.max(1e-9, this.rng.next())) * 1.2;
-    const panicAt = 0.035 + this.rng.next() * 0.045;
-    const nerve = this.rng.next();
+  private makeBotBrain(name: string): Strategy {
+    const s = BOT_STYLE[name] ?? BOT_STYLE["glacier"]!;
+    const target = s.t0 + this.rng.next() * (s.t1 - s.t0);
+    const panicAt = s.panic + this.rng.next() * 0.015;
     const breakEven = 1 / (1 - totalRake(this.config));
     return (ctx) => {
       if (ctx.tick <= this.config.hazard.graceTicks) return false;
       if (ctx.multiple < breakEven) return false;
       if (ctx.multiple >= target) return true;
-      return ctx.q > panicAt && this.rng.next() < nerve * 0.15;
+      // Heads-up is decided by guts, not by the hazard gauge: the timid
+      // fold within a few ticks, the gutsy sit on their target and make
+      // the human beat them to it.
+      if (ctx.liveCount <= 2) return this.rng.next() < (1 - s.guts) * 0.22;
+      return ctx.q > panicAt && this.rng.next() < s.nerve * 0.15;
     };
   }
 
