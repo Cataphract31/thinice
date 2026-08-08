@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 // deploy quietly fell back to the offline single-player demo. An environment
 // variable still overrides for other deployments; an explicit "demo" opts back
 // into the offline build.
-const raw = process.env.VITE_SERVER_URL ?? "wss://35.184.125.131.sslip.io";
+const raw = process.env.VITE_SERVER_URL ?? "wss://34.70.75.204.sslip.io";
 /** Empty string = no server = the client runs its offline demo. */
 const SERVER_URL = raw === "demo" ? "" : raw;
 
