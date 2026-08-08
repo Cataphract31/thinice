@@ -314,9 +314,11 @@ export class GameServer {
     this.commit = sha256Hex(commitPreimage(this.roundId, this.seedHex, this.rulesHash));
     this.db.openRound(this.roundId, this.commit, Date.now());
 
-    // A fresh crowd size each round, so the practice field breathes instead
-    // of being the same N faces every time.
-    this.botTarget = CONFIG.bots > 0 ? 1 + Math.floor(this.rng.next() * CONFIG.bots) : 0;
+    // Every configured bot, every round. The old "breathing" random draw
+    // could pick 1, and one bot cannot meet the two-wallet minimum: the
+    // lobby then waited forever on a human, which is the exact opposite of
+    // a room that is supposed to run around the clock.
+    this.botTarget = CONFIG.bots;
     this.nextBotAt = Date.now() + 1500;
     this.botStrategies.clear();
 
