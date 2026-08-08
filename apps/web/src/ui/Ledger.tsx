@@ -18,10 +18,28 @@ export function Roster({
   onSelect?: (id: number) => void;
 }): JSX.Element {
   const parentRef = useRef<HTMLDivElement>(null);
+  // One row per OWNER, not per plate: a five-plate wallet showed as five
+  // identical lines. The row wears a ×k badge instead, and represents the
+  // stack by its best-standing plate: live plates all share one multiple
+  // (engine invariant), so a stack with anything still on the ice reads as
+  // "in" at the live number; otherwise its best extraction; otherwise dead.
   const rank = (p: PlayerView): number =>
     p.you ? 0 : p.outcome === "in" ? 1 : p.outcome === "cashed" ? 2 : 3;
-  const rows = [...snap.players].sort(
-    (a, b) => rank(a) - rank(b) || b.multiple - a.multiple,
+  const byOwner = new Map<string, { rep: PlayerView; count: number }>();
+  for (const p of snap.players) {
+    const g = byOwner.get(p.name);
+    if (!g) {
+      byOwner.set(p.name, { rep: p, count: 1 });
+      continue;
+    }
+    g.count++;
+    const better =
+      rank(p) < rank(g.rep) ||
+      (rank(p) === rank(g.rep) && p.multiple > g.rep.multiple);
+    if (better) g.rep = p;
+  }
+  const rows = [...byOwner.values()].sort(
+    (a, b) => rank(a.rep) - rank(b.rep) || b.rep.multiple - a.rep.multiple,
   );
 
   const virt = useVirtualizer({
@@ -38,7 +56,7 @@ export function Roster({
     <div ref={parentRef} className="scroll-fade h-full overflow-y-auto">
       <div className="relative w-full" style={{ height: virt.getTotalSize() }}>
         {virt.getVirtualItems().map((item) => {
-          const p = rows[item.index]!;
+          const { rep: p, count } = rows[item.index]!;
           const color =
             p.outcome === "dead"
               ? "var(--color-danger)"
@@ -70,6 +88,14 @@ export function Roster({
               >
                 {p.name}
               </span>
+              {count > 1 && (
+                <span
+                  className="tnum shrink-0 text-[10px] font-semibold text-[var(--color-dim)]"
+                  style={{ opacity: p.outcome === "dead" ? 0.45 : 1 }}
+                >
+                  ×{count}
+                </span>
+              )}
               <span
                 className="tnum ml-auto shrink-0"
                 style={{
