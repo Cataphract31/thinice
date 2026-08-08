@@ -257,7 +257,9 @@ credit is keyed on the transaction signature, so replaying one credits nothing.
 infrastructure — static hosting, the Node process, nginx/Caddy websocket
 config, TLS, and the two failure modes that waste a day if nobody warns you
 (the server URL is baked in at build time, and a default reverse-proxy config
-silently breaks websockets).
+silently breaks websockets). It also covers the intended opening move: an
+open play-money launch (`BANKING=off` — real multiplayer, fake balances, no
+chain) and the one migration trap when real money later arrives.
 
 Nothing in the code is platform-specific. The `vercel.json` at the root exists
 only because the current free preview deploy runs there; any host can ignore it.

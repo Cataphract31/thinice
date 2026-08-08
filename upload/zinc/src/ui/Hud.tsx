@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import type { AutoSettings, Snapshot } from "@/game/client";
 import { shortAddress } from "@/game/names";
 import { CharArt } from "./Chars";
@@ -275,9 +275,37 @@ function TicketsStat({ snap }: { snap: Snapshot }): JSX.Element {
 }
 
 function Stats({ snap }: { snap: Snapshot }): JSX.Element {
+  // The rakeback drip lands in the balance silently at every round end, which
+  // wastes the entire point of passive income: a number nobody sees move is a
+  // number that never went up. Watch the lifetime-streamed counter and float
+  // each increment over the wallet as it arrives — including for spectators,
+  // who are exactly the people the stream is meant to pull back in.
+  const prevStreamed = useRef<number | null>(null);
+  const [gain, setGain] = useState<{ amt: number; key: number } | null>(null);
+  useEffect(() => {
+    const cur = snap.tickets.revStreamed;
+    // First observation is baseline, never a gain: on connect the counter
+    // jumps from 0 to a lifetime total, and floating THAT would announce a
+    // windfall nobody just received.
+    if (prevStreamed.current !== null && cur - prevStreamed.current > 5e-5) {
+      setGain({ amt: cur - prevStreamed.current, key: Date.now() });
+    }
+    prevStreamed.current = cur;
+  }, [snap.tickets.revStreamed]);
+
   return (
     <>
-      <Stat label="wallet" value={`${snap.wallet.toFixed(3)} ◎`} color="var(--color-zinc-hi)" />
+      <div className="relative">
+        <Stat label="wallet" value={`${snap.wallet.toFixed(3)} ◎`} color="var(--color-zinc-hi)" />
+        {gain && (
+          <span
+            key={gain.key}
+            className="gain-float tnum pointer-events-none absolute -top-3.5 right-0 text-[11px] font-bold text-[var(--color-profit)]"
+          >
+            +{gain.amt.toFixed(4)} ◎
+          </span>
+        )}
+      </div>
       <Stat
         label="session"
         value={`${snap.session >= 0 ? "+" : ""}${snap.session.toFixed(3)} ◎`}

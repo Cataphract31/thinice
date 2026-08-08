@@ -10,7 +10,9 @@ import { RPC_URL, houseBalance, loadHouse, sendWithdrawal, verifyDeposit } from 
 import type { ClientMessage, NetChat, NetHistory, NetState, ServerMessage } from "./protocol.ts";
 
 const db = new Database();
-const house = loadHouse();
+// Play-money mode never creates key material: a box that cannot pay out has
+// no business holding a keypair to steal.
+const house = CONFIG.banking ? loadHouse() : null;
 
 // A round interrupted by a crash left stakes debited and never settled. Refund
 // them before opening anything new: money that silently evaporates on restart
@@ -115,7 +117,9 @@ wss.on("connection", (ws: WebSocket) => {
       t: "ready",
       wallet,
       guest,
-      ...(guest ? {} : { house: house.publicKey.toBase58() }),
+      // No house account offered, no bank panel rendered: the client shows
+      // banking only when this field arrives.
+      ...(guest || !house ? {} : { house: house.publicKey.toBase58() }),
     });
     game.attach(session);
   };
@@ -124,6 +128,7 @@ wss.on("connection", (ws: WebSocket) => {
   let bankBusy = false;
 
   async function handleDeposit(s: Session, sig: string): Promise<void> {
+    if (!house) return;
     const check = await verifyDeposit(sig, s.wallet, house.publicKey);
     if (!check.ok) {
       send({ t: "tx", kind: "deposit", ok: false, sol: 0, note: check.reason ?? "rejected" });
@@ -138,6 +143,7 @@ wss.on("connection", (ws: WebSocket) => {
   }
 
   async function handleWithdraw(s: Session, sol: number): Promise<void> {
+    if (!house) return;
     const lamports = toLamports(sol);
     // Debit first, atomically — the balance check and the debit are one SQL
     // statement, so two racing withdrawals cannot both pass on one balance.
@@ -303,7 +309,8 @@ wss.on("connection", (ws: WebSocket) => {
         // Real wallets only: a guest has no chain identity to receive from or
         // pay to, and crediting a guest from an arbitrary transaction would
         // let anyone bank someone else's transfer under a throwaway id.
-        if (!session || session.guest) return;
+        // No house = play-money server = nothing to deposit into.
+        if (!session || session.guest || !house) return;
         const sig = String(msg.sig ?? "");
         if (!/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(sig)) {
           send({ t: "tx", kind: "deposit", ok: false, sol: 0, note: "bad signature" });
@@ -327,7 +334,7 @@ wss.on("connection", (ws: WebSocket) => {
       }
 
       case "withdraw": {
-        if (!session || session.guest) return;
+        if (!session || session.guest || !house) return;
         const sol = Number(msg.sol);
         // Bounded and truthy: NaN, negatives, dust and absurd sizes all die
         // here rather than reaching the balance SQL or the chain.
@@ -380,11 +387,16 @@ wss.on("connection", (ws: WebSocket) => {
 http.listen(CONFIG.port, () => {
   console.log(`THIN ICE server on :${CONFIG.port}`);
   console.log(`  db     ${CONFIG.dbPath}`);
-  console.log(`  rpc    ${RPC_URL}`);
-  console.log(`  house  ${house.publicKey.toBase58()}`);
-  void houseBalance(house).then((l) =>
-    console.log(`  house balance ${(l / 1e9).toFixed(4)} SOL`),
-  );
+  if (house) {
+    console.log(`  rpc    ${RPC_URL}`);
+    console.log(`  house  ${house.publicKey.toBase58()}`);
+    const h = house;
+    void houseBalance(h).then((l) =>
+      console.log(`  house balance ${(l / 1e9).toFixed(4)} SOL`),
+    );
+  } else {
+    console.log(`  banking OFF — play-money mode, no chain, no house wallet`);
+  }
 });
 
 // Last line of defence. Everything money-related is committed transactionally

@@ -210,6 +210,34 @@ your-host {
 
 ---
 
+## Launching with play money first (no chain at all)
+
+The intended opening move: real multiplayer, real shared database, fake
+balances — and the chain later. This is one environment variable:
+
+```bash
+BANKING=off PORT=8787 DB_PATH=/var/lib/thinice/zinc.db npm run server
+```
+
+With banking off the server never creates a house keypair, never touches an
+RPC, and never offers clients the bank panel (the client renders banking only
+when the server names a house account, so nothing needs changing in the web
+build). Every new wallet or guest is granted `STARTING_BALANCE` (default 5) of
+play money on first sight, and everything else is exactly the real game: one
+shared lobby, the full fairness ceremony, rakeback, jackpot, persistent
+balances per guest id or signed wallet.
+
+**The one trap, and it is a serious one: play-money balances must not survive
+into the real-money era.** The ledger stores balances as plain lamports — it
+does not know or care whether they were ever backed by deposits. If you flip
+`BANKING=on` against the same database later, every point ever granted or won
+during the free period becomes withdrawable SOL, and the house pays out money
+nobody ever put in. When real money arrives, start it on a **fresh
+`DB_PATH`**. If you want to reward the play-money era, do it as a deliberate,
+budgeted airdrop — never by letting the old ledger become real.
+
+---
+
 ## Before real money touches it
 
 The full checklist is in `README.md`. The four that are specifically about

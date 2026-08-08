@@ -39,6 +39,13 @@ export const CONFIG = {
    * lock everyone else out of the round.
    */
   maxPlatesPerWallet: num("MAX_PLATES_PER_WALLET", 5, 1, 50),
+  /**
+   * BANKING=off runs the server as pure play money: no house keypair is ever
+   * created, no RPC is touched, and clients are never offered the bank —
+   * real multiplayer on the real ledger, with balances that are only points.
+   * This is the open-launch mode; the chain comes later or not at all.
+   */
+  banking: (process.env.BANKING ?? "on").toLowerCase() !== "off",
 } as const;
 
 export const LAMPORTS = 1_000_000_000;
