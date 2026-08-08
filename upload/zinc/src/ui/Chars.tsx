@@ -48,13 +48,21 @@ export function CharArt({
       />
     );
   }
+  // In fill mode the placeholder MUST obey the parent frame exactly like the
+  // art does. It used to hardcode a size×size square, so a winner scene that
+  // mounted before the PNG decoded opened oversized and then snapped to the
+  // art's shape mid-scene — with the column centered, the champion visibly
+  // slid to a new middle on any phone slow enough to still be decoding.
   return (
     <span
       aria-hidden
-      className="flex shrink-0 select-none items-center justify-center rounded-full leading-none"
+      className={
+        fill
+          ? "flex aspect-square h-full max-h-full select-none items-center justify-center overflow-hidden rounded-full leading-none"
+          : "flex shrink-0 select-none items-center justify-center rounded-full leading-none"
+      }
       style={{
-        width: size,
-        height: size,
+        ...(fill ? {} : { width: size, height: size }),
         fontSize: size * 0.62,
         background: `hsl(${def.hue} 45% 22% / ${dim ? 0.4 : 0.85})`,
         filter: dim ? "grayscale(0.6) brightness(0.8)" : undefined,
@@ -190,7 +198,10 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
       <div className="win-flash absolute inset-0 bg-white/70" />
 
       {w ? (
-        <div className="relative flex min-h-0 flex-col items-center">
+        // h-full makes this the centering context with a DEFINITE height, so
+        // the art cap below resolves the same way in every browser — and the
+        // champion's centre depends on nothing that loads or arrives late.
+        <div className="relative flex h-full w-full min-h-0 flex-col items-center justify-center">
           {/* Height is capped as a share of the frame, so the champion scales
               down with the phone instead of spilling out of the lattice. The
               base height steps up with the viewport: a champion sized for a
@@ -228,7 +239,7 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
           </div>
         </div>
       ) : (
-        <div className="relative flex flex-col items-center">
+        <div className="relative flex h-full w-full flex-col items-center justify-center">
           <div className="win-slam text-[64px] leading-none lg:text-[92px]">❄️</div>
           <div className="display win-rise mt-3 text-[15px] font-bold tracking-[0.22em] text-[var(--color-danger)] lg:text-[17px]">
             the ice took everyone
@@ -236,10 +247,13 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
         </div>
       )}
 
-      {/* Desktop only. On a phone the lattice frame is shorter than the scene,
-          and this strip was what pushed the verdict text into the art. */}
+      {/* Desktop only — on a phone the lattice frame is shorter than the
+          scene, and this strip was what pushed the verdict text into the art.
+          PINNED to the bottom, outside the centering flow: history lands a
+          beat after the result state, and when this strip appeared as a flex
+          sibling that arrival re-centred the column and nudged the champion. */}
       {champs.length > 1 && (
-        <div className="win-rise relative mt-4 hidden shrink-0 flex-col items-center gap-1.5 lg:flex">
+        <div className="win-rise absolute inset-x-0 bottom-2.5 hidden flex-col items-center gap-1.5 lg:flex">
           <span className="label">recent champions</span>
           <div className="flex items-center gap-1.5">
             {/* The frame owns the size so the strip can scale with the
