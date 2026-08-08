@@ -1,0 +1,48 @@
+{
+  "name": "zinc-games",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @zinc/web",
+    "build": "npm run build --workspace @zinc/web",
+    "sim": "tsx packages/sim/src/run.ts",
+    "sim:invariants": "tsx packages/sim/src/invariants.ts",
+    "sim:fairness": "tsx packages/sim/src/fairness.ts",
+    "server": "npm run start --workspace @zinc/server",
+    "test:server": "node tools/probe.mjs",
+    "test:crash": "cd tools && node crashtest.mjs",
+    "sim:payouts": "tsx packages/sim/src/payouts.ts",
+    "sim:diagnose": "tsx packages/sim/src/diagnose.ts",
+    "sim:pacing": "tsx packages/sim/src/pacing.ts",
+    "sim:sweep": "tsx packages/sim/src/sweep.ts",
+    "sim:composition": "tsx packages/sim/src/composition.ts",
+    "sim:rake": "tsx packages/sim/src/rake.ts",
+    "test:bank": "cd tools && node banktest.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^6.0.5",
+    "bs58": "^6.0.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.19.2",
+    "tweetnacl": "^1.0.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.1",
+    "ws": "^8.21.3"
+  },
+  "dependencies": {
+    "@tanstack/react-virtual": "^3.14.9",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
+}

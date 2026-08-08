@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "@zinc/engine": ["./packages/engine/src/index.ts"]
+    }
+  },
+  // Engine and sim only. The web app is browser code with its own DOM lib and
+  // JSX settings, and is checked by apps/web/tsconfig.json — checking it here
+  // as well just reports every DOM global as missing.
+  "include": ["packages/**/*.ts"]
+}

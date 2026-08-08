@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.vercel/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+
+# Server state: the ledger and the house hot wallet. Never committed.
+*.db
+*.db-wal
+*.db-shm
+house-keypair.json
+
+# Raw art masters. ~36 MB of green-screen generator output that was already
+# chroma-keyed and packed into apps/web/public — nothing here ships, and none
+# of it will ever change. The RECIPE is committed (art-drop/README.md has the
+# exact prompts), so the art is reproducible without carrying the originals in
+# every clone. Keep the folder itself backed up somewhere: it is the only copy
+# of the masters if anyone ever wants to re-crop or add a character.
+art-drop/**/*.jpg
+art-drop/**/*.png

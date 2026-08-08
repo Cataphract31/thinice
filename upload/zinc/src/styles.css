@@ -1,0 +1,275 @@
+@import "tailwindcss";
+
+/**
+ * Palette taken from the subject, not from convention.
+ *
+ * The lattice is ice — a frozen lake the whole field is standing on — so the
+ * scene is glacial blues, and rising danger heats the seams through violet
+ * into crimson. The bonanza is the single warm thing in the freeze, which is
+ * the point of it.
+ */
+@theme {
+  /*
+   * Same hues throughout, lifted in luminance. The palette was sitting a few
+   * points off pure black, which photographs well in a mockup and is grim to
+   * actually sit in for an hour — the surfaces read as absence rather than as
+   * material. These are the identical blue-greys with enough light on them to
+   * look like brushed metal in a room.
+   */
+  --color-pit: #0a1017;
+  --color-panel: #0e1620;
+  --color-panel2: #141f2a;
+  --color-edge: #223343;
+  --color-edge2: #33506a;
+
+  --color-text: #e6eff6;
+  --color-dim: #7891a6;
+
+  /* Rolled zinc */
+  --color-zinc: #4a6478;
+  --color-zinc-hi: #8fb3c7;
+
+  /* You, and safety */
+  --color-cyan: #3fe0d8;
+  --color-profit: #3fe8c0;
+
+  /* Escalating hazard */
+  --color-warn: #9d7bff;
+  --color-danger: #ff2d6f;
+
+  /* The only warm element in the whole product */
+  --color-gold: #ffb63d;
+
+  /*
+   * Mono for every numeral — tabular figures do not reflow while animating,
+   * and monospaced digits are what financial products are read in. Chakra
+   * Petch for everything else: squared, instrument-panel letterforms that
+   * read as game hardware instead of a SaaS landing page (the CEO's verdict
+   * on Inter: generic).
+   */
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --font-display: "Chakra Petch", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--color-pit);
+  color: var(--color-text);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+body {
+  font-size: 14px;
+}
+
+/* Numbers must never reflow while animating. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.display {
+  font-family: var(--font-display);
+  letter-spacing: -0.005em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+/* Numerals stay monospaced wherever they appear. */
+.tnum,
+.tnum * {
+  font-family: var(--font-mono);
+}
+
+.label {
+  font-size: 9.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--color-dim);
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/**
+ * Scrollable without a scrollbar. The affordance is the content itself fading
+ * out at the top and bottom edges — anything cut off visibly continues, which
+ * says "this scrolls" without drawing a rail next to it.
+ */
+.scroll-fade {
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 10px,
+    #000 calc(100% - 14px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 10px,
+    #000 calc(100% - 14px),
+    transparent
+  );
+}
+.scroll-fade::-webkit-scrollbar {
+  display: none;
+}
+
+/* The multiplier's step. A hard snap up, then a settle — it should feel like
+   an impact, not a transition. */
+@keyframes step-jolt {
+  0% {
+    transform: scale(1);
+  }
+  18% {
+    transform: scale(1.075);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.jolt {
+  animation: step-jolt 380ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.slide-in {
+  animation: slide-in 220ms ease-out;
+}
+
+@keyframes gold-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 14px rgba(255, 182, 61, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(255, 182, 61, 0.26);
+  }
+}
+.breathe {
+  animation: gold-breathe 3.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jolt,
+  .ring,
+  .slide-in,
+  .breathe {
+    animation: none !important;
+  }
+}
+
+/* The cooldown ring charges over one tick; when it fills, the roll lands. */
+@keyframes ring-charge {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [style*="ring-charge"] {
+    animation: none !important;
+    /* Static full ring: still coloured by the risk band, just not sweeping. */
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The winner scene: CRT scanlines, one white flash, the champion slamming in
+   oversized then settling, supporting text rising a beat later. */
+.scanlines {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.28) 0 1px,
+    transparent 1px 3px
+  );
+}
+
+@keyframes win-flash {
+  0% {
+    opacity: 0.75;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.win-flash {
+  animation: win-flash 600ms ease-out both;
+}
+
+@keyframes win-slam {
+  0% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(0.94);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.win-slam {
+  animation: win-slam 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes win-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.win-rise {
+  animation: win-rise 420ms 200ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .win-slam,
+  .win-rise {
+    animation: none !important;
+  }
+  .win-flash {
+    animation: none !important;
+    opacity: 0;
+  }
+}
