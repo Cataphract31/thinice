@@ -19,6 +19,12 @@ import { riskScale } from "@/game/risk";
 export interface CellInput {
   id: number;
   state: CellState;
+  /**
+   * Marks the viewer's own plates, whatever their state. Ownership must ride
+   * separately from `state` — a dead plate stops being state "you" but is
+   * still yours, and a relayout that forgets that ejects it from your cluster.
+   */
+  you?: boolean;
 }
 
 export interface LatticeSnapshot {
@@ -368,12 +374,41 @@ export class LatticeRenderer {
 
     this.bounds = { x: startX - r * 1.2, y: startY - r, w: gridW + r * 0.4, h: gridH + r };
 
-    const kept = new Map<number, Cell>();
-    inputs.forEach((input, i) => {
+    // Slot coordinates for the packed block, in column-major order.
+    const slots: { x: number; y: number }[] = [];
+    for (let i = 0; i < n; i++) {
       const col = Math.floor(i / usedRows);
       const row = i % usedRows;
-      const x = startX + col * r * 1.5;
-      const y = startY + row * r * Math.sqrt(3) + (col % 2 ? (r * Math.sqrt(3)) / 2 : 0);
+      slots.push({
+        x: startX + col * r * 1.5,
+        y: startY + row * r * hexH + (col % 2 ? (r * hexH) / 2 : 0),
+      });
+    }
+
+    // Your plates claim the slots nearest the block's centroid — a geometric
+    // anchor, not a position in the join order. The first version parked the
+    // owner's run at the middle of the INPUT ARRAY, and every lobby arrival
+    // moved that midpoint while re-shaping the grid, so the "cluster" hopped
+    // columns all lobby long. Distance-to-centre is stable under reflow: the
+    // grid can re-pack all it likes and your plates re-land in the middle,
+    // adjacent, every time.
+    const cx = slots.reduce((a, s) => a + s.x, 0) / n;
+    const cy = slots.reduce((a, s) => a + s.y, 0) / n;
+    const yourCount = inputs.reduce((a, c) => a + (c.you ? 1 : 0), 0);
+    const byDist = slots
+      .map((s, i) => ({ i, d: (s.x - cx) ** 2 + (s.y - cy) ** 2 }))
+      .sort((a, b) => a.d - b.d || a.i - b.i)
+      .map((s) => s.i);
+    const centerSlots = byDist.slice(0, yourCount);
+    const centerSet = new Set(centerSlots);
+    const restSlots: number[] = [];
+    for (let i = 0; i < n; i++) if (!centerSet.has(i)) restSlots.push(i);
+
+    let yi = 0;
+    let oi = 0;
+    const kept = new Map<number, Cell>();
+    for (const input of inputs) {
+      const { x, y } = slots[input.you ? centerSlots[yi++]! : restSlots[oi++]!]!;
       const prev = this.cells.get(input.id);
       kept.set(input.id, {
         id: input.id,
@@ -386,7 +421,7 @@ export class LatticeRenderer {
         seed: ((input.id * 2654435761) >>> 0) / 4294967296,
         born: prev?.born ?? 0,
       });
-    });
+    }
     this.cells = kept;
   }
 

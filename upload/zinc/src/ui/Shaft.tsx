@@ -43,18 +43,14 @@ export function Shaft({
   useEffect(() => {
     const r = renderer.current;
     if (!r) return;
-    // Your plates cluster: the layout packs cells in array order, so putting
-    // every "you" plate in a contiguous run at the middle of the array lands
-    // them adjacent near the centre of the beehive instead of scattered
-    // wherever join order happened to file them. Deterministic — the same
-    // roster always yields the same order, so relayout never reshuffles.
-    const yours = snap.players.filter((p) => p.you);
-    const others = snap.players.filter((p) => !p.you);
-    const mid = Math.floor(others.length / 2);
-    const ordered = [...others.slice(0, mid), ...yours, ...others.slice(mid)];
     r.update({
-      cells: ordered.map((p) => ({
+      // `you` rides along so the layout can pin your plates to the slots at
+      // the centre of the lattice. The clustering lives in the layout, not in
+      // array order — reordering here moved your block every time the lobby
+      // grew, which read as your plates wandering the board.
+      cells: snap.players.map((p) => ({
         id: p.id,
+        you: p.you,
         state: (p.outcome === "dead"
           ? "dying"
           : p.outcome === "cashed"
