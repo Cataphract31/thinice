@@ -163,7 +163,9 @@ export function ShatterCard({ snap }: { snap: Snapshot }): JSX.Element | null {
   return (
     <div
       key={snap.roundId}
-      className="win-rise pointer-events-none absolute bottom-2 left-2 z-20 flex items-end gap-1.5"
+      // Bottom-RIGHT: the profile card owns the bottom-left corner, and the
+      // two stacked on top of each other whenever you died with a card open.
+      className="win-rise pointer-events-none absolute bottom-2 right-2 z-20 flex flex-row-reverse items-end gap-1.5"
     >
       {/* Same rule as the winner: the frame owns the bounds, not the art. */}
       <div className="h-[64px] max-h-[30%] min-h-[34px] lg:h-[88px]">
