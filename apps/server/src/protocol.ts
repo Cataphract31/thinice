@@ -121,7 +121,7 @@ export interface NetState {
     revStreamed: number;
   };
   nextCommit: string;
-  auto: { enabled: boolean; target: number };
+  auto: { enabled: boolean; target: number; plates: number };
   stats: NetStats;
   /** Humans currently connected, so a lobby of one is visibly a lobby of one. */
   online: number;
@@ -132,7 +132,7 @@ export type ClientMessage =
   | { t: "guest"; id: string }
   | { t: "join" }
   | { t: "cashout" }
-  | { t: "setAuto"; enabled: boolean; target: number }
+  | { t: "setAuto"; enabled: boolean; target: number; plates: number }
   | { t: "setChar"; charId: string }
   /** A line for the room. Cleaned, capped and rate-limited server-side. */
   | { t: "chat"; text: string }

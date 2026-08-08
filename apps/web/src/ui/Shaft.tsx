@@ -43,12 +43,17 @@ export function Shaft({
   useEffect(() => {
     const r = renderer.current;
     if (!r) return;
+    // Everyone's plates group by owner, not just yours: multi-betting is only
+    // legible if a wallet holding four plates LOOKS like a wallet holding four
+    // plates. Sorting by (name, id) is deterministic for a fixed roster, and
+    // the layout packs adjacent array entries into adjacent slots. Your own
+    // plates are position-independent here — the layout pins anything marked
+    // `you` to the centre slots regardless of where it sits in this array.
+    const ordered = [...snap.players].sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : a.id - b.id,
+    );
     r.update({
-      // `you` rides along so the layout can pin your plates to the slots at
-      // the centre of the lattice. The clustering lives in the layout, not in
-      // array order — reordering here moved your block every time the lobby
-      // grew, which read as your plates wandering the board.
-      cells: snap.players.map((p) => ({
+      cells: ordered.map((p) => ({
         id: p.id,
         you: p.you,
         state: (p.outcome === "dead"

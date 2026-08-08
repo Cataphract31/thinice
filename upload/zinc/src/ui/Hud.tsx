@@ -409,6 +409,20 @@ export function AutoPanel({
         className="tnum w-[64px] rounded-sm bg-[var(--color-panel2)] px-1.5 py-1 text-right text-[13px] font-semibold text-[var(--color-text)] outline-none focus:ring-1 focus:ring-[var(--color-cyan)]"
       />
       <span className="label">×</span>
+      {/* How many plates each auto round buys. A select, not a stepper: five
+          discrete values, and the whole range must be visible in one tap. */}
+      <select
+        value={snap.auto.plates}
+        onChange={(e) => onChange({ plates: Number(e.target.value) })}
+        aria-label="Auto plate count"
+        className="tnum rounded-sm bg-[var(--color-panel2)] px-1 py-1 text-[13px] font-semibold text-[var(--color-text)] outline-none focus:ring-1 focus:ring-[var(--color-cyan)]"
+      >
+        {Array.from({ length: Math.max(1, snap.you.plates.max || 5) }, (_, i) => (
+          <option key={i + 1} value={i + 1}>
+            ×{i + 1}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

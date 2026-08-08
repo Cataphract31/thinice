@@ -293,7 +293,15 @@ export class GameServer {
   private autoJoin(): void {
     for (const s of this.uniqueSessions()) {
       const row = this.db.player(s.wallet);
-      if (row.autoEnabled) this.join(s);
+      if (row.autoEnabled) this.autoBuy(s, row.autoPlates ?? 1);
+    }
+  }
+
+  /** Buys up to auto's plate count, stopping at any refusal (cap, funds). */
+  private autoBuy(s: Session, want: number): void {
+    const target = Math.min(Math.max(1, want), CONFIG.maxPlatesPerWallet);
+    while ((this.seatsOf.get(s.wallet)?.length ?? 0) < target) {
+      if (this.join(s) !== null) break;
     }
   }
 
@@ -434,9 +442,11 @@ export class GameServer {
       Auto play buys exactly ONE plate per round; extra breadth is a choice. */
   private autoEnter(): void {
     for (const s of this.uniqueSessions()) {
+      // Any seat means auto already ran (or the player bought by hand); auto
+      // never tops up a position the player chose themselves.
       if (this.seatsOf.has(s.wallet)) continue;
       const row = this.db.player(s.wallet);
-      if (row.autoEnabled) this.join(s);
+      if (row.autoEnabled) this.autoBuy(s, row.autoPlates ?? 1);
     }
   }
 
@@ -808,7 +818,11 @@ export class GameServer {
         revStreamed: toSol(row.revEarned),
       },
       nextCommit: this.commit,
-      auto: { enabled: row.autoEnabled === 1, target: row.autoTarget },
+      auto: {
+        enabled: row.autoEnabled === 1,
+        target: row.autoTarget,
+        plates: row.autoPlates ?? 1,
+      },
       stats: {
         roundsPlayed: row.roundsPlayed,
         roundsWon: row.roundsWon,

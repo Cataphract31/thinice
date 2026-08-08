@@ -146,7 +146,7 @@ const IDLE: Snapshot = {
   chat: [],
   history: [],
   nextCommit: "",
-  auto: { enabled: false, target: 2 },
+  auto: { enabled: false, target: 2, plates: 1 },
   stats: EMPTY_STATS,
   online: 0,
   connected: false,
@@ -626,11 +626,15 @@ export class NetClient {
     const next = { ...this.snap.auto, ...patch };
     if (!Number.isFinite(next.target) || next.target < 1.05) next.target = 1.05;
     if (next.target > 1000) next.target = 1000;
+    const cap = this.snap.you.plates.max || 5;
+    next.plates = Number.isFinite(next.plates)
+      ? Math.min(cap, Math.max(1, Math.round(next.plates)))
+      : 1;
     // Optimistic locally so the control answers instantly; the server's next
     // state message is what actually settles it.
     this.snap = { ...this.snap, auto: next };
     this.emit();
-    this.send({ t: "setAuto", enabled: next.enabled, target: next.target });
+    this.send({ t: "setAuto", enabled: next.enabled, target: next.target, plates: next.plates });
   }
 
   setCharacter(id: string): void {

@@ -20,6 +20,7 @@ export interface PlayerRow {
   charId: string;
   autoEnabled: number;
   autoTarget: number;
+  autoPlates: number;
   roundsPlayed: number;
   roundsWon: number;
   wagered: number;
@@ -134,6 +135,7 @@ export class Database {
     for (const sql of [
       "ALTER TABLE entries ADD COLUMN seat INTEGER NOT NULL DEFAULT 0",
       "ALTER TABLE players ADD COLUMN bonanzaWon INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE players ADD COLUMN autoPlates INTEGER NOT NULL DEFAULT 1",
     ]) {
       try {
         this.db.exec(sql);
@@ -236,10 +238,12 @@ export class Database {
     this.db.prepare("UPDATE players SET charId = ? WHERE wallet = ?").run(charId, wallet);
   }
 
-  setAuto(wallet: string, enabled: boolean, target: number): void {
+  setAuto(wallet: string, enabled: boolean, target: number, plates: number): void {
     this.db
-      .prepare("UPDATE players SET autoEnabled = ?, autoTarget = ? WHERE wallet = ?")
-      .run(enabled ? 1 : 0, target, wallet);
+      .prepare(
+        "UPDATE players SET autoEnabled = ?, autoTarget = ?, autoPlates = ? WHERE wallet = ?",
+      )
+      .run(enabled ? 1 : 0, target, plates, wallet);
   }
 
   setTickets(wallet: string, bonanza: number, revLifetime: number, revWeight: number): void {

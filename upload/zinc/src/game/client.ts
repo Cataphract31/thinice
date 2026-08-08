@@ -106,6 +106,8 @@ export interface AutoSettings {
    * crosses: never below the target, sometimes above it.
    */
   target: number;
+  /** Plates auto play buys each round, 1 up to the per-wallet cap. */
+  plates: number;
 }
 
 export interface Snapshot {
@@ -260,6 +262,7 @@ interface SaveState {
   revWeight: number;
   autoEnabled?: boolean;
   autoTarget?: number;
+  autoPlates?: number;
   charId?: string;
   revStreamed?: number;
   teamWins?: Record<string, number>;
@@ -534,7 +537,7 @@ export class GameClient {
    */
   charId: string = CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)]!.id;
   private charMap = new Map<number, string>();
-  auto: AutoSettings = { enabled: false, target: 2 };
+  auto: AutoSettings = { enabled: false, target: 2, plates: 1 };
 
   private listeners = new Set<(s: Snapshot) => void>();
 
@@ -554,6 +557,7 @@ export class GameClient {
         this.auto.target = save.autoTarget;
       }
       this.auto.enabled = save.autoEnabled === true;
+      this.auto.plates = Math.min(MAX_PLATES, Math.max(1, Math.round(num(save.autoPlates, 1))));
       // charById falls back to the default character on any unknown slug.
       if (save.charId) this.charId = charById(save.charId).id;
       // Display lifetime only. The claim marker (rakebackClaimed) must NOT be
@@ -733,8 +737,17 @@ export class GameClient {
       this.arrivals.set(i, now + this.rng.next() * this.config.timing.lobbyMs * 0.82);
     }
     // Auto-entry walks in the moment the lobby opens, wallet permitting.
-    if (this.auto.enabled) this.join();
+    if (this.auto.enabled) this.autoBuy();
     this.emit();
+  }
+
+  /** Buys plates until auto's count is held, the cap bites, or money runs out. */
+  private autoBuy(): void {
+    while (this.youPlates < this.auto.plates) {
+      const before = this.youPlates;
+      this.join();
+      if (this.youPlates === before) break;
+    }
   }
 
   /**
@@ -980,6 +993,7 @@ export class GameClient {
         revWeight: this.revShare.weightOf(YOU_ID, now),
         autoEnabled: this.auto.enabled,
         autoTarget: this.auto.target,
+        autoPlates: this.auto.plates,
         charId: this.charId,
         revStreamed: this.revStreamedLifetime,
         teamWins: this.teamWins,
@@ -1068,8 +1082,12 @@ export class GameClient {
     if (!Number.isFinite(this.auto.target) || this.auto.target < 1.05) {
       this.auto.target = 1.05;
     }
-    // Flipping auto on mid-lobby should not miss the current round.
-    if (this.auto.enabled && this.phase === "lobby" && this.youPlates === 0) this.join();
+    this.auto.plates = Number.isFinite(this.auto.plates)
+      ? Math.min(MAX_PLATES, Math.max(1, Math.round(this.auto.plates)))
+      : 1;
+    // Flipping auto on mid-lobby should not miss the current round, and
+    // raising the count mid-lobby tops the position up to it.
+    if (this.auto.enabled && this.phase === "lobby") this.autoBuy();
     this.saveState();
     this.emit();
   }

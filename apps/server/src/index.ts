@@ -256,7 +256,11 @@ wss.on("connection", (ws: WebSocket) => {
         // NaN here disables the player's auto-exit without telling them.
         const raw = Number(msg.target);
         const target = Number.isFinite(raw) ? Math.min(1000, Math.max(1.05, raw)) : 2;
-        db.setAuto(session.wallet, Boolean(msg.enabled), target);
+        const rawPlates = Number(msg.plates);
+        const plates = Number.isFinite(rawPlates)
+          ? Math.min(CONFIG.maxPlatesPerWallet, Math.max(1, Math.round(rawPlates)))
+          : 1;
+        db.setAuto(session.wallet, Boolean(msg.enabled), target, plates);
         return;
       }
 
