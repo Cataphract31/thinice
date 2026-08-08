@@ -21,13 +21,11 @@ export interface NetPlayer {
    * profile card. Net includes rakeback and jackpot winnings — the honest
    * "versus the house" number, not just round settlements.
    *
-   * `plates` and `wagered` are ONE fact at a fixed entry (wagered = plates ×
-   * entry), so the card prints them as one line. The style tells — how often
-   * they finish a plate ahead, and how far they have ever ridden one — are
-   * what actually distinguish one stranger from another.
+   * No plate count: entry is fixed, so it is `wagered / entry` — the same
+   * fact in different units, and the card is small. The style tells are what
+   * actually distinguish one stranger from another.
    */
   lifetime?: {
-    plates: number;
     wagered: number;
     net: number;
     /** Share of plates that came back at or above the entry, 0-1. */

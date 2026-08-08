@@ -340,7 +340,6 @@ export class GameServer {
       name: shortAddress(s.wallet),
       charId: row.charId,
       lifetime: {
-        plates: row.roundsPlayed,
         wagered: toSol(row.wagered),
         // Round settlements plus rakeback plus jackpot, minus stakes: the
         // wallet's true lifetime result against this house.

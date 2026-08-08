@@ -347,13 +347,7 @@ function PlayerCard({
         <div className="mt-1.5 space-y-0.5 border-t border-[var(--color-panel2)] pt-1.5">
           {line(
             "wagered",
-            <span className="tnum text-[11px]">
-              {p.lifetime.wagered.toFixed(1)} ◎
-              <span className="text-[var(--color-dim)]">
-                {" "}
-                · {p.lifetime.plates.toLocaleString()} plates
-              </span>
-            </span>,
+            <span className="tnum text-[11px]">{p.lifetime.wagered.toFixed(1)} ◎</span>,
           )}
           {line(
             "banked ahead",

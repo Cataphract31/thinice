@@ -69,12 +69,11 @@ export interface PlayerView {
    * includes rakeback and jackpot winnings — the wallet's true result
    * against the house, not just round settlements.
    *
-   * `plates` and `wagered` are one fact at a fixed entry, so the card prints
-   * them on one line; `hitRate` and `best` are the style tells that actually
+   * No plate count: entry is fixed, so it is `wagered / entry` — the same
+   * fact in different units. `hitRate` and `best` are the style tells that
    * separate a nit from someone who rides every plate into the red zone.
    */
   lifetime?: {
-    plates: number;
     wagered: number;
     net: number;
     /** Share of plates that came back at or above the entry, 0-1. */
@@ -1212,7 +1211,6 @@ export class GameClient {
     if (isYou(id)) {
       const s = this.stats;
       return {
-        plates: s.roundsPlayed,
         wagered: s.wagered,
         net: s.returned + s.revEarned + (s.bonanzaWon ?? 0) - s.wagered,
         hitRate: s.roundsPlayed > 0 ? s.roundsWon / s.roundsPlayed : 0,
@@ -1233,7 +1231,6 @@ export class GameClient {
     // which no exit strategy can actually produce.
     const style = ((h >>> 18) % 1000) / 1000;
     return {
-      plates,
       wagered,
       net: wagered * (rtp - 1),
       hitRate: 0.74 - style * 0.56,

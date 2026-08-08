@@ -213,7 +213,7 @@ else fail(`online count wrong: ${aEnd.online}`);
 // The profile card's data: every seat carries its wallet's lifetime record.
 const anyPlate = aEnd.players.find((p) => !p.you) ?? aEnd.players[0];
 const lt = anyPlate?.lifetime;
-if (lt && ["wagered", "net", "hitRate", "best", "plates"].every((k) => typeof lt[k] === "number")) {
+if (lt && ["wagered", "net", "hitRate", "best"].every((k) => typeof lt[k] === "number")) {
   ok(`plates carry lifetime records (${lt.wagered} ◎ wagered, ${(lt.hitRate * 100).toFixed(0)}% ahead)`);
 } else fail(`plates carry no lifetime record: ${JSON.stringify(lt)}`);
 
