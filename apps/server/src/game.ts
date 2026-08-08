@@ -50,6 +50,8 @@ interface Seat {
   wallet: string;
   name: string;
   charId: string;
+  /** Lifetime record snapshot from join time, shown on the profile card. */
+  lifetime: { plates: number; wagered: number; net: number };
 }
 
 /** A connected human. The socket layer owns the transport; this owns the money. */
@@ -325,16 +327,25 @@ export class GameServer {
     if (this.seats.size >= this.config.field.max) return "the lattice is full";
     const stake = toLamports(this.config.entry);
     const id = this.nextSeatId++;
+    // Read BEFORE the debit, so the lifetime snapshot on the profile card is
+    // "as of stepping on" rather than dipping by one unsettled stake.
+    const row = this.db.player(s.wallet);
     // Debit and entry row commit together, or the seat does not exist.
     if (!this.db.takeEntry(this.roundId, s.wallet, stake, id)) return "not enough balance";
 
     this.db.touch(s.wallet);
-    const row = this.db.player(s.wallet);
     this.seats.set(id, {
       id,
       wallet: s.wallet,
       name: shortAddress(s.wallet),
       charId: row.charId,
+      lifetime: {
+        plates: row.roundsPlayed,
+        wagered: toSol(row.wagered),
+        // Round settlements plus rakeback plus jackpot, minus stakes: the
+        // wallet's true lifetime result against this house.
+        net: toSol(row.returned + row.revEarned + (row.bonanzaWon ?? 0) - row.wagered),
+      },
     });
     this.seatsOf.set(s.wallet, [...mine, id]);
     this.broadcast(true);
@@ -691,6 +702,7 @@ export class GameServer {
         multiple: rake,
         balance: this.config.entry * rake,
         ticksSurvived: 0,
+        lifetime: seat.lifetime,
       };
     }
     return {
@@ -702,6 +714,7 @@ export class GameServer {
       multiple: (p.outcome === "in" ? p.balance : p.cashedOut) / this.config.entry,
       balance: p.outcome === "in" ? p.balance : p.cashedOut,
       ticksSurvived: p.ticksSurvived,
+      lifetime: seat.lifetime,
     };
   }
 

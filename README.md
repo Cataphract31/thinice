@@ -93,7 +93,7 @@ npm run typecheck       # all three projects
 npm run sim:fairness    # RNG quality, replay determinism, jackpot derivation
 npm run sim:invariants  # the martingale + pot conservation, asserted
 npm run sim             # full economics: RTP by strategy, pacing, jackpot
-npm run test:server     # 27 end-to-end checks against a running server
+npm run test:server     # 28 end-to-end checks against a running server
 npm run test:crash      # kills the server mid-round, asserts nobody loses money
 npm run test:bank       # real devnet deposit + withdraw round trip
 ```

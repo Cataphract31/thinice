@@ -64,6 +64,12 @@ export interface PlayerView {
   balance: number;
   /** Ticks spent standing on the ice. Still climbing while they are alive. */
   ticksSurvived: number;
+  /**
+   * Lifetime record as of joining this round, for the profile card. Net
+   * includes rakeback and jackpot winnings — the wallet's true result
+   * against the house, not just round settlements.
+   */
+  lifetime?: { plates: number; wagered: number; net: number };
 }
 
 /** Who the winner scene celebrates once a round ends. */
@@ -1183,6 +1189,31 @@ export class GameClient {
     return isYou(id) ? this.charId : (this.charMap.get(id) ?? CHARACTERS[0]!.id);
   }
 
+  /**
+   * Lifetime record for the profile card. Yours is your real local record;
+   * a bot's is synthesized deterministically from its wallet name — the demo
+   * already invents the wallet, so it invents a history consistent with the
+   * economics (flat entries, RTP-shaped net) rather than showing a blank
+   * card that reads as broken.
+   */
+  private lifetimeOf(id: number): PlayerView["lifetime"] {
+    if (isYou(id)) {
+      const s = this.stats;
+      return {
+        plates: s.roundsPlayed,
+        wagered: s.wagered,
+        net: s.returned + s.revEarned + (s.bonanzaWon ?? 0) - s.wagered,
+      };
+    }
+    const name = this.names.get(id) ?? "player";
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (Math.imul(h, 31) + name.charCodeAt(i)) >>> 0;
+    const plates = 20 + (h % 4800);
+    const wagered = plates * this.config.entry;
+    const rtp = 0.9 + ((h >>> 8) % 1600) / 10000;
+    return { plates, wagered, net: wagered * (rtp - 1) };
+  }
+
   private viewOf(p: Player): PlayerView {
     return {
       id: p.id,
@@ -1193,6 +1224,7 @@ export class GameClient {
       multiple: (p.outcome === "in" ? p.balance : p.cashedOut) / this.config.entry,
       balance: p.outcome === "in" ? p.balance : p.cashedOut,
       ticksSurvived: p.ticksSurvived,
+      lifetime: this.lifetimeOf(p.id),
     };
   }
 
@@ -1216,6 +1248,7 @@ export class GameClient {
               multiple: 1 - totalRake(cfg),
               balance: cfg.entry * (1 - totalRake(cfg)),
               ticksSurvived: 0,
+              lifetime: this.lifetimeOf(e.id),
             })),
             ...Array.from({ length: this.youPlates }, (_, i) => ({
               id: YOU_BASE + i,
@@ -1226,6 +1259,7 @@ export class GameClient {
               multiple: 1 - totalRake(cfg),
               balance: cfg.entry * (1 - totalRake(cfg)),
               ticksSurvived: 0,
+              lifetime: this.lifetimeOf(YOU_BASE + i),
             })),
           ]
         : [];

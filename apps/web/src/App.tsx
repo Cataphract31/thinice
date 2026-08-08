@@ -142,7 +142,7 @@ export default function App(): JSX.Element {
           {/* Always visible, never behind a tab: a PvP room where the other
               players are silent and hidden reads as a single-player game. */}
           <div className="min-h-0 flex-1">
-            <ChatPanel snap={snap} client={client} />
+            <ChatPanel snap={snap} client={client} onSelect={select} />
           </div>
         </aside>
       </div>
@@ -159,7 +159,7 @@ export default function App(): JSX.Element {
           ) : tab === "stats" ? (
             <StatsPanel snap={snap} />
           ) : (
-            <ChatPanel snap={snap} client={client} bare />
+            <ChatPanel snap={snap} client={client} bare onSelect={select} />
           )}
         </TabbedPanel>
       </div>
@@ -310,15 +310,6 @@ function PlayerCard({
       </div>
 
       <div className="mt-2 space-y-0.5 border-t border-[var(--color-panel2)] pt-1.5">
-        {/* Time on the ice, not the entry: every entry is the same fixed
-            amount, so printing it on every card says nothing about anybody. */}
-        {line(
-          p.outcome === "in" ? "on the ice" : "survived",
-          <span className="tnum text-[11px]">
-            {((p.ticksSurvived * TICK_MS) / 1000).toFixed(1)}s
-            <span className="text-[var(--color-dim)]"> · {p.ticksSurvived}t</span>
-          </span>,
-        )}
         {line(
           p.outcome === "in" ? "unrealised" : "profit",
           <span
@@ -344,6 +335,36 @@ function PlayerCard({
           </span>,
         )}
       </div>
+
+      {/* The record, not the stopwatch. A round timer said nothing about
+          anybody; who someone IS at this table is their volume and their
+          lifetime result — rakeback and jackpots included, so the number is
+          their true standing against the house. */}
+      {p.lifetime && (
+        <div className="mt-1.5 space-y-0.5 border-t border-[var(--color-panel2)] pt-1.5">
+          {line(
+            "plates bought",
+            <span className="tnum text-[11px]">{p.lifetime.plates.toLocaleString()}</span>,
+          )}
+          {line(
+            "total wagered",
+            <span className="tnum text-[11px]">{p.lifetime.wagered.toFixed(2)} ◎</span>,
+          )}
+          {line(
+            "lifetime p/l",
+            <span
+              className="tnum text-[11px] font-semibold"
+              style={{
+                color:
+                  p.lifetime.net >= 0 ? "var(--color-profit)" : "var(--color-danger)",
+              }}
+            >
+              {p.lifetime.net >= 0 ? "+" : ""}
+              {p.lifetime.net.toFixed(3)} ◎
+            </span>,
+          )}
+        </div>
+      )}
     </div>
   );
 }

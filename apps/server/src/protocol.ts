@@ -16,6 +16,12 @@ export interface NetPlayer {
   multiple: number;
   balance: number;
   ticksSurvived: number;
+  /**
+   * The wallet's lifetime record as of joining this round, for the plate
+   * profile card. Net includes rakeback and jackpot winnings — the honest
+   * "versus the house" number, not just round settlements.
+   */
+  lifetime?: { plates: number; wagered: number; net: number };
 }
 
 /** Lifetime record, straight out of the database. */

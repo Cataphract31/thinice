@@ -18,11 +18,14 @@ export function ChatPanel({
   snap,
   client,
   bare = false,
+  onSelect,
 }: {
   snap: Snapshot;
   client: Talker;
   /** Inside the mobile tab panel, which already owns the surface and padding. */
   bare?: boolean;
+  /** Opens a speaker's plate profile, same as clicking them on the roster. */
+  onSelect?: (id: number) => void;
 }): JSX.Element {
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -70,20 +73,36 @@ export function ChatPanel({
             </div>
           ) : (
             <div key={m.id} className="flex items-start gap-1.5 px-1 py-0.5">
-              <div className="mt-[1px] shrink-0">
-                <CharArt charId={m.charId} pose="head" size={16} />
-              </div>
-              <div className="min-w-0 text-[12px] leading-snug [overflow-wrap:anywhere]">
-                <span
-                  className="font-semibold"
-                  style={{
-                    color: m.you ? "var(--color-cyan)" : "var(--color-zinc-hi)",
-                  }}
-                >
-                  {m.you ? "YOU" : m.name}
-                </span>{" "}
-                <span className="text-[var(--color-text)]">{m.text}</span>
-              </div>
+              {/* Speaker opens their plate profile, exactly like the roster —
+                  when they hold a plate this round. A speaker who is only
+                  spectating has no plate to profile, so the click is a no-op
+                  rather than an error. Cosmetic lookup by display name is
+                  fine here; nothing money-bearing hangs off it. */}
+              <button
+                type="button"
+                onClick={() => {
+                  const target = m.you
+                    ? snap.players.find((p) => p.you)
+                    : snap.players.find((p) => p.name === m.name);
+                  if (target) onSelect?.(target.id);
+                }}
+                className="flex min-w-0 items-start gap-1.5 text-left"
+              >
+                <div className="mt-[1px] shrink-0">
+                  <CharArt charId={m.charId} pose="head" size={16} />
+                </div>
+                <div className="min-w-0 text-[12px] leading-snug [overflow-wrap:anywhere]">
+                  <span
+                    className="font-semibold hover:underline"
+                    style={{
+                      color: m.you ? "var(--color-cyan)" : "var(--color-zinc-hi)",
+                    }}
+                  >
+                    {m.you ? "YOU" : m.name}
+                  </span>{" "}
+                  <span className="text-[var(--color-text)]">{m.text}</span>
+                </div>
+              </button>
             </div>
           ),
         )}

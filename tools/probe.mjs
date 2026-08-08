@@ -210,6 +210,12 @@ else fail(`stats not recorded (wagered ${aEnd.stats.wagered})`);
 if (aEnd.online >= 2) ok(`online count reflects both players: ${aEnd.online}`);
 else fail(`online count wrong: ${aEnd.online}`);
 
+// The profile card's data: every seat carries its wallet's lifetime record.
+const anyPlate = aEnd.players.find((p) => !p.you) ?? aEnd.players[0];
+if (anyPlate && typeof anyPlate.lifetime?.wagered === "number" && typeof anyPlate.lifetime?.net === "number") {
+  ok(`plates carry lifetime records (sample: ${anyPlate.lifetime.wagered} ◎ wagered)`);
+} else fail(`plates carry no lifetime record: ${JSON.stringify(anyPlate?.lifetime)}`);
+
 // -------------------------------------------------------------- fairness
 await sleep(600);
 const row = alice.history.find((h) => h.roundId === done.roundId);
