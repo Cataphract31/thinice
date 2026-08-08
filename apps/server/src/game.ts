@@ -733,6 +733,22 @@ export class GameServer {
       [...res.players].filter((p) => p.outcome === "cashed").sort((a, b) => b.cashedOut - a.cashedOut)[0];
     const champSeat = champ ? this.seats.get(champ.id) : undefined;
     this.winnerWallet = champSeat?.wallet ?? null;
+
+    // Distinct wallets that banked exactly the champion's extraction. A
+    // simultaneous exit ties to the lamport, and calling one of them "best"
+    // is a coin flip dressed as a verdict — the scene says "dead heat".
+    // Distinct WALLETS: one player's multi-plate cash-out always ties itself.
+    let tied = 1;
+    if (champ && champSeat && champ.lastStanding !== true) {
+      const wallets = new Set<string>();
+      for (const p of res.players) {
+        if (p.outcome !== "cashed") continue;
+        if (Math.abs(p.cashedOut - champ.cashedOut) > 1e-9) continue;
+        const s2 = this.seats.get(p.id);
+        if (s2) wallets.add(s2.wallet);
+      }
+      tied = Math.max(1, wallets.size);
+    }
     this.winner = champ && champSeat
       ? {
           name: champSeat.name,
@@ -747,6 +763,7 @@ export class GameServer {
           lastStanding:
             champ.lastStanding === true ||
             (this.soleOwnerWallet !== null && champSeat.wallet === this.soleOwnerWallet),
+          tied,
         }
       : null;
 

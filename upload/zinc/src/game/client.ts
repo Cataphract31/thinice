@@ -92,6 +92,13 @@ export interface WinnerInfo {
   amount: number;
   /** True: outlasted everyone. False: nobody survived, best extraction shown. */
   lastStanding: boolean;
+  /**
+   * Distinct wallets sharing the top extraction. Everyone extracting at the
+   * same multiple is common (any simultaneous exit ties exactly), and
+   * crowning one of them "best" is a coin flip dressed as a verdict — above
+   * 1 the scene says "dead heat" instead.
+   */
+  tied?: number;
 }
 
 export interface BonanzaEvent {
@@ -981,6 +988,19 @@ export class GameClient {
         [...res.players]
           .filter((p) => p.outcome === "cashed")
           .sort((a, b) => b.cashedOut - a.cashedOut)[0];
+      // Distinct owners at the champion's exact extraction — same rule as
+      // the server: a shared top exit renders "dead heat", never a coin-flip
+      // "best", and one owner's multi-plate cash-out never ties itself.
+      let tied = 1;
+      if (champ && champ.lastStanding !== true) {
+        const owners = new Set<string>();
+        for (const p of res.players) {
+          if (p.outcome !== "cashed") continue;
+          if (Math.abs(p.cashedOut - champ.cashedOut) > 1e-9) continue;
+          owners.add(this.ownerOf(p.id));
+        }
+        tied = Math.max(1, owners.size);
+      }
       this.winner = champ
         ? {
             name: this.names.get(champ.id) ?? "player",
@@ -993,6 +1013,7 @@ export class GameClient {
             lastStanding:
               champ.lastStanding === true ||
               (this.soleOwnerKey !== null && this.ownerOf(champ.id) === this.soleOwnerKey),
+            tied,
           }
         : null;
       if (this.winner) {

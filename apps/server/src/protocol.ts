@@ -130,6 +130,8 @@ export interface NetState {
     multiple: number;
     amount: number;
     lastStanding: boolean;
+    /** Distinct wallets sharing the top extraction; >1 renders "dead heat". */
+    tied?: number;
   } | null;
   teamWins: Record<string, number>;
   tickets: {

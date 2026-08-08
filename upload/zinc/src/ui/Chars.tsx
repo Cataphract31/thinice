@@ -203,7 +203,11 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
             className="display win-rise mt-3 text-[15px] font-bold tracking-[0.22em] lg:text-[17px]"
             style={{ color: w.you ? "var(--color-cyan)" : "var(--color-text)" }}
           >
-            {w.lastStanding ? "last one standing" : "best extraction"}
+            {w.lastStanding
+              ? "last one standing"
+              : (w.tied ?? 1) > 1
+                ? "dead heat"
+                : "best extraction"}
           </div>
           <div className="win-rise mt-1 flex items-baseline gap-2.5">
             <span
@@ -211,6 +215,9 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
               style={{ color: w.you ? "var(--color-cyan)" : "var(--color-text)" }}
             >
               {w.you ? "YOU" : w.name}
+              {(w.tied ?? 1) > 1 && (
+                <span className="text-[var(--color-dim)]"> +{(w.tied ?? 1) - 1} more</span>
+              )}
             </span>
             <span className="tnum text-[17px] font-bold text-[var(--color-profit)] lg:text-[20px]">
               {w.multiple.toFixed(2)}×

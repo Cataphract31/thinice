@@ -456,11 +456,17 @@ export function AutoPanel({
 }
 
 export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
+  // Adaptive precision: a young pool grows by thousandths per round, and at
+  // one decimal it sat frozen at "0.0" through its entire infancy — the one
+  // number whose whole job is visibly growing. More digits while it is
+  // small, fewer as it gets big enough to move its own display.
+  const pool = snap.bonanzaPool;
+  const digits = pool < 1 ? 3 : pool < 100 ? 2 : 1;
   return (
     <div className="breathe mx-3 flex items-center gap-3 rounded-sm bg-gradient-to-r from-[#1b1608] to-[#0f1319] px-3 py-1.5">
       <span className="label text-[var(--color-gold)]">bonanza</span>
       <span className="tnum text-[17px] font-bold text-[var(--color-gold)]">
-        {snap.bonanzaPool.toFixed(1)} ◎
+        {pool.toFixed(digits)} ◎
       </span>
       <span className="label ml-auto hidden sm:inline">
         one ticket takes all
