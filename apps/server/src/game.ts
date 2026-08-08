@@ -299,20 +299,15 @@ export class GameServer {
     this.broadcast(true);
   }
 
-  /** Any seat held by a human. Practice bots alone must never seal a round. */
-  private hasHumanSeat(): boolean {
-    for (const w of this.seatsOf.keys()) if (!isBot(w)) return true;
-    return false;
-  }
-
   /**
-   * Trickles practice bots into the lobby, one every second or two, while a
-   * human is CONNECTED — a visitor should find a live room, but a server
-   * nobody is watching plays no theatre for the empty air.
+   * Trickles practice bots into the lobby, one every second or two — with or
+   * without an audience. The room runs around the clock: every bot round
+   * feeds the rakeback stream and the bonanza pool, so ticket holders keep
+   * earning while they sleep, and a visitor always walks into a live game
+   * instead of an empty lobby waiting for strangers.
    */
   private fillBots(now: number): void {
     if (this.botTarget <= 0 || now < this.nextBotAt) return;
-    if (this.sessions.size === 0) return;
     if (this.seats.size >= this.config.field.max) return;
     let seated = 0;
     for (const w of this.seatsOf.keys()) if (isBot(w)) seated++;
@@ -332,6 +327,7 @@ export class GameServer {
     const id = this.nextSeatId++;
     if (!this.db.takeEntry(this.roundId, wallet, stake, id)) return;
     const fresh = this.db.player(wallet);
+    const botLid = this.ledgerIds.get(wallet);
     this.seats.set(id, {
       id,
       wallet,
@@ -339,12 +335,16 @@ export class GameServer {
       charId: fresh.charId,
       lifetime: {
         wagered: toSol(fresh.wagered),
-        net: toSol(fresh.returned + fresh.revEarned - fresh.wagered),
+        net: toSol(fresh.returned + fresh.revEarned + (fresh.bonanzaWon ?? 0) - fresh.wagered),
         hitRate: fresh.roundsPlayed > 0 ? fresh.roundsWon / fresh.roundsPlayed : 0,
         best: fresh.bestMultiple,
-        jackpots: 0,
-        // Honest zeroes: bots fund the pools and hold no tickets in either.
-        tickets: { bon: 0, rev: 0 },
+        jackpots: toSol(fresh.bonanzaWon ?? 0),
+        // Bots are full participants in the play-money economies, so their
+        // cards show real holdings from the same ledgers as everyone else's.
+        tickets: {
+          bon: botLid === undefined ? 0 : this.jackpot.ticketsOf(botLid),
+          rev: botLid === undefined ? 0 : this.revShare.lifetimeOf(botLid),
+        },
       },
     });
     this.seatsOf.set(wallet, [id]);
@@ -594,12 +594,17 @@ export class GameServer {
     // here separates the two money moments a player experiences: guaranteed
     // drip now, round result later. Ticket credit precedes the distribution
     // (this round's entrants share in this round's stream, as certified by
-    // the sim), bots fund but never hold, and every payout is recorded per
-    // round so a crash mid-round claws the whole thing back. Weights are NOT
-    // persisted here: if the round dies, its credits must die with it.
+    // the sim), and every payout is recorded per round so a crash mid-round
+    // claws the whole thing back. Weights are NOT persisted here: if the
+    // round dies, its credits must die with it.
+    //
+    // Bots earn tickets like anyone else. This is the play-money room's
+    // honesty rule: bots play the same economy they sit in — same rake, same
+    // rakeback, same jackpot odds per entry — so nothing about the numbers a
+    // visitor watches is staged. Their earnings recycle into their own play.
     const sealMs = Date.now();
     for (const seat of this.seats.values()) {
-      if (!isBot(seat.wallet)) this.revShare.credit(this.ledgerId(seat.wallet), sealMs);
+      this.revShare.credit(this.ledgerId(seat.wallet), sealMs);
     }
     this.revShare.distribute(
       this.seats.size * this.config.entry * this.config.rake.revShare,
@@ -631,9 +636,10 @@ export class GameServer {
         // several plates, and a round whose every plate is one person is not
         // PvP — it is one player paying rake to shuffle money between their
         // own hands. Too thin to be a game: roll the lobby instead. Practice
-        // bots count toward the minimum (that is their purpose) but can never
-        // carry a round alone: at least one plate must be a human's.
-        if (this.seatsOf.size >= CONFIG.minEntrants && this.hasHumanSeat()) this.seal();
+        // bots count toward the minimum and may carry a round alone: the
+        // play-money room runs continuously so the ticket economies never
+        // stop paying, humans present or not.
+        if (this.seatsOf.size >= CONFIG.minEntrants) this.seal();
         else this.phaseEnd = now + this.config.timing.lobbyMs;
       }
     } else if (this.phase === "live") {
@@ -722,14 +728,13 @@ export class GameServer {
     for (const p of res.players) {
       const seat = this.seats.get(p.id);
       if (!seat) continue;
-      // Practice bots fund both pools (their rake points flow in like any
-      // entry) but hold no tickets in either — a bot must never win the
-      // jackpot or skim the rakeback stream. Real players' odds only improve
-      // for having them at the table. (Rev-share tickets were credited at
-      // the seal, alongside the stream they share in.)
-      if (!isBot(seat.wallet)) {
-        this.jackpot.credit(this.ledgerId(seat.wallet), p.bonanzaTickets);
-      }
+      // Bots accrue bonanza tickets too — full participants, same odds per
+      // entry as anyone. A bot CAN win the jackpot: it is play money, the
+      // fire is drawn from the committed seed either way, and a rigged-away
+      // bot would quietly inflate every human's apparent odds — the exact
+      // kind of staging this room refuses. (Rev-share tickets were credited
+      // at the seal, alongside the stream they share in.)
+      this.jackpot.credit(this.ledgerId(seat.wallet), p.bonanzaTickets);
       if (!this.settled.has(p.id)) {
         this.settled.add(p.id);
         this.settleExit(
@@ -862,7 +867,11 @@ export class GameServer {
     this.bonanzaWallet = winnerWallet || null;
     this.bonanza = {
       amount: fire.amount,
-      winner: shortAddress(winnerWallet || "?"),
+      // A bot winner is announced by its table name, not a wallet-shaped
+      // truncation of "bot:frosty" — the label rule holds everywhere.
+      winner: isBot(winnerWallet)
+        ? `bot·${winnerWallet.slice(4)}`
+        : shortAddress(winnerWallet || "?"),
       youWon: false,
       at: Date.now(),
     };

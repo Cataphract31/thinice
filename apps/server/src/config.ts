@@ -47,13 +47,14 @@ export const CONFIG = {
    */
   banking: (process.env.BANKING ?? "on").toLowerCase() !== "off",
   /**
-   * Up to this many PRACTICE bots may fill a lobby (each round draws a random
-   * count). 0 — the default — means bots do not exist, and the promise in the
-   * README ("no hidden bots") is enforced by three structural rules wherever
-   * they are enabled: practice bots are labelled `bot·name` on every surface,
-   * they never hold jackpot or rakeback tickets (they fund both pools and can
-   * win neither), and the server REFUSES TO BOOT with bots and banking both
-   * on — a bot may never share a table with real money.
+   * Up to this many PRACTICE bots keep the play-money room alive. 0 — the
+   * default — means bots do not exist. Where enabled, they play CONTINUOUSLY
+   * (humans present or not, so the ticket economies never stop paying) as
+   * full participants: same rake, same rakeback and jackpot tickets, same
+   * odds per entry. The README's "no hidden bots" promise is enforced by two
+   * structural rules: every practice bot is labelled `bot·name` on every
+   * surface, and the server REFUSES TO BOOT with bots and banking both on —
+   * a bot may never share a table with real money.
    */
   bots: num("BOTS", 0, 0, 8),
 } as const;

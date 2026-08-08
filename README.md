@@ -12,13 +12,15 @@ It is player-versus-player. The house does not take a position in any round —
 it takes a fixed cut of the entries and nothing else. **There are no hidden
 bots.** A lobby is real people or it is empty — with one loudly-declared
 exception: in play-money mode the server may seat a few PRACTICE bots
-(`BOTS=n`, default 0) so early testers have someone to play against. Three
-structural rules keep that honest: every practice bot is labelled `bot·name`
-on every surface, bots fund the jackpot and rakeback pools but can hold
-tickets in neither (a bot can never win the bonanza), and the server refuses
-to boot with bots and banking enabled together — a bot may never share a
-table with real money. Bots cannot carry a round alone; at least one plate
-must be a human's.
+(`BOTS=n`, default 0) so the room is always live. Two structural rules keep
+that honest: every practice bot is labelled `bot·name` on every surface, and
+the server refuses to boot with bots and banking enabled together — a bot may
+never share a table with real money. Within the play-money room the bots are
+FULL participants in the same economy they sit in: same rake, same rakeback
+tickets, same bonanza odds per entry (a bot can win the jackpot — excluding
+them would quietly stage every human's apparent odds). They play continuously,
+humans present or not, so the ticket economies pay around the clock and a
+visitor always walks into a running game.
 
 ---
 
