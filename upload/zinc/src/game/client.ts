@@ -65,6 +65,13 @@ export interface PlayerView {
   /** Ticks spent standing on the ice. Still climbing while they are alive. */
   ticksSurvived: number;
   /**
+   * True for the plate(s) that stood until the very end — the engine's sole
+   * survivor, or a sole owner's auto-banked plates. Everyone else's "cashed"
+   * means THEY LEFT, and the end-screen board draws the two differently:
+   * leavers ghost out, the one who stood stays standing.
+   */
+  lastStanding?: boolean;
+  /**
    * Lifetime record as of joining this round, for the profile card. Net
    * includes rakeback and jackpot winnings — the wallet's true result
    * against the house, not just round settlements.
@@ -1320,6 +1327,11 @@ export class GameClient {
       multiple: (p.outcome === "in" ? p.balance : p.cashedOut) / this.config.entry,
       balance: p.outcome === "in" ? p.balance : p.cashedOut,
       ticksSurvived: p.ticksSurvived,
+      lastStanding:
+        p.lastStanding === true ||
+        (this.soleOwnerKey !== null &&
+          this.ownerOf(p.id) === this.soleOwnerKey &&
+          p.outcome === "cashed"),
       lifetime: this.lifetimeOf(p.id),
     };
   }

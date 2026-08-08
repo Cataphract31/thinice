@@ -16,6 +16,8 @@ export interface NetPlayer {
   multiple: number;
   balance: number;
   ticksSurvived: number;
+  /** Stood to the very end (sole survivor / sole owner) — see PlayerView. */
+  lastStanding?: boolean;
   /**
    * The wallet's lifetime record as of joining this round, for the plate
    * profile card. Net includes rakeback and jackpot winnings — the honest

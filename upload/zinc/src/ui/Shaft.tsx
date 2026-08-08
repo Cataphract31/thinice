@@ -63,10 +63,18 @@ export function Shaft({
         you: p.you,
         group: p.name,
         hue: !p.you && (counts.get(p.name) ?? 0) > 1 ? hueOf(p.name) : undefined,
+        // "Cashed" states two different endings: LEAVING mid-round, or being
+        // auto-banked as the one who outlasted everyone. The board must not
+        // conflate them — on the end screen the leavers ghost out and the
+        // stander keeps standing, so the picture matches the verdict.
         state: (p.outcome === "dead"
           ? "dying"
           : p.outcome === "cashed"
-            ? "cashed"
+            ? p.lastStanding
+              ? p.you
+                ? "you"
+                : "live"
+              : "cashed"
             : p.you
               ? "you"
               : "live") as CellState,

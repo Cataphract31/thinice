@@ -1032,7 +1032,12 @@ export class LatticeRenderer {
         if (k >= 1) continue;
       } else if (c.state === "cashed") {
         const k = Math.min(1, c.t / 0.55);
-        alpha *= 1 - k * 0.45;
+        // Mid-round a vacated plate stays a legible ghost — the sheet reads
+        // as one surface with people missing. On the RESULT screen the same
+        // ghost read as "still standing" under the dark overlay, flatly
+        // contradicting the verdict beside it, so leavers all but vanish.
+        const fade = this.snap.phase === "result" ? 0.9 : 0.45;
+        alpha *= 1 - k * fade;
         dy = -k * 3;
       } else if (c.state === "you") {
         scale *= 1 + Math.sin(this.time * 3 + c.seed * 6) * 0.018;

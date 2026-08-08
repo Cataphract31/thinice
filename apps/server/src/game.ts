@@ -916,6 +916,13 @@ export class GameServer {
       multiple: (p.outcome === "in" ? p.balance : p.cashedOut) / this.config.entry,
       balance: p.outcome === "in" ? p.balance : p.cashedOut,
       ticksSurvived: p.ticksSurvived,
+      // Sole-owner endings count: those plates stood until every other
+      // wallet was gone, which is the same claim the flag makes.
+      lastStanding:
+        p.lastStanding === true ||
+        (this.soleOwnerWallet !== null &&
+          seat.wallet === this.soleOwnerWallet &&
+          p.outcome === "cashed"),
       lifetime: seat.lifetime,
     };
   }
