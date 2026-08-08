@@ -21,3 +21,7 @@ house-keypair.json
 # of the masters if anyone ever wants to re-crop or add a character.
 art-drop/**/*.jpg
 art-drop/**/*.png
+
+# Python bytecode from the art pipeline
+__pycache__/
+*.pyc
