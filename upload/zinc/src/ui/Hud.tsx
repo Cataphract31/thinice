@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import type { AutoSettings, Snapshot } from "@/game/client";
+import { setWalletOptIn, walletOptedIn } from "@/game/net";
 import { shortAddress } from "@/game/names";
 import { CharArt } from "./Chars";
 import {
@@ -141,8 +142,11 @@ function phantom(): PhantomProvider | null {
 function WalletButton({ onChange }: { onChange?: () => void }): JSX.Element {
   const [addr, setAddr] = useState<string | null>(null);
 
-  // Reconnect silently if the player has approved this site before.
+  // Reconnect silently ONLY for players who explicitly connected before.
+  // Merely having Phantom installed must never start a wallet conversation:
+  // everyone is a guest until they press this button.
   useEffect(() => {
+    if (!walletOptedIn()) return;
     phantom()
       ?.connect({ onlyIfTrusted: true })
       .then((r) => setAddr(r.publicKey.toString()))
@@ -157,12 +161,14 @@ function WalletButton({ onChange }: { onChange?: () => void }): JSX.Element {
     }
     if (addr) {
       await p.disconnect().catch(() => {});
+      setWalletOptIn(false);
       setAddr(null);
       onChange?.();
       return;
     }
     try {
       const r = await p.connect();
+      setWalletOptIn(true);
       setAddr(r.publicKey.toString());
       onChange?.();
     } catch {
@@ -398,7 +404,7 @@ export function TopBar({
         </div>
         {/* Round 0 does not exist — the counter increments before the first
             lobby opens — so it must not be shown while still connecting. */}
-        <div className="label">{snap.roundId > 0 ? `#${snap.roundId}` : "—"}</div>
+        <div className="label">{snap.roundId > 0 ? `#${snap.roundId}` : "-"}</div>
 
         {/* Desktop: stats inline. */}
         <div className="ml-auto hidden items-center gap-4 sm:flex">

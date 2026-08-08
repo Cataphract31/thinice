@@ -162,10 +162,14 @@ export const DEFAULT_CONFIG: GameConfig = {
     // Matched to the bonanza denomination for the same reason. Shares are
     // ratios, so this changes nobody's payout by a lamport.
     ticketsPerEntry: 200,
-    // Was 75. Shortened so early-cohort weight fades faster: the measured
-    // tail for a quitter was ~1.6x their active-period rakeback at 75d,
-    // which made early players a little too dominant over later cohorts.
-    halfLifeDays: 60,
+    // Was 75, then 60. Shortened again so early-cohort weight fades faster:
+    // the measured tail for a quitter at 75d was ~1.6x their active-period
+    // rakeback, which made early players too dominant over later cohorts.
+    // At 45d a quitter's slice is a quarter at three months and ~6% at six —
+    // "about three months of tail" without a hard cliff, which the O(1)
+    // decay-normalised ledger cannot express anyway (a cliff needs per-ticket
+    // sweeps, and hands a player the day their stream visibly dies).
+    halfLifeDays: 45,
   },
   // tickMs is a pure clock knob: it changes wall-clock pacing without touching
   // a single probability, so game feel can be tuned independently of economics.

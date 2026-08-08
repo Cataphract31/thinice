@@ -100,6 +100,31 @@ type PhantomProvider = {
   signAndSendTransaction(tx: unknown): Promise<{ signature: string }>;
 };
 
+/**
+ * Wallet auth is OPT-IN, remembered per browser. Without this the handshake
+ * ran at every socket open, so anyone with Phantom installed got a signature
+ * popup before they had seen the game at all. Everyone starts as a guest;
+ * clicking connect sets the flag, disconnecting clears it.
+ */
+const WALLET_OPTIN_KEY = "zinc.walletOptIn";
+
+export function walletOptedIn(): boolean {
+  try {
+    return localStorage.getItem(WALLET_OPTIN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setWalletOptIn(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(WALLET_OPTIN_KEY, "1");
+    else localStorage.removeItem(WALLET_OPTIN_KEY);
+  } catch {
+    /* session-only opt-in still works via the fresh handshake */
+  }
+}
+
 function phantom(): PhantomProvider | null {
   const w = window as unknown as {
     phantom?: { solana?: PhantomProvider };
@@ -408,7 +433,9 @@ export class NetClient {
     // the wallet holder silently ends up seated as a guest.
     const origin = this.ws;
     const stillOurs = (): boolean => this.ws === origin && origin?.readyState === WebSocket.OPEN;
-    const p = phantom();
+    // Guest until proven otherwise: the wallet path only runs for players
+    // who explicitly connected one. Beta is guest-first.
+    const p = walletOptedIn() ? phantom() : null;
     if (p) {
       try {
         const res = await p.connect({ onlyIfTrusted: true }).catch(() => null);

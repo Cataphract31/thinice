@@ -292,9 +292,33 @@ body {
   animation: win-rise 420ms 200ms ease-out both;
 }
 
+/* The tutorial's rakeback drip: a small credit rising into the wallet
+   number, looping — the "number goes up while you sleep" pitch as motion. */
+@keyframes drip-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(36px);
+  }
+  16% {
+    opacity: 1;
+  }
+  68% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.drip {
+  bottom: 40px;
+  animation: drip-rise 3.4s ease-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .win-slam,
-  .win-rise {
+  .win-rise,
+  .drip {
     animation: none !important;
   }
   .win-flash {

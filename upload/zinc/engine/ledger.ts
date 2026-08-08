@@ -182,7 +182,7 @@ export class RevShareLedger {
   }
 
   /**
-   * Flush every four half-lives — about eight months at the shipped 60-day
+   * Flush every four half-lives — about six months at the shipped 45-day
    * setting, so O(holders) work roughly once a year, against the alternative
    * of silently paying nobody. Four half-lives is far inside the range where
    * the arithmetic is still exact, so this never runs late.

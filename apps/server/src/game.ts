@@ -347,38 +347,48 @@ export class GameServer {
     const name = BOT_NAMES[seated % BOT_NAMES.length]!;
     const wallet = `bot:${name}`;
     if (this.seatsOf.has(wallet)) return;
+    // A couple of stacks per room, never a bot whale: mostly singles, about
+    // one in five buys a second plate, one in fourteen a third. Puts owner
+    // clusters and cash-out-all behaviour on the ice even with no humans.
+    const roll = this.rng.next();
+    const plates = roll < 0.72 ? 1 : roll < 0.93 ? 2 : 3;
+    const stake = toLamports(this.config.entry);
     const row = this.db.player(wallet);
     // Play money is minted for a broke bot: its losses flow to real players
     // and its stakes fund the pools, so the float has to come from somewhere.
-    if (row.balance < toLamports(this.config.entry)) {
+    if (row.balance < stake * plates) {
       this.db.adjustBalance(wallet, toLamports(1));
     }
-    const stake = toLamports(this.config.entry);
-    const id = this.nextSeatId++;
-    if (!this.db.takeEntry(this.roundId, wallet, stake, id)) return;
     const fresh = this.db.player(wallet);
     const botLid = this.ledgerIds.get(wallet);
-    this.seats.set(id, {
-      id,
-      wallet,
-      name: `bot·${name}`,
-      charId: fresh.charId,
-      lifetime: {
-        wagered: toSol(fresh.wagered),
-        net: toSol(fresh.returned + fresh.revEarned + (fresh.bonanzaWon ?? 0) - fresh.wagered),
-        hitRate: fresh.roundsPlayed > 0 ? fresh.roundsWon / fresh.roundsPlayed : 0,
-        best: fresh.bestMultiple,
-        jackpots: toSol(fresh.bonanzaWon ?? 0),
-        // Bots are full participants in the play-money economies, so their
-        // cards show real holdings from the same ledgers as everyone else's.
-        tickets: {
-          bon: botLid === undefined ? 0 : this.jackpot.ticketsOf(botLid),
-          rev: botLid === undefined ? 0 : this.revShare.lifetimeOf(botLid),
-        },
+    const lifetime = {
+      wagered: toSol(fresh.wagered),
+      net: toSol(fresh.returned + fresh.revEarned + (fresh.bonanzaWon ?? 0) - fresh.wagered),
+      hitRate: fresh.roundsPlayed > 0 ? fresh.roundsWon / fresh.roundsPlayed : 0,
+      best: fresh.bestMultiple,
+      jackpots: toSol(fresh.bonanzaWon ?? 0),
+      // Bots are full participants in the play-money economies, so their
+      // cards show real holdings from the same ledgers as everyone else's.
+      tickets: {
+        bon: botLid === undefined ? 0 : this.jackpot.ticketsOf(botLid),
+        rev: botLid === undefined ? 0 : this.revShare.lifetimeOf(botLid),
       },
-    });
-    this.seatsOf.set(wallet, [id]);
-    this.botStrategies.set(id, this.makeBotBrain(name));
+    };
+    // ONE brain across the whole stack: a multi-plate owner decides once per
+    // tick and every plate follows, exactly like the human cash-out-all
+    // button. Separate brains would scatter one owner's exits across ticks.
+    const brain = this.makeBotBrain(name);
+    const ids: number[] = [];
+    for (let i = 0; i < plates; i++) {
+      if (this.seats.size >= this.config.field.max) break;
+      const id = this.nextSeatId++;
+      if (!this.db.takeEntry(this.roundId, wallet, stake, id)) break;
+      this.seats.set(id, { id, wallet, name: `bot·${name}`, charId: fresh.charId, lifetime });
+      this.botStrategies.set(id, brain);
+      ids.push(id);
+    }
+    if (ids.length === 0) return;
+    this.seatsOf.set(wallet, ids);
     this.broadcast(true);
   }
 
@@ -394,15 +404,25 @@ export class GameServer {
     const target = s.t0 + this.rng.next() * (s.t1 - s.t0);
     const panicAt = s.panic + this.rng.next() * 0.015;
     const breakEven = 1 / (1 - totalRake(this.config));
+    // Memoised per tick: a multi-plate stack shares this one closure, and
+    // the random panic path must not roll separately per plate or one
+    // owner's exits scatter across ticks instead of banking together.
+    let decidedTick = -1;
+    let decision = false;
     return (ctx) => {
-      if (ctx.tick <= this.config.hazard.graceTicks) return false;
-      if (ctx.multiple < breakEven) return false;
-      if (ctx.multiple >= target) return true;
-      // Heads-up is decided by guts, not by the hazard gauge: the timid
-      // fold within a few ticks, the gutsy sit on their target and make
-      // the human beat them to it.
-      if (ctx.liveCount <= 2) return this.rng.next() < (1 - s.guts) * 0.22;
-      return ctx.q > panicAt && this.rng.next() < s.nerve * 0.15;
+      if (ctx.tick === decidedTick) return decision;
+      decidedTick = ctx.tick;
+      decision = ((): boolean => {
+        if (ctx.tick <= this.config.hazard.graceTicks) return false;
+        if (ctx.multiple < breakEven) return false;
+        if (ctx.multiple >= target) return true;
+        // Heads-up is decided by guts, not by the hazard gauge: the timid
+        // fold within a few ticks, the gutsy sit on their target and make
+        // the human beat them to it.
+        if (ctx.liveCount <= 2) return this.rng.next() < (1 - s.guts) * 0.22;
+        return ctx.q > panicAt && this.rng.next() < s.nerve * 0.15;
+      })();
+      return decision;
     };
   }
 
