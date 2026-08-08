@@ -463,7 +463,7 @@ export function AutoPanel({
   };
 
   return (
-    <div className="flex items-center gap-2 rounded-md bg-[var(--color-panel)] px-2.5 py-2">
+    <div className="flex items-center gap-2 px-2.5 py-2">
       <button
         onClick={() => onChange({ enabled: !on })}
         className="label rounded-sm px-2.5 py-1.5"

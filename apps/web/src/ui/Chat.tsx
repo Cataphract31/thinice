@@ -137,7 +137,7 @@ export function ChatPanel({
 
   if (bare) return <div className="flex h-full min-h-0 flex-col">{body}</div>;
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-md bg-[var(--color-panel)]">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-baseline justify-between px-2 pt-1.5">
         <span className="label">chat</span>
         <span className="label tnum">{snap.online} online</span>

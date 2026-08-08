@@ -448,8 +448,9 @@ function AliveCard({ snap }: { snap: Snapshot }): JSX.Element {
     sub = "";
   }
 
+  // Boxless on purpose: numbers over the page, same as the hero multiplier.
   return (
-    <div className="flex w-[88px] shrink-0 flex-col items-center justify-center rounded-md bg-[var(--color-panel)] p-2 sm:w-[118px]">
+    <div className="flex w-[88px] shrink-0 flex-col items-center justify-center p-2 sm:w-[118px]">
       <div className="label">{label}</div>
       <div className="tnum mt-1 leading-none" style={{ fontSize: 26, fontWeight: 700 }}>
         {big}
@@ -493,7 +494,7 @@ function TabbedPanel({
     </button>
   );
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-md bg-[var(--color-panel)]">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-1 px-1 py-1">
         {tabBtn("roster", `roster · ${snap.liveCount} in`)}
         {chat && tabBtn("chat", "chat")}

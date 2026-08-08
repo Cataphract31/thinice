@@ -18,8 +18,10 @@ export function TickRing({ snap, tickMs }: { snap: Snapshot; tickMs: number }): 
   const band = riskBand(snap.hazard, snap.grace);
   const color = live ? bandColor(band) : "var(--color-edge2)";
 
+  // No card. The ring is its own shape — boxing it made the vitals strip
+  // read as three crates in a row instead of instruments over the ice.
   return (
-    <div className="flex w-[88px] shrink-0 items-center justify-center rounded-md bg-[var(--color-panel)] p-2 sm:w-[118px]">
+    <div className="flex w-[88px] shrink-0 items-center justify-center p-2 sm:w-[118px]">
       <div className="relative aspect-square w-full max-w-[102px]">
         <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full -rotate-90">
           <circle

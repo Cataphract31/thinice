@@ -354,7 +354,13 @@ export class LatticeRenderer {
     // overflowing the frame on phones. The ceiling has to scale with the
     // viewport, not be a fixed pixel count — a flat cap sized for a phone
     // shrinks a full desktop field to a third of the space it should own.
-    const roomy = Math.max(70, Math.min(availW, availH) * 0.16);
+    //
+    // And the cap has to loosen as the field thins: at a flat 16% a 3-plate
+    // beta lobby huddled in the middle of a frame four times its size. Small
+    // fields own the frame; the capacity loop below still shrinks whatever
+    // cannot actually fit, so overflow stays impossible.
+    const fillShare = n <= 4 ? 0.3 : n <= 9 ? 0.24 : n <= 16 ? 0.19 : 0.16;
+    const roomy = Math.max(70, Math.min(availW, availH) * fillShare);
     r = Math.min(r, roomy, availW / 2.4, availH / (hexH * 1.6));
     let cols = 0;
     let rows = 0;
@@ -839,19 +845,18 @@ export class LatticeRenderer {
     const pulse = 0.82 + Math.sin(this.time * 2.1) * 0.06 + this.heat * 0.3;
 
     ctx.save();
-    const grad = ctx.createRadialGradient(
-      b.x + b.w / 2,
-      b.y + b.h / 2,
-      0,
-      b.x + b.w / 2,
-      b.y + b.h / 2,
-      Math.max(b.w, b.h) * 0.72,
-    );
+    const midX = b.x + b.w / 2;
+    const midY = b.y + b.h / 2;
+    const reach = Math.max(b.w, b.h) * 0.72;
+    const grad = ctx.createRadialGradient(midX, midY, 0, midX, midY, reach);
     const a = (0.16 + this.heat * 0.7) * pulse;
     grad.addColorStop(0, `rgba(${r | 0},${g | 0},${bl | 0},${a})`);
     grad.addColorStop(1, `rgba(${r | 0},${g | 0},${bl | 0},0)`);
     ctx.fillStyle = grad;
-    ctx.fillRect(b.x - 40, b.y - 40, b.w + 80, b.h + 80);
+    // The fill must cover the gradient's whole falloff circle. Clipped at
+    // bounds+40 the glow was cut while still visibly non-zero, printing a
+    // hard-edged rectangle behind the lattice.
+    ctx.fillRect(midX - reach, midY - reach, reach * 2, reach * 2);
 
     // A second tighter core so genuine danger reads as molten. On the
     // perceptual scale 0.4 is ~1.9% hazard, so this joins mid-band and grows.
@@ -859,7 +864,7 @@ export class LatticeRenderer {
       ctx.globalCompositeOperation = "lighter";
       ctx.globalAlpha = (this.heat - 0.4) * 0.55;
       ctx.fillStyle = grad;
-      ctx.fillRect(b.x - 40, b.y - 40, b.w + 80, b.h + 80);
+      ctx.fillRect(midX - reach, midY - reach, reach * 2, reach * 2);
     }
     ctx.restore();
   }
