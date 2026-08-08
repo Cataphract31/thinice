@@ -1142,7 +1142,58 @@ export class LatticeRenderer {
         ctx.restore();
       }
     }
+    this.drawYouTag();
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * One floating marker over your whole holding. The per-plate cyan rims say
+   * "these plates are special"; this says WHOSE they are and how many, which
+   * multi-buy made ambiguous — a two-plate stack next to an owner-rimmed bot
+   * cluster read as just another cluster until you hunted for the cyan. The
+   * count falls as your plates die, so the tag doubles as a live stack gauge.
+   */
+  private drawYouTag(): void {
+    if (this.radius <= 5 || this.snap.phase === "result") return;
+    const { ctx } = this;
+    let n = 0;
+    let sx = 0;
+    let topY = Infinity;
+    for (const c of this.cells.values()) {
+      if (c.state !== "you") continue;
+      n++;
+      sx += c.x;
+      if (c.y < topY) topY = c.y;
+    }
+    if (n === 0) return;
+
+    const cx = sx / n;
+    const fs = Math.max(11, Math.min(17, this.radius * 0.55));
+    const bob = Math.sin(this.time * 2.6) * 1.6;
+    // Above the topmost plate of the cluster, clamped so a top-row cluster
+    // keeps the tag on screen instead of clipping it at the frame edge.
+    const y = Math.max(fs + 10, topY - this.radius * 1.32) + bob;
+    const label = n > 1 ? `YOU ×${n}` : "YOU";
+
+    ctx.save();
+    ctx.font = `700 ${fs}px "Chakra Petch", ui-sans-serif, system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    // Dark halo, not a chip: keeps the chrome boxless while staying legible
+    // over pale ice and hot seams alike.
+    ctx.shadowColor = "rgba(2, 12, 18, 0.95)";
+    ctx.shadowBlur = 5;
+    ctx.fillStyle = "#3fe0d8";
+    ctx.fillText(label, cx, y - 4);
+    // Chevron pointing down into the cluster.
+    const cw = fs * 0.34;
+    ctx.beginPath();
+    ctx.moveTo(cx - cw, y);
+    ctx.lineTo(cx + cw, y);
+    ctx.lineTo(cx, y + cw * 1.3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   }
 
   /** Broken ore in flight. Value shards home in on the multiplier. */

@@ -644,12 +644,14 @@ export function ActionBar({
 
   // The way out. A bonded player whose lobby never fills would otherwise be
   // locked in with no exit — nothing between "wait indefinitely" and closing
-  // the tab. Refunds every plate, as if never bought.
+  // the tab. Refunds every plate, as if never bought. Sized and lit as a real
+  // button: this is the un-bet control, and at label size in dim-on-panel it
+  // read as a caption pinned to the screen edge, not a thing thumbs can hit.
   const stepOff =
     snap.phase === "lobby" && snap.you.joined && snap.connected && onStepOff ? (
       <button
         onClick={onStepOff}
-        className="label mt-1 w-full rounded-sm bg-[var(--color-panel2)] py-1.5 hover:text-[var(--color-text)]"
+        className="mt-1.5 w-full rounded-sm bg-[var(--color-panel2)] py-2.5 text-[12px] font-semibold tracking-[0.04em] text-[var(--color-warn)] transition-transform active:scale-[0.985]"
       >
         step off · refund {(k * snap.entry).toFixed(1)} ◎
       </button>
@@ -673,5 +675,12 @@ export function ActionBar({
 /** Bottom bar on mobile, bare button in the desktop column. */
 function wrap(button: JSX.Element, inline: boolean): JSX.Element {
   if (inline) return button;
-  return <div className="bg-[var(--color-pit)]/95 px-3 py-2.5 backdrop-blur">{button}</div>;
+  // Bottom padding clears the gesture bar on phones (safe-area inset when the
+  // browser reports one, a floor of 14px when it does not) so the last button
+  // never sits flush against the screen edge.
+  return (
+    <div className="bg-[var(--color-pit)]/95 px-3 pt-2.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] backdrop-blur">
+      {button}
+    </div>
+  );
 }
