@@ -257,13 +257,15 @@ deployment:
 
 ```bash
 curl https://your-host/health          # {"ok":true}
-npm run test:server wss://your-host/ws # 29 end-to-end checks against it
+npm run test:server wss://your-host/ws # 30 end-to-end checks against it
 ```
 
 `test:server` seats three real clients, plays a full round, and asserts the
 money moved exactly once, the fairness commitment covers the seed and the rules,
 a client cannot set fields the server owns, and chat is relayed, truncated and
-rate-limited. It is safe to run against a live server — it plays as ordinary
+rate-limited. Run it against a server with `BOTS=0` — practice bots joining
+mid-probe change round timing and fail the sole-owner check. It is safe to run
+against a live server — it plays as ordinary
 guests — but its chat checks leave test lines in the room's 50-line backlog,
 where every later visitor will read them. **Restart the service after probing
 production** (chat is memory-only, so a restart clears it), or probe before

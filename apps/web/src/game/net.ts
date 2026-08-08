@@ -539,6 +539,13 @@ export class NetClient {
     this.send({ t: "cashout" });
   }
 
+  /** Steps off during the lobby: full refund, and auto play switches off. */
+  stepOff(): void {
+    this.snap = { ...this.snap, auto: { ...this.snap.auto, enabled: false } };
+    this.emit();
+    this.send({ t: "unjoin" });
+  }
+
   /**
    * A line for the room. No local echo: the server relays it back to every
    * session including this one, so your own message appearing IS the receipt

@@ -15,6 +15,7 @@ import {
   type Entrant,
   type GameConfig,
   type Rng,
+  type Strategy,
 } from "@zinc/engine";
 import { CONFIG, toLamports, toSol } from "./config.ts";
 import type { Database } from "./db.ts";
@@ -26,6 +27,18 @@ export { CHARS } from "./config.ts";
 export function shortAddress(addr: string): string {
   return addr.length <= 10 ? addr : `${addr.slice(0, 4)}…${addr.slice(-4)}`;
 }
+
+/**
+ * Practice-bot identities. Namespaced like guests so they can never collide
+ * with (or impersonate) a real address, and each keeps ONE persistent wallet
+ * so its profile card shows a genuine accumulated record rather than invented
+ * numbers. The display name is the label: every surface — roster, lattice
+ * profile, winner scene — says `bot·frosty`, never a wallet-shaped string.
+ */
+const BOT_NAMES = [
+  "frosty", "glacier", "tundra", "drift", "floe", "shiver", "hail", "slush",
+];
+const isBot = (wallet: string): boolean => wallet.startsWith("bot:");
 
 function sha256Hex(s: string): string {
   return createHash("sha256").update(s).digest("hex");
@@ -114,6 +127,10 @@ export class GameServer {
   private winnerWallet: string | null = null;
   /** Set when the round ended because one wallet owned every live plate. */
   private soleOwnerWallet: string | null = null;
+  /** Practice bots this lobby aims for (drawn per round), and their brains. */
+  private botTarget = 0;
+  private nextBotAt = 0;
+  private botStrategies = new Map<number, Strategy>();
   private bonanza: NetState["bonanza"] = null;
   private bonanzaWallet: string | null = null;
   private lastBroadcast = 0;
@@ -272,8 +289,88 @@ export class GameServer {
     this.commit = sha256Hex(commitPreimage(this.roundId, this.seedHex, this.rulesHash));
     this.db.openRound(this.roundId, this.commit, Date.now());
 
+    // A fresh crowd size each round, so the practice field breathes instead
+    // of being the same N faces every time.
+    this.botTarget = CONFIG.bots > 0 ? 1 + Math.floor(this.rng.next() * CONFIG.bots) : 0;
+    this.nextBotAt = Date.now() + 1500;
+    this.botStrategies.clear();
+
     this.autoJoin();
     this.broadcast(true);
+  }
+
+  /** Any seat held by a human. Practice bots alone must never seal a round. */
+  private hasHumanSeat(): boolean {
+    for (const w of this.seatsOf.keys()) if (!isBot(w)) return true;
+    return false;
+  }
+
+  /**
+   * Trickles practice bots into the lobby, one every second or two, while a
+   * human is CONNECTED — a visitor should find a live room, but a server
+   * nobody is watching plays no theatre for the empty air.
+   */
+  private fillBots(now: number): void {
+    if (this.botTarget <= 0 || now < this.nextBotAt) return;
+    if (this.sessions.size === 0) return;
+    if (this.seats.size >= this.config.field.max) return;
+    let seated = 0;
+    for (const w of this.seatsOf.keys()) if (isBot(w)) seated++;
+    if (seated >= this.botTarget) return;
+    this.nextBotAt = now + 1000 + this.rng.next() * 2200;
+
+    const name = BOT_NAMES[seated % BOT_NAMES.length]!;
+    const wallet = `bot:${name}`;
+    if (this.seatsOf.has(wallet)) return;
+    const row = this.db.player(wallet);
+    // Play money is minted for a broke bot: its losses flow to real players
+    // and its stakes fund the pools, so the float has to come from somewhere.
+    if (row.balance < toLamports(this.config.entry)) {
+      this.db.adjustBalance(wallet, toLamports(1));
+    }
+    const stake = toLamports(this.config.entry);
+    const id = this.nextSeatId++;
+    if (!this.db.takeEntry(this.roundId, wallet, stake, id)) return;
+    const fresh = this.db.player(wallet);
+    this.seats.set(id, {
+      id,
+      wallet,
+      name: `bot·${name}`,
+      charId: fresh.charId,
+      lifetime: {
+        wagered: toSol(fresh.wagered),
+        net: toSol(fresh.returned + fresh.revEarned - fresh.wagered),
+        hitRate: fresh.roundsPlayed > 0 ? fresh.roundsWon / fresh.roundsPlayed : 0,
+        best: fresh.bestMultiple,
+        jackpots: 0,
+      },
+    });
+    this.seatsOf.set(wallet, [id]);
+    this.botStrategies.set(id, this.makeBotBrain());
+    this.broadcast(true);
+  }
+
+  /**
+   * A practice bot's exit policy: a target multiple plus nerves that fray as
+   * the hazard climbs. Draws ONLY from the presentation RNG — a strategy that
+   * touched the round's committed stream would shift the elimination sequence
+   * and break every player's replay verification.
+   */
+  private makeBotBrain(): Strategy {
+    const r = this.rng.next();
+    const target =
+      r < 0.35
+        ? 1.15 + this.rng.next() * 0.4
+        : 1.5 + -Math.log(Math.max(1e-9, this.rng.next())) * 1.2;
+    const panicAt = 0.035 + this.rng.next() * 0.045;
+    const nerve = this.rng.next();
+    const breakEven = 1 / (1 - totalRake(this.config));
+    return (ctx) => {
+      if (ctx.tick <= this.config.hazard.graceTicks) return false;
+      if (ctx.multiple < breakEven) return false;
+      if (ctx.multiple >= target) return true;
+      return ctx.q > panicAt && this.rng.next() < nerve * 0.15;
+    };
   }
 
   /**
@@ -353,6 +450,31 @@ export class GameServer {
       },
     });
     this.seatsOf.set(s.wallet, [...mine, id]);
+    this.broadcast(true);
+    return null;
+  }
+
+  /**
+   * Steps a wallet off the ice DURING THE LOBBY: every plate refunded in
+   * full, as if never bought. Without this a player whose lobby never fills
+   * is locked in indefinitely — bonded, unsealed, waiting on strangers.
+   * Auto play switches off with it: stepping off IS the statement that you
+   * are done, and auto re-buying the seat back would make the button a lie.
+   */
+  unjoin(s: Session): string | null {
+    if (this.phase !== "lobby") return "the lattice is already sealed";
+    const mine = this.seatsOf.get(s.wallet);
+    if (!mine || mine.length === 0) return null;
+    for (const id of mine) {
+      if (this.db.refundLobbyEntry(this.roundId, s.wallet, id)) {
+        this.seats.delete(id);
+      }
+    }
+    this.seatsOf.delete(s.wallet);
+    const row = this.db.player(s.wallet);
+    if (row.autoEnabled) {
+      this.db.setAuto(s.wallet, false, row.autoTarget, row.autoPlates ?? 1);
+    }
     this.broadcast(true);
     return null;
   }
@@ -442,7 +564,15 @@ export class GameServer {
     // eliminations, which is exactly what the replay a player verifies re-runs.
     const entrants: Entrant[] = [];
     for (const seat of this.seats.values()) {
-      entrants.push({ id: seat.id, strategyId: "human", strategy: () => false });
+      // Humans' exits arrive over the wire, so their engine strategy never
+      // fires; practice bots decide in-tick through their brain, and those
+      // exits land in the cash-out log exactly like a button press — the
+      // replay a player verifies re-runs them from the record.
+      entrants.push({
+        id: seat.id,
+        strategyId: isBot(seat.wallet) ? "bot" : "human",
+        strategy: this.botStrategies.get(seat.id) ?? (() => false),
+      });
     }
     this.settled.clear();
     this.round = new Round(this.config, rngFromSeedHex(this.seedHex), entrants);
@@ -455,12 +585,15 @@ export class GameServer {
     const now = Date.now();
     if (this.phase === "lobby") {
       this.autoEnter();
+      this.fillBots(now);
       if (now >= this.phaseEnd) {
         // Distinct WALLETS, not seats: with multi-betting one wallet can hold
         // several plates, and a round whose every plate is one person is not
         // PvP — it is one player paying rake to shuffle money between their
-        // own hands. Too thin to be a game: roll the lobby instead.
-        if (this.seatsOf.size >= CONFIG.minEntrants) this.seal();
+        // own hands. Too thin to be a game: roll the lobby instead. Practice
+        // bots count toward the minimum (that is their purpose) but can never
+        // carry a round alone: at least one plate must be a human's.
+        if (this.seatsOf.size >= CONFIG.minEntrants && this.hasHumanSeat()) this.seal();
         else this.phaseEnd = now + this.config.timing.lobbyMs;
       }
     } else if (this.phase === "live") {
@@ -549,9 +682,15 @@ export class GameServer {
     for (const p of res.players) {
       const seat = this.seats.get(p.id);
       if (!seat) continue;
-      const id = this.ledgerId(seat.wallet);
-      this.jackpot.credit(id, p.bonanzaTickets);
-      this.revShare.credit(id, now);
+      // Practice bots fund both pools (their rake points flow in like any
+      // entry) but hold no tickets in either — a bot must never win the
+      // jackpot or skim the rakeback stream. Real players' odds only improve
+      // for having them at the table.
+      if (!isBot(seat.wallet)) {
+        const id = this.ledgerId(seat.wallet);
+        this.jackpot.credit(id, p.bonanzaTickets);
+        this.revShare.credit(id, now);
+      }
       if (!this.settled.has(p.id)) {
         this.settled.add(p.id);
         this.settleExit(

@@ -286,6 +286,13 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         return;
       }
 
+      case "unjoin": {
+        if (!session) return;
+        const err = game.unjoin(session);
+        if (err) send({ t: "error", message: err });
+        return;
+      }
+
       case "cashout":
         if (session) game.cashOut(session);
         return;

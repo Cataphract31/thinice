@@ -473,11 +473,14 @@ export function ActionBar({
   snap,
   onJoin,
   onWalkOut,
+  onStepOff,
   inline = false,
 }: {
   snap: Snapshot;
   onJoin: () => void;
   onWalkOut: () => void;
+  /** Lobby-only: refunds every plate and stands the player down. */
+  onStepOff?: () => void;
   /** In-column placement (desktop) instead of the full-width bottom bar. */
   inline?: boolean;
 }): JSX.Element {
@@ -553,14 +556,30 @@ export function ActionBar({
         ? "bg-[var(--color-profit)] text-[#03231a]"
         : "bg-[var(--color-panel2)] text-[var(--color-dim)]";
 
+  // The way out. A bonded player whose lobby never fills would otherwise be
+  // locked in with no exit — nothing between "wait indefinitely" and closing
+  // the tab. Refunds every plate, as if never bought.
+  const stepOff =
+    snap.phase === "lobby" && snap.you.joined && snap.connected && onStepOff ? (
+      <button
+        onClick={onStepOff}
+        className="label mt-1 w-full rounded-sm bg-[var(--color-panel2)] py-1.5 hover:text-[var(--color-text)]"
+      >
+        step off · refund {(k * snap.entry).toFixed(1)} ◎
+      </button>
+    ) : null;
+
   return wrap(
-    <button
-      disabled={!action}
-      onClick={action ?? undefined}
-      className={`display h-13 w-full rounded-sm py-3.5 text-[17px] font-bold tracking-[0.1em] transition-transform active:scale-[0.985] disabled:cursor-not-allowed ${bg}`}
-    >
-      {label}
-    </button>,
+    <>
+      <button
+        disabled={!action}
+        onClick={action ?? undefined}
+        className={`display h-13 w-full rounded-sm py-3.5 text-[17px] font-bold tracking-[0.1em] transition-transform active:scale-[0.985] disabled:cursor-not-allowed ${bg}`}
+      >
+        {label}
+      </button>
+      {stepOff}
+    </>,
     inline,
   );
 }

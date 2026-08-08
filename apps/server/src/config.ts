@@ -46,7 +46,24 @@ export const CONFIG = {
    * This is the open-launch mode; the chain comes later or not at all.
    */
   banking: (process.env.BANKING ?? "on").toLowerCase() !== "off",
+  /**
+   * Up to this many PRACTICE bots may fill a lobby (each round draws a random
+   * count). 0 — the default — means bots do not exist, and the promise in the
+   * README ("no hidden bots") is enforced by three structural rules wherever
+   * they are enabled: practice bots are labelled `bot·name` on every surface,
+   * they never hold jackpot or rakeback tickets (they fund both pools and can
+   * win neither), and the server REFUSES TO BOOT with bots and banking both
+   * on — a bot may never share a table with real money.
+   */
+  bots: num("BOTS", 0, 0, 8),
 } as const;
+
+if (CONFIG.bots > 0 && CONFIG.banking) {
+  throw new Error(
+    "BOTS>0 with banking enabled: practice bots may never share a table with real money. " +
+      "Set BANKING=off (play-money mode) or BOTS=0.",
+  );
+}
 
 /**
  * The character roster. Lives here because both the game (whitelisting what a

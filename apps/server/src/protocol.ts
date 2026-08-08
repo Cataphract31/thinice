@@ -150,6 +150,8 @@ export type ClientMessage =
   | { t: "auth"; wallet: string; sig: string }
   | { t: "guest"; id: string }
   | { t: "join" }
+  /** Steps off during the lobby: every plate refunded, as if never bought. */
+  | { t: "unjoin" }
   | { t: "cashout" }
   | { t: "setAuto"; enabled: boolean; target: number; plates: number }
   | { t: "setChar"; charId: string }

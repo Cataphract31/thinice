@@ -1185,6 +1185,21 @@ export class GameClient {
     this.emit();
   }
 
+  /**
+   * Steps off during the lobby: every plate refunded as if never bought, and
+   * auto play switches off — stepping off IS the statement that you are done.
+   */
+  stepOff(): void {
+    if (this.phase !== "lobby" || this.youPlates === 0) return;
+    this.wallet += this.youPlates * this.config.entry;
+    this.stats.roundsPlayed -= this.youPlates;
+    this.stats.wagered -= this.youPlates * this.config.entry;
+    this.youPlates = 0;
+    this.auto.enabled = false;
+    this.saveState();
+    this.emit();
+  }
+
   /** Extracts every live plate you hold, together, at the shared multiple. */
   walkOut(): void {
     const round = this.round;

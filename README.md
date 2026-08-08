@@ -9,8 +9,16 @@ field empties. Cash out whenever you like and keep what you are holding, or get
 caught and keep nothing. Last one standing takes the rest.
 
 It is player-versus-player. The house does not take a position in any round —
-it takes a fixed cut of the entries and nothing else. **There are no bots.** A
-lobby is real people or it is empty.
+it takes a fixed cut of the entries and nothing else. **There are no hidden
+bots.** A lobby is real people or it is empty — with one loudly-declared
+exception: in play-money mode the server may seat a few PRACTICE bots
+(`BOTS=n`, default 0) so early testers have someone to play against. Three
+structural rules keep that honest: every practice bot is labelled `bot·name`
+on every surface, bots fund the jackpot and rakeback pools but can hold
+tickets in neither (a bot can never win the bonanza), and the server refuses
+to boot with bots and banking enabled together — a bot may never share a
+table with real money. Bots cannot carry a round alone; at least one plate
+must be a human's.
 
 ---
 
@@ -93,7 +101,7 @@ npm run typecheck       # all three projects
 npm run sim:fairness    # RNG quality, replay determinism, jackpot derivation
 npm run sim:invariants  # the martingale + pot conservation, asserted
 npm run sim             # full economics: RTP by strategy, pacing, jackpot
-npm run test:server     # 29 end-to-end checks against a running server
+npm run test:server     # 30 end-to-end checks against a running server
 npm run test:crash      # kills the server mid-round, asserts nobody loses money
 npm run test:bank       # real devnet deposit + withdraw round trip
 ```

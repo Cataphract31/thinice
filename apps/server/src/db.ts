@@ -454,6 +454,40 @@ export class Database {
     }
   }
 
+  /**
+   * Reverses a lobby entry that never played: stake back, stats un-counted,
+   * row deleted — as if the plate was never bought. Only valid BEFORE the
+   * round seals; a sealed round settles through settleEntry or the crash
+   * refund, never through here.
+   */
+  refundLobbyEntry(roundId: number, wallet: string, seat: number): boolean {
+    this.db.exec("BEGIN");
+    try {
+      const row = this.db
+        .prepare("SELECT staked FROM entries WHERE roundId = ? AND wallet = ? AND seat = ?")
+        .get(roundId, wallet, seat) as { staked: number } | undefined;
+      if (!row) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
+      this.db
+        .prepare(
+          `UPDATE players
+              SET balance = balance + ?, wagered = wagered - ?, roundsPlayed = roundsPlayed - 1
+            WHERE wallet = ?`,
+        )
+        .run(row.staked, row.staked, wallet);
+      this.db
+        .prepare("DELETE FROM entries WHERE roundId = ? AND wallet = ? AND seat = ?")
+        .run(roundId, wallet, seat);
+      this.db.exec("COMMIT");
+      return true;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
   settleEntry(
     roundId: number,
     wallet: string,

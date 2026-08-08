@@ -124,6 +124,7 @@ export default function App(): JSX.Element {
             snap={snap}
             onJoin={() => client.join()}
             onWalkOut={() => client.walkOut()}
+            onStepOff={() => client.stepOff()}
           />
           <AutoPanel snap={snap} onChange={(p) => client.setAuto(p)} />
           {/* Chat lives on mobile as a fourth tab; on desktop it has its own
@@ -199,6 +200,7 @@ export default function App(): JSX.Element {
           snap={snap}
           onJoin={() => client.join()}
           onWalkOut={() => client.walkOut()}
+          onStepOff={() => client.stepOff()}
         />
       </div>
 

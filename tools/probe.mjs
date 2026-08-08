@@ -146,6 +146,21 @@ if (
   );
 }
 
+// ------------------------------------------------------------ lobby exit
+// Stepping off during the lobby refunds everything, as if never bonded —
+// the escape hatch for a lobby that never fills.
+const carolBefore = last(carol).wallet;
+carol.send({ t: "unjoin" });
+await sleep(400);
+const cOff = last(carol);
+if (!cOff.you.joined && Math.abs(cOff.wallet - (carolBefore + entry)) < 1e-9) {
+  ok(`stepping off refunded the stake in full (${cOff.wallet} ◎)`);
+} else {
+  fail(`step-off wrong (joined=${cOff.you.joined}, wallet=${cOff.wallet}, expected ${carolBefore + entry})`);
+}
+carol.send({ t: "join" });
+await sleep(400);
+
 const commit = a1.nextCommit;
 if (/^[0-9a-f]{64}$/.test(commit)) ok(`commitment published before seal: ${commit.slice(0, 20)}…`);
 else fail(`no commitment during lobby (got "${commit}")`);
