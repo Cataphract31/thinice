@@ -28,6 +28,18 @@ rest need building.
 - [ ] **Withdrawal path re-verified.** Withdrawals pay only the
       authenticated session's own wallet (built). Re-test after any auth
       change, every time.
+- [ ] **Withdrawal failure is not proof of failure.** A confirmation that
+      throws is currently re-credited blind; if the transfer actually
+      landed, the player keeps both. Write an intent row before
+      broadcasting and re-query the signature's status before re-crediting.
+- [ ] **Hold covers ALL reversible money.** The withdrawal hold guards
+      unsettled rakeback but not mid-round cash-out profit, which the
+      crash sweep can claw back after the lamports left. Extend the hold,
+      and make shutdown close the open round instead of just stopping the
+      timer.
+- [ ] **Flip the banking default to off.** BANKING defaults to ON in
+      config.ts and .env.example; play money is one forgotten env var away
+      from being armed. The safe state should be a property of the code.
 - [ ] **Chat moderation.** Rate limits exist; real money attracts spam,
       phishing links, and impersonation. Minimum: link stripping, a mute
       tool, a report path.
@@ -43,8 +55,4 @@ rest need building.
 - [ ] **Load test.** MAX_PER_IP and the socket path have never seen a crowd.
       Simulate one before one arrives.
 
-## Paper
 
-- [ ] **Jurisdiction and terms.** Real-money gaming has rules everywhere.
-      Terms of service, age gating, and a jurisdiction call happen before
-      launch, not after the first dispute.
