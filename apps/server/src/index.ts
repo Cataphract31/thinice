@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import { randomBytes } from "node:crypto";
 import bs58 from "bs58";
 import nacl from "tweetnacl";
@@ -66,7 +66,28 @@ const http = createServer((req, res) => {
 // The 4 KiB guard in the message handler runs only after the whole frame has
 // been buffered in memory, so on its own it protects JSON.parse and nothing
 // else: the default cap is 100 MiB per frame.
-const wss = new WebSocketServer({ server: http, maxPayload: 8 * 1024 });
+const wss = new WebSocketServer({
+  server: http,
+  maxPayload: 8 * 1024,
+  // Outbound bandwidth is the one metered resource on a small cloud box, and
+  // the protocol is repetitive JSON pushed several times a second — the ideal
+  // compression victim. No context takeover and a low level keep the zlib
+  // memory per socket small enough for a 1 GB machine.
+  perMessageDeflate: {
+    threshold: 512,
+    clientNoContextTakeover: true,
+    serverNoContextTakeover: true,
+    zlibDeflateOptions: { level: 3 },
+  },
+});
+
+// Connection ceilings. Every accepted socket is a stream of state pushes,
+// i.e. metered egress an attacker gets billed to US — opening sockets must
+// therefore be bounded, per address and in total. Legitimate use sits far
+// below both numbers (a phone plus a couple of tabs is 3).
+const MAX_SOCKETS = 300;
+const MAX_PER_IP = 6;
+const perIp = new Map<string, number>();
 
 // A socket-level error with no listener is thrown out of an I/O callback as
 // ERR_UNHANDLED_ERROR and takes the process down. ws emits 'error' on the
@@ -74,7 +95,21 @@ const wss = new WebSocketServer({ server: http, maxPayload: 8 * 1024 });
 // from any client would kill the round every other player is mid-way through.
 wss.on("error", (err) => console.error("wss error", err));
 
-wss.on("connection", (ws: WebSocket) => {
+wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+  // Behind the reverse proxy every socket is 127.0.0.1; the real address
+  // rides in X-Forwarded-For, which only the proxy can set — the game port
+  // itself is not reachable from outside the box.
+  const ip =
+    String(req.headers["x-forwarded-for"] ?? "").split(",")[0]!.trim() ||
+    req.socket.remoteAddress ||
+    "?";
+  const ipCount = perIp.get(ip) ?? 0;
+  if (wss.clients.size > MAX_SOCKETS || ipCount >= MAX_PER_IP) {
+    ws.close(1013, "server full");
+    return;
+  }
+  perIp.set(ip, ipCount + 1);
+
   const nonce = randomBytes(16).toString("hex");
   const nonceAt = Date.now();
   /** One attempt per challenge: a rejected signature must not be retryable. */
@@ -380,6 +415,9 @@ wss.on("connection", (ws: WebSocket) => {
     clearInterval(ping);
     clearInterval(refill);
     clearInterval(chatRefill);
+    const left = (perIp.get(ip) ?? 1) - 1;
+    if (left <= 0) perIp.delete(ip);
+    else perIp.set(ip, left);
     if (session) game.detach(session);
   });
 });
