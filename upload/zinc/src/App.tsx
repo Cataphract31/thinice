@@ -151,7 +151,7 @@ export default function App(): JSX.Element {
       {/* Mobile panel. Kept deliberately short: on a phone every row of chrome
           is taken straight out of the lattice, which is the thing people came
           to look at. The roster scrolls, so height here is a luxury. */}
-      <div className="mt-1.5 h-[148px] shrink-0 px-1.5 lg:hidden">
+      <div className="mt-1 h-[124px] shrink-0 px-1.5 lg:hidden">
         <TabbedPanel snap={snap} tab={tab} onTab={setTab} chat>
           {tab === "roster" ? (
             <Roster snap={snap} onSelect={select} />
@@ -193,7 +193,7 @@ export default function App(): JSX.Element {
 
       {/* Mobile keeps the thumb-reach bottom bar, with auto play just above. */}
       <div className="lg:hidden">
-        <div className="px-3 pb-1.5">
+        <div className="px-3 pb-1">
           <AutoPanel snap={snap} onChange={(p) => client.setAuto(p)} />
         </div>
         <ActionBar
@@ -242,10 +242,13 @@ function Footer({ onShowInfo }: { onShowInfo: () => void }): JSX.Element {
 /**
  * Everything about one player on one plate.
  *
- * Tickets are worth showing even for a stranger: entry is fixed and tickets
- * are flat per entry, so the count is the same for everyone in the round and
- * the card can state it as fact rather than guessing. Fixed width with a
- * pinned close button, so the geometry never depends on the length of a name.
+ * The tickets row is the wallet's ACTUAL holdings — the same bonanza / rev
+ * pair the owner sees in their own tickets stat. It used to print the flat
+ * per-entry award, which told a player checking their alt from another phone
+ * that their five-figure stack was "200". Fixed width with a pinned close
+ * button, so the geometry never depends on the length of a name; capped to
+ * the lattice frame and scrollable inside, because on a phone the frame is
+ * shorter than the card and the overflow was silently clipped.
  */
 function PlayerCard({
   p,
@@ -273,7 +276,7 @@ function PlayerCard({
   );
 
   return (
-    <div className="absolute bottom-2 left-2 z-20 w-[208px] rounded-md bg-[var(--color-pit)]/95 p-2.5 shadow-[0_6px_28px_rgba(0,0,0,0.55)] backdrop-blur">
+    <div className="absolute bottom-2 left-2 z-20 max-h-[calc(100%-16px)] w-[208px] overflow-y-auto rounded-md bg-[var(--color-pit)]/95 p-2.5 shadow-[0_6px_28px_rgba(0,0,0,0.55)] backdrop-blur">
       <button
         onClick={onClose}
         aria-label="Close"
@@ -324,18 +327,6 @@ function PlayerCard({
             {pl.toFixed(3)} ◎
           </span>,
         )}
-        {line(
-          "tickets",
-          <span className="tnum text-[11px] font-semibold">
-            <span className="text-[var(--color-gold)]">
-              {DEFAULT_CONFIG.bonanza.ticketBase}
-            </span>
-            <span className="text-[var(--color-dim)]"> / </span>
-            <span className="text-[var(--color-cyan)]">
-              {DEFAULT_CONFIG.revShare.ticketsPerEntry}
-            </span>
-          </span>,
-        )}
       </div>
 
       {/* The record, not the stopwatch.
@@ -351,6 +342,23 @@ function PlayerCard({
             "wagered",
             <span className="tnum text-[11px]">{p.lifetime.wagered.toFixed(1)} ◎</span>,
           )}
+          {/* This wallet's holdings, not the per-entry award: bots and fresh
+              wallets hold nothing, and printing 0 / 0 would only invite the
+              question this row exists to answer. */}
+          {p.lifetime.tickets &&
+            (p.lifetime.tickets.bon > 0 || p.lifetime.tickets.rev > 0) &&
+            line(
+              "tickets",
+              <span className="tnum text-[11px] font-semibold">
+                <span className="text-[var(--color-gold)]">
+                  {p.lifetime.tickets.bon.toLocaleString()}
+                </span>
+                <span className="text-[var(--color-dim)]"> / </span>
+                <span className="text-[var(--color-cyan)]">
+                  {p.lifetime.tickets.rev.toLocaleString()}
+                </span>
+              </span>,
+            )}
           {line(
             "banked ahead",
             <span className="tnum text-[11px] font-semibold">

@@ -343,6 +343,8 @@ export class GameServer {
         hitRate: fresh.roundsPlayed > 0 ? fresh.roundsWon / fresh.roundsPlayed : 0,
         best: fresh.bestMultiple,
         jackpots: 0,
+        // Honest zeroes: bots fund the pools and hold no tickets in either.
+        tickets: { bon: 0, rev: 0 },
       },
     });
     this.seatsOf.set(wallet, [id]);
@@ -430,6 +432,9 @@ export class GameServer {
     // Read BEFORE the debit, so the lifetime snapshot on the profile card is
     // "as of stepping on" rather than dipping by one unsettled stake.
     const row = this.db.player(s.wallet);
+    // Same source the owner's own tickets stat reads, so the two can never
+    // disagree about the same wallet.
+    const lid = this.ledgerIds.get(s.wallet);
     // Debit and entry row commit together, or the seat does not exist.
     if (!this.db.takeEntry(this.roundId, s.wallet, stake, id)) return "not enough balance";
 
@@ -447,6 +452,10 @@ export class GameServer {
         hitRate: row.roundsPlayed > 0 ? row.roundsWon / row.roundsPlayed : 0,
         best: row.bestMultiple,
         jackpots: toSol(row.bonanzaWon ?? 0),
+        tickets: {
+          bon: lid === undefined ? 0 : this.jackpot.ticketsOf(lid),
+          rev: lid === undefined ? 0 : this.revShare.lifetimeOf(lid),
+        },
       },
     });
     this.seatsOf.set(s.wallet, [...mine, id]);

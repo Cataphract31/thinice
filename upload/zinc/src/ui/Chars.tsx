@@ -200,7 +200,7 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
             <CharArt charId={w.charId} pose="win" size={168} fill />
           </div>
           <div
-            className="display win-rise mt-3 text-[15px] font-bold tracking-[0.22em] lg:text-[17px]"
+            className="display win-rise mt-2 text-[15px] font-bold tracking-[0.22em] lg:mt-3 lg:text-[17px]"
             style={{ color: w.you ? "var(--color-cyan)" : "var(--color-text)" }}
           >
             {w.lastStanding
@@ -209,6 +209,9 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
                 ? "dead heat"
                 : "best extraction"}
           </div>
+          {/* Multiplier only. Entry is fixed, so the SOL amount is the same
+              fact again in different units, and on a phone the row has to
+              fit "name +N more ×mult" without wrapping into the art. */}
           <div className="win-rise mt-1 flex items-baseline gap-2.5">
             <span
               className="text-[13px] font-semibold lg:text-[15px]"
@@ -222,7 +225,6 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
             <span className="tnum text-[17px] font-bold text-[var(--color-profit)] lg:text-[20px]">
               {w.multiple.toFixed(2)}×
             </span>
-            <span className="tnum label">{w.amount.toFixed(3)} ◎</span>
           </div>
         </div>
       ) : (
@@ -234,8 +236,10 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
         </div>
       )}
 
+      {/* Desktop only. On a phone the lattice frame is shorter than the scene,
+          and this strip was what pushed the verdict text into the art. */}
       {champs.length > 1 && (
-        <div className="win-rise relative mt-4 flex shrink-0 flex-col items-center gap-1.5">
+        <div className="win-rise relative mt-4 hidden shrink-0 flex-col items-center gap-1.5 lg:flex">
           <span className="label">recent champions</span>
           <div className="flex items-center gap-1.5">
             {/* The frame owns the size so the strip can scale with the

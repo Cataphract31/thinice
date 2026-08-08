@@ -36,6 +36,14 @@ export interface NetPlayer {
     best: number;
     /** Lifetime jackpot winnings, shown only when they have taken one. */
     jackpots: number;
+    /**
+     * The wallet's actual holdings — bonanza tickets in the current
+     * circulation, lifetime rev-share tickets — matching the owner's own
+     * tickets stat. The card used to print the flat per-entry award here,
+     * which read as "this whale holds 200 tickets". Zero for bots: they
+     * fund the pools and hold nothing, and the card should say so.
+     */
+    tickets?: { bon: number; rev: number };
   };
 }
 

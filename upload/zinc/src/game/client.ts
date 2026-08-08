@@ -87,6 +87,12 @@ export interface PlayerView {
     hitRate: number;
     best: number;
     jackpots: number;
+    /**
+     * Actual holdings — bonanza tickets in circulation / lifetime rev-share
+     * tickets — the same pair the owner's tickets stat shows. Not the flat
+     * per-entry award, which is the same number for everyone.
+     */
+    tickets?: { bon: number; rev: number };
   };
 }
 
@@ -1302,6 +1308,10 @@ export class GameClient {
         hitRate: s.roundsPlayed > 0 ? s.roundsWon / s.roundsPlayed : 0,
         best: s.bestMultiple,
         jackpots: s.bonanzaWon ?? 0,
+        tickets: {
+          bon: this.jackpot.ticketsOf(YOU_ID),
+          rev: this.revShare.lifetimeOf(YOU_ID),
+        },
       };
     }
     const name = this.names.get(id) ?? "player";
@@ -1322,6 +1332,14 @@ export class GameClient {
       hitRate: 0.74 - style * 0.56,
       best: 1.6 + style * style * 38 + ((h >>> 4) % 100) / 100,
       jackpots: (h >>> 28) === 0 ? 20 + ((h >>> 6) % 9000) / 100 : 0,
+      // Rev tickets never wipe, so lifetime plates times the per-entry award
+      // is the truth by construction. Bonanza tickets wipe on every fire, so
+      // only a small recent slice of that history is still circulating.
+      tickets: {
+        bon: Math.round(plates * (0.005 + ((h >>> 12) % 80) / 1000)) *
+          this.config.bonanza.ticketBase,
+        rev: plates * this.config.revShare.ticketsPerEntry,
+      },
     };
   }
 
