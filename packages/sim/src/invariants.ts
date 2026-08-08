@@ -186,7 +186,7 @@ for (const c of CASES) {
   // A real case passes when every cohort holds. A contrast case passes when at
   // least one cohort leaks — asserted at the case level, because the whole
   // point of that case is that the strategies are paid *differently*, so some
-  // of its cohorts hold at 94% and are supposed to. Previously the contrast
+  // of its cohorts hold at the in-game RTP and are supposed to. Previously the contrast
   // case was hardcoded to pass, which meant that if the leak it demonstrates
   // ever stopped reproducing the suite would print "?!" and still exit 0.
   const caseOk = c.expectViolation ? rows.some((r) => !r.holds) : rows.every((r) => r.holds);

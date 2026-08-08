@@ -105,22 +105,22 @@ export interface GameConfig {
 }
 
 /**
- * 6% total rake in three equal thirds, of which only 2% is genuine house edge.
- * Headline RTP is 98% — 94% returned inside the game, 2% via the bonanza, 2%
- * via the revenue-share stream.
+ * 5% total rake — 2% bonanza, 2% rakeback, 1% platform fee — of which only
+ * the platform 1% is genuine house edge. Headline RTP is 99%: 95% returned
+ * inside the game, 2% via the bonanza, 2% via the revenue-share stream.
  *
- * This was 3% to the bonanza. Moving that point back into the game leaves the
- * headline RTP and the house edge untouched at 98% / 2%, because the jackpot
- * is player money either way. What it changes is who receives it: a jackpot
- * point is paid out roughly once per 39,000 entries, so it is a point that
- * almost nobody ever sees, while an in-game point is paid on every round.
- * Measured, the swap raises the chance of finishing a round ahead and lifts
- * the p90 outcome, and — because a jackpot contributes p·X² to variance and X
- * is enormous — it cuts total variance per stake by 52%.
+ * The platform fee was 2%. Halving it moves a point straight back into the
+ * in-game pot — the strongest possible use of a point, since it pays on
+ * every round rather than through the rare jackpot — and makes the headline
+ * a 99% figure almost nothing on the market can print.
+ *
+ * (Earlier move, same logic: the bonanza was 3%; a jackpot point is paid
+ * roughly once per 39,000 entries, so shifting it in-game raised the chance
+ * of finishing a round ahead and cut total variance per stake by 52%.)
  */
 export const DEFAULT_CONFIG: GameConfig = {
   entry: 0.1,
-  rake: { bonanza: 0.02, house: 0.02, revShare: 0.02 },
+  rake: { bonanza: 0.02, house: 0.01, revShare: 0.02 },
   hazard: {
     q0: 0.075,
     // Crowding stays steep: this is the "fewer people, more oxygen" signal the
@@ -149,7 +149,7 @@ export const DEFAULT_CONFIG: GameConfig = {
     // weighted accrual was measured to hand late-stayers ~1.5pts of RTP over
     // cautious players, and it rewarded never leaving — the opposite of a
     // lively round. The climbing multiplier is already all the incentive
-    // anyone needs to stay, so this makes every strategy land on exactly 98%.
+    // anyone needs to stay, so this makes every strategy land on exactly 99%.
     // The demo granted a few hundred per round and the number felt like it
     // meant something. Flat tickets are scale-free — every share is
     // tickets/total — so the denomination is a pure presentation choice, and a

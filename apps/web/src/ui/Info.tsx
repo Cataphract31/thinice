@@ -77,9 +77,9 @@ export function InfoOverlay({
                 [pc(IN_GAME), "the pot", "paid out every round"],
                 [pc(C.rake.bonanza), "the bonanza", "jackpot, one winner takes all"],
                 [pc(C.rake.revShare), "rakeback", "streamed to players forever"],
-                [pc(C.rake.house), "the house", "the only real edge"],
+                [pc(C.rake.house), "platform fee", "the only real edge"],
               ]}
-              foot={[pc(RTP), "returned to players", `${pc(C.rake.house)} house edge`]}
+              foot={[pc(RTP), "returned to players", `${pc(C.rake.house)} platform fee`]}
             />
           </Section>
 

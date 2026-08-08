@@ -18,7 +18,7 @@ import { STRATEGY_SET } from "./strategies.js";
  * The structural answer is known before simulating: the engine has no concept
  * of ownership. Deaths roll independently per PLATE, redistribution is
  * pro-rata per PLATE, and each plate's balance is a martingale, so a plate's
- * expected return is 94% of entry no matter who else its owner has standing.
+ * expected return is 95% of entry no matter who else its owner has standing.
  * k plates = k × the same EV. This study exists to (a) verify that number
  * holds in the presence of multi-plate wallets, for both the wallet and the
  * bystanders, and (b) measure the thing that DOES change: the shape of the
@@ -201,7 +201,7 @@ for (const style of STYLES) {
   }
 }
 console.log(
-  "\n  EV/entry must read ~0.9400 in every row (the 94% in-game RTP), including for the\n" +
+  "\n  EV/entry must read ~0.9500 in every row (the 95% in-game RTP), including for the\n" +
     "  bystanders sharing a lattice with a multi-plate wallet — ownership does not exist\n" +
     "  in the engine, so it cannot price anything.\n",
 );

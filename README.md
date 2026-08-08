@@ -121,12 +121,12 @@ npm run test:bank       # real devnet deposit + withdraw round trip
 | | |
 |---|---|
 | Entry | 0.1 SOL, fixed for everyone |
-| Rake | 6% — 2% jackpot, 2% house, 2% rakeback |
-| In-game RTP | **94.00%** |
-| Headline RTP | **98.00%** — only the house 2% is a true edge |
+| Rake | 5% — 2% jackpot, 2% rakeback, 1% platform fee |
+| In-game RTP | **95.00%** |
+| Headline RTP | **99.00%** — only the platform 1% is a true edge |
 
-The jackpot and the rakeback stream are both player money, which is why 98% is
-the honest published figure. Only 2% is house revenue.
+The jackpot and the rakeback stream are both player money, which is why 99% is
+the honest published figure. Only 1% is house revenue.
 
 **The in-game return is identical for every cash-out strategy.** Balance is
 conserved and every live player holds the same balance, so no exit timing beats
