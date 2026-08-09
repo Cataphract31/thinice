@@ -93,6 +93,7 @@ export const CHARS = [
   "bogdanoff",
   "bobo",
   "mumu",
+  "milady",
 ];
 
 export const LAMPORTS = 1_000_000_000;

@@ -306,23 +306,9 @@ function TicketsStat({
                 {snap.bonanzaDrought.toLocaleString()} rounds ago
               </span>
             </div>
-            {/* The proof the jackpot is real: the last few people it paid.
-                Three rows here; the bonanza bar holds the longer list. */}
-            {(snap.bonanzaFires ?? []).slice(0, 3).map((f) => (
-              <div key={f.round} className="mt-1 flex items-center gap-1.5">
-                <CharArt charId={f.charId} pose="head" size={14} />
-                <span
-                  className="truncate text-[11px] font-semibold"
-                  style={f.name === "YOU" ? { color: "var(--color-cyan)" } : undefined}
-                >
-                  {f.name}
-                </span>
-                <span className="tnum ml-auto text-[11px] font-bold text-[var(--color-gold)]">
-                  {f.sol.toFixed(1)} ◎
-                </span>
-                <span className="label w-[26px] text-right">{ago(Date.now() - f.at)}</span>
-              </div>
-            ))}
+            {/* No hit rows here: the jackpot window owns that list, on both
+                widths. Two places showing the same receipts in two styles was
+                the clutter, not the content. */}
             <div className="mt-1 text-[10.5px] leading-snug text-[var(--color-dim)]">
               Fires about 1 round in{" "}
               {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()},
@@ -351,6 +337,22 @@ function TicketsStat({
         </>
       )}
     </div>
+  );
+}
+
+function BonanzaStat({ snap }: { snap: Snapshot }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)}>
+        <Stat
+          label="bonanza"
+          value={`${snap.bonanzaPool.toFixed(poolDigits(snap.bonanzaPool))} ◎`}
+          color="var(--color-gold)"
+        />
+      </button>
+      {open && <BonanzaOverlay snap={snap} onClose={() => setOpen(false)} />}
+    </>
   );
 }
 
@@ -414,11 +416,10 @@ function Stats({
         )}
       </div>
       {mobile ? (
-        <Stat
-          label="bonanza"
-          value={`${snap.bonanzaPool.toFixed(poolDigits(snap.bonanzaPool))} ◎`}
-          color="var(--color-gold)"
-        />
+        // The bar is hidden at this width, so this stat is the phone's door
+        // into the jackpot window — same window the bar opens, no second
+        // design and no history rows crammed into the tickets popover.
+        <BonanzaStat snap={snap} />
       ) : (
         <Stat
           label="session"
@@ -577,63 +578,163 @@ export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
   const pool = snap.bonanzaPool;
   const digits = poolDigits(pool);
   const [open, setOpen] = useState(false);
-  const fires = snap.bonanzaFires ?? [];
   return (
-    <div className="relative mx-3 max-sm:hidden">
-      {/* The whole bar is the button: tap it and the jackpot shows its
-          receipts — who it paid, how much, how long ago. */}
+    <div className="mx-3 max-sm:hidden">
+      {/* The bar carries three things at three sizes and nothing else: what it
+          is, what it holds, how long it has held it. The odds, the rules and
+          the receipts all moved into the window this opens — they were a run-on
+          sentence set in one type size, which is not a design. The whole bar is
+          the affordance; there is no separate history control to find. */}
       <button
-        onClick={() => setOpen((o) => !o)}
-        className="breathe flex w-full items-center gap-3 rounded-sm bg-gradient-to-r from-[#1b1608] to-[#0f1319] px-3 py-1.5 text-left"
+        onClick={() => setOpen(true)}
+        title="Bonanza history"
+        className="breathe flex w-full items-center gap-3 rounded-sm bg-gradient-to-r from-[#1b1608] to-[#0f1319] px-3 py-1.5 text-left hover:brightness-125"
       >
         <span className="label text-[var(--color-gold)]">bonanza</span>
         <span className="tnum text-[17px] font-bold text-[var(--color-gold)]">
           {pool.toFixed(digits)} ◎
         </span>
-        {/* The drought is the sales pitch: every dry round is one more the
-            pool grew and one more it did not fire. Odds stay printed next to
-            it so the number reads as chance, never as "due". */}
-        <span className="label ml-auto hidden sm:inline">
-          last hit{" "}
-          <span className="tnum text-[var(--color-gold)]">
+        {/* The drought is the sales pitch: every dry round is one more the pool
+            grew and one more it did not fire. The odds live one click away so
+            the number can never be read as "due" for long. */}
+        <span className="ml-auto flex items-baseline gap-1.5">
+          <span className="tnum text-[13px] font-semibold text-[var(--color-zinc-hi)]">
             {snap.bonanzaDrought.toLocaleString()}
-          </span>{" "}
-          rounds ago · 1 in{" "}
-          {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()} every
-          round · one ticket takes all · history ▾
+          </span>
+          <span className="label">rounds dry</span>
         </span>
       </button>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-50 mt-1.5 w-[320px] rounded-md bg-[var(--color-panel2)] p-3 shadow-[0_8px_30px_rgba(0,0,0,0.55)]">
-            <div className="label mb-1.5 text-[var(--color-gold)]">bonanza hits</div>
-            {fires.length === 0 ? (
-              <div className="text-[12px] text-[var(--color-dim)]">
-                No hits on record yet. Every dry round grows the pool.
-              </div>
-            ) : (
-              fires.slice(0, 10).map((f) => (
-                <div key={f.round} className="flex items-center gap-2 py-1">
-                  <CharArt charId={f.charId} pose="head" size={18} />
-                  <span
-                    className="truncate text-[12px] font-semibold"
-                    style={f.name === "YOU" ? { color: "var(--color-cyan)" } : undefined}
-                  >
-                    {f.name}
-                  </span>
-                  <span className="label">#{f.round.toLocaleString()}</span>
-                  <span className="tnum ml-auto text-[12px] font-bold text-[var(--color-gold)]">
-                    {f.sol.toFixed(1)} ◎
-                  </span>
-                  <span className="label w-[30px] text-right">{ago(Date.now() - f.at)}</span>
-                </div>
-              ))
-            )}
+      {open && <BonanzaOverlay snap={snap} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+/**
+ * The jackpot's own window: the pool, the terms, and every hit on record.
+ *
+ * A centred overlay rather than a popover hanging off the bar, because this is
+ * the one screen that has to feel like money — a 240px dropdown of grey rows
+ * cannot carry a jackpot, and the bar it hung from was already overloaded.
+ */
+function BonanzaOverlay({
+  snap,
+  onClose,
+}: {
+  snap: Snapshot;
+  onClose: () => void;
+}): JSX.Element {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
+
+  const fires = snap.bonanzaFires ?? [];
+  const share = snap.tickets.bonShare;
+  const pct =
+    share > 0 && share < 0.0001 ? "<0.01%" : `${(share * 100).toFixed(2)}%`;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#04070a]/85 p-3 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="win-slam w-full max-w-[400px] rounded-md bg-[var(--color-panel)] shadow-[0_24px_90px_rgba(0,0,0,0.8)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center px-4 pt-3">
+          <span className="display text-[13px] tracking-[0.14em] text-[var(--color-gold)]">
+            the bonanza
+          </span>
+          <button
+            onClick={onClose}
+            className="label ml-auto rounded-sm bg-[var(--color-panel2)] px-2 py-1 hover:text-[var(--color-text)]"
+          >
+            close
+          </button>
+        </div>
+
+        {/* The pool, alone and enormous. Everything else on this screen is a
+            caption to it. */}
+        <div className="px-4 pb-4 pt-5 text-center">
+          <div className="tnum text-[40px] font-bold leading-none text-[var(--color-gold)] [text-shadow:0_0_30px_rgba(255,196,64,0.35)]">
+            {snap.bonanzaPool.toFixed(poolDigits(snap.bonanzaPool))} ◎
           </div>
-        </>
-      )}
+          <div className="label mt-2">in the pool right now</div>
+        </div>
+
+        <div className="mx-4 space-y-1.5 rounded-sm bg-[var(--color-panel2)] px-3 py-2.5">
+          <Line label="odds">
+            1 in {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()}, every
+            round
+          </Line>
+          <Line label="dry for">
+            <span className="tnum">{snap.bonanzaDrought.toLocaleString()}</span> rounds
+          </Line>
+          <Line label="your share" gold>
+            {pct}
+          </Line>
+        </div>
+
+        <div className="label px-4 pb-1 pt-4">previous hits</div>
+        <div className="max-h-[196px] overflow-y-auto px-4">
+          {fires.length === 0 ? (
+            <div className="pb-1 text-[12px] leading-snug text-[var(--color-dim)]">
+              Nothing on record yet. Every dry round grows the pool.
+            </div>
+          ) : (
+            fires.slice(0, 12).map((f) => (
+              <div key={f.round} className="flex items-center gap-2 py-1">
+                <CharArt charId={f.charId} pose="head" size={20} />
+                <span
+                  className="truncate text-[12.5px] font-semibold"
+                  style={f.name === "YOU" ? { color: "var(--color-cyan)" } : undefined}
+                >
+                  {f.name}
+                </span>
+                <span className="label">#{f.round.toLocaleString()}</span>
+                <span className="tnum ml-auto text-[13px] font-bold text-[var(--color-gold)]">
+                  {f.sol.toFixed(2)} ◎
+                </span>
+                <span className="label w-[28px] text-right">{ago(Date.now() - f.at)}</span>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="px-4 pb-4 pt-3 text-[11.5px] leading-snug text-[var(--color-dim)]">
+          One ticket takes the whole pool. Every plate buys{" "}
+          {DEFAULT_CONFIG.bonanza.ticketBase} of them, and a fire wipes every ticket
+          in circulation.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A caption and its value, the two type sizes this window is built from. */
+function Line({
+  label,
+  gold = false,
+  children,
+}: {
+  label: string;
+  gold?: boolean;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <div className="flex items-baseline justify-between">
+      <span className="label">{label}</span>
+      <span
+        className="text-[12.5px] font-semibold"
+        style={gold ? { color: "var(--color-gold)" } : undefined}
+      >
+        {children}
+      </span>
     </div>
   );
 }

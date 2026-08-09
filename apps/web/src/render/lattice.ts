@@ -1613,7 +1613,7 @@ export class LatticeRenderer {
       for (const s of sealDraws) {
         const face = charImage(s.charId, "head");
         if (!face) continue;
-        const side = this.radius * 0.58 * s.scale;
+        const side = this.radius * 0.55 * s.scale;
         ctx.globalAlpha = s.alpha;
         ctx.drawImage(
           face,

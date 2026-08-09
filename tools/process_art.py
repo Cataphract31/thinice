@@ -28,6 +28,15 @@ TILES = ["base", "hairline", "heavy", "crack"]
 TILE_SIZE = 384
 COLORS = 96
 
+# Speck floor for generations that came with scenery. Milady is drawn kneeling
+# in spilled chips, cards and dice; most of that litter falls under the default
+# 1%, but two cards clear it and leave her floating above debris while every
+# other loser is alone on the ice. Raising the floor globally is not an option:
+# Wojak's lose is line art whose eyes and nose are separate 1-2% strokes, and
+# they are not enclosed by anything, so no containment test tells them apart
+# from scenery either. Per image is the honest way to say it.
+SPECK_FLOOR = {("milady", "lose"): 0.02}
+
 
 def key_backdrop(img: Image.Image) -> Image.Image:
     """Removes the backdrop only — never colour that belongs to the character.
@@ -98,7 +107,7 @@ def trim(img: Image.Image) -> Image.Image:
     )
 
 
-def drop_specks(img: Image.Image, min_frac: float = 0.02) -> Image.Image:
+def drop_specks(img: Image.Image, min_frac: float = 0.01) -> Image.Image:
     """Deletes anything that is not part of the character.
 
     Some generations come with a decorative border. The keyer eats the parts
@@ -107,12 +116,6 @@ def drop_specks(img: Image.Image, min_frac: float = 0.02) -> Image.Image:
     such fragment is its own island, so keeping only islands of a meaningful
     size relative to the subject removes them and leaves real detached pieces
     (a held phone, a raised fist) untouched.
-
-    The threshold also earns its keep on scenery: Milady is drawn kneeling
-    among spilled chips and cards, and a couple of those survived 1% and left
-    her floating above a litter of debris while every other loser stands alone
-    on the ice. 2% clears them. The real detached pieces on the roster are all
-    3.5% and up, so nothing that belongs to a character is anywhere near it.
     """
     a = np.asarray(img).copy()
     op = a[..., 3] > 8
@@ -185,7 +188,9 @@ def do_chars() -> int:
             src = find(os.path.join(SRC, char), pose)
             if not src:
                 continue
-            img = trim(strip_frame(trim(drop_specks(key_backdrop(Image.open(src))))))
+            floor = SPECK_FLOOR.get((char, pose), 0.01)
+            keyed = drop_specks(key_backdrop(Image.open(src)), floor)
+            img = trim(strip_frame(trim(keyed)))
             if pose == "head":
                 # The lattice blits heads square; pad rather than squash.
                 side = max(img.size)
