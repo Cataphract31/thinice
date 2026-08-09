@@ -142,6 +142,17 @@ export class LatticeRenderer {
   };
   /** Your last known standing, so the moment it changes can be staged. */
   private youWas: LatticeSnapshot["youOutcome"] = "out";
+  /**
+   * The endgame sequence clock: wall-clock seconds since the break that
+   * decided the round, or -1 outside one. While it runs, scene time is bent —
+   * the deciding shatter plays at quarter speed under a lean-in zoom, then
+   * time ramps back as the crown lands on whoever is left standing.
+   */
+  private finaleT = -1;
+  /** The surviving plates that wear the crown. Empty on a total wipe. */
+  private crownIds: number[] = [];
+  /** Where the deciding break happened; the zoom leans into it. */
+  private focus = { x: 0, y: 0 };
   /** 1 to 0 over the beat after your own round ends. */
   private hit = 0;
   private hitKind: "dead" | "cashed" = "dead";
@@ -314,15 +325,23 @@ export class LatticeRenderer {
       this.youWas = snap.youOutcome;
     }
 
-    // ≤1 standing after this push means these deaths END the round: that break
-    // is the story beat the survivors paid to watch, so it lands heavier —
-    // more shards, thrown harder, under the biggest shake the scene does.
-    // First live feedback: "the final ice breaking is not depicted, you
-    // just... win". It was depicted; the winner screen was covering it.
-    let standing = 0;
+    // A new lobby stands the clock back up for the next round's ending.
+    if (snap.phase === "lobby" && this.finaleT >= 0) {
+      this.finaleT = -1;
+      this.crownIds = [];
+    }
+
+    // ≤1 OWNER standing after this push means these deaths END the round:
+    // that break is the story beat the survivors paid to watch, so it lands
+    // heavier — more shards, thrown harder, under the biggest shake the
+    // scene does. Owners, not plates: a winner holding a whole cluster is
+    // still one player standing. First live feedback: "the final ice
+    // breaking is not depicted, you just... win". It was depicted; the
+    // winner screen was covering it.
+    const owners = new Set<string>();
     for (const c of snap.cells)
-      if (c.state === "live" || c.state === "you") standing++;
-    const finale = standing <= 1;
+      if (c.state === "live" || c.state === "you") owners.add(c.group ?? `#${c.id}`);
+    const finale = owners.size <= 1;
 
     let deaths = 0;
     for (const input of snap.cells) {
@@ -338,6 +357,7 @@ export class LatticeRenderer {
       if (input.state === "dying") {
         deaths++;
         this.fracture(cell, finale ? 2 : 1);
+        if (finale) this.focus = { x: cell.x, y: cell.y };
       } else if (input.state === "cashed") {
         this.release(cell);
       }
@@ -346,6 +366,15 @@ export class LatticeRenderer {
       this.shake = finale
         ? 1.5
         : Math.min(1, this.shake + 0.14 + deaths * 0.04);
+
+    // Cue the sequence exactly once per round, on the deciding deaths. Every
+    // surviving plate is the winner's, so the whole cluster gets crowned.
+    if (deaths > 0 && finale && this.finaleT < 0) {
+      this.finaleT = 0;
+      this.crownIds = [];
+      for (const c of snap.cells)
+        if (c.state === "live" || c.state === "you") this.crownIds.push(c.id);
+    }
   }
 
   /**
@@ -725,16 +754,29 @@ export class LatticeRenderer {
   }
 
   private frame(dt: number): void {
-    this.time += dt;
-    this.heat += (this.heatTarget - this.heat) * Math.min(1, dt * 3.5);
-    this.stressS += (this.stressTarget - this.stressS) * Math.min(1, dt * 4.5);
+    // The finale bends time: its own clock runs on the wall, the scene runs
+    // on scaled dt. Quarter speed while the deciding break crumbles, then
+    // time ramps back to full as the crown lands. Every animation downstream
+    // (cell faces, shards, shake, floods) slows as one, which is what makes
+    // it read as slow motion rather than as one slowed effect.
+    let timescale = 1;
+    if (this.finaleT >= 0) {
+      this.finaleT += dt;
+      const f = this.finaleT;
+      timescale = f < 0.9 ? 0.24 : f < 1.4 ? 0.24 + ((f - 0.9) / 0.5) * 0.76 : 1;
+    }
+    const sdt = dt * timescale;
+
+    this.time += sdt;
+    this.heat += (this.heatTarget - this.heat) * Math.min(1, sdt * 3.5);
+    this.stressS += (this.stressTarget - this.stressS) * Math.min(1, sdt * 4.5);
     // The lake freezes over during the grace ticks, then the frost lifts as
     // the first real roll arrives — freezing is quick, thawing is gradual.
     const frostTarget = this.snap.phase === "live" && this.snap.grace ? 1 : 0;
-    this.frost += (frostTarget - this.frost) * Math.min(1, dt * (frostTarget > this.frost ? 3.2 : 1.6));
-    this.shake *= Math.pow(0.002, dt);
-    if (this.goldWave > 0) this.goldWave = Math.max(0, this.goldWave - dt / 6);
-    if (this.hit > 0) this.hit = Math.max(0, this.hit - dt / 1.1);
+    this.frost += (frostTarget - this.frost) * Math.min(1, sdt * (frostTarget > this.frost ? 3.2 : 1.6));
+    this.shake *= Math.pow(0.002, sdt);
+    if (this.goldWave > 0) this.goldWave = Math.max(0, this.goldWave - sdt / 6);
+    if (this.hit > 0) this.hit = Math.max(0, this.hit - sdt / 1.1);
 
     const ctx = this.ctx;
     ctx.save();
@@ -742,16 +784,67 @@ export class LatticeRenderer {
       const s = this.shake * 4.5;
       ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
     }
+    if (this.finaleT >= 0) {
+      // Lean-in on the deciding plate: quick push to +13%, held through the
+      // slow-mo, released as real time returns. Scaling up around an interior
+      // point always keeps the canvas covered, so no edges ever show.
+      const f = this.finaleT;
+      const zin = 1 - Math.pow(1 - Math.min(1, f / 0.35), 3);
+      const zout = f < 1.3 ? 1 : Math.max(0, 1 - (f - 1.3) / 0.9);
+      const z = 1 + 0.13 * zin * zout;
+      if (z > 1.001) {
+        ctx.translate(this.focus.x, this.focus.y);
+        ctx.scale(z, z);
+        ctx.translate(-this.focus.x, -this.focus.y);
+      }
+    }
 
     this.drawRock();
     this.drawSeams();
-    this.drawCells(dt);
-    this.drawShards(dt);
+    this.drawCells(sdt);
+    this.drawShards(sdt);
     if (this.goldWave > 0) this.drawGoldFlood();
     this.drawAtmosphere();
+    if (this.finaleT >= 0 && this.crownIds.length > 0) this.drawCrown();
     if (this.hit > 0) this.drawHit();
     this.drawGrain();
 
+    ctx.restore();
+  }
+
+  /**
+   * The coronation. Once the slow-mo break has landed, the last plate
+   * standing gets a gold halo and a crown dropped onto it — a split second
+   * of "that one won" on the board itself, before the winner screen takes
+   * over. The wipe has no crown; the ice is the only winner there.
+   */
+  private drawCrown(): void {
+    const t = this.finaleT - 0.85;
+    if (t < 0) return;
+    const { ctx } = this;
+    const r = this.radius;
+    const k = Math.min(1, t / 0.28);
+    // easeOutBack: the crown overshoots a touch and settles, like it landed.
+    const c1 = 1.7;
+    const pop = 1 + (c1 + 1) * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2);
+    const halo = Math.min(1, t / 0.5);
+    const size = Math.max(10, r * 1.5) * Math.max(0, pop);
+
+    ctx.save();
+    ctx.font = `${size}px "Segoe UI Emoji", "Apple Color Emoji", serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const id of this.crownIds) {
+      const cell = this.cells.get(id);
+      if (!cell) continue;
+      // Gold halo swelling behind the champion plate, crown dropped on top.
+      const g = ctx.createRadialGradient(cell.x, cell.y, r * 0.2, cell.x, cell.y, r * 3.2);
+      g.addColorStop(0, `rgba(255, 205, 110, ${0.3 * halo})`);
+      g.addColorStop(1, "rgba(255, 205, 110, 0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(cell.x - r * 3.2, cell.y - r * 3.2, r * 6.4, r * 6.4);
+      ctx.fillText("\u{1F451}", cell.x, cell.y - r * (1.6 + 0.3 * k));
+    }
     ctx.restore();
   }
 

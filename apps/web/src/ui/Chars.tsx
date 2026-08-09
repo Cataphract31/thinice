@@ -187,10 +187,12 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
   const w = snap.winner;
   // The scene used to slam in on the exact frame the phase flipped, and its
   // dark layer buried the break that decided the round — you just ... won.
-  // Now the lattice gets a beat to play the final shatter (or the wipe) in
-  // the clear before the curtain. Endings with no wreckage to watch (best
-  // extraction: everyone banked and walked) keep only a breath.
-  const holdMs = !w || w.lastStanding ? 1100 : 350;
+  // Now the curtain waits out the lattice's endgame sequence: slow-mo on the
+  // deciding shatter, then the crown landing on the last plate standing
+  // (2.0s), or the wipe playing out with no one to crown (1.6s). Endings
+  // with no wreckage to watch (best extraction: everyone banked and walked)
+  // keep only a breath.
+  const holdMs = !w ? 1600 : w.lastStanding ? 2000 : 350;
   const [curtain, setCurtain] = useState(false);
   useEffect(() => {
     if (!isResult) {
