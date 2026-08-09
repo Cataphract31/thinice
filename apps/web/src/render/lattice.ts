@@ -41,6 +41,18 @@ export interface CellInput {
   group?: string;
   /** Banked multiple, set only on cashed plates. Printed on the plate. */
   multiple?: number;
+  /** Owner's character. Worn as a tiny corner seal on the plate. */
+  charId?: string;
+}
+
+/** The slice of a chat message the board needs to pop it over its sender. */
+export interface ChatPopMsg {
+  id: number;
+  name: string;
+  charId: string;
+  text: string;
+  at: number;
+  system?: boolean;
 }
 
 export interface LatticeSnapshot {
@@ -54,6 +66,8 @@ export interface LatticeSnapshot {
   youOutcome: "out" | "in" | "cashed" | "dead";
   /** Your character. Your plates alone wear its head on the board. */
   youCharId: string;
+  /** The chat log. Fresh messages pop briefly over their sender's cluster. */
+  chat: ChatPopMsg[];
 }
 
 interface Cell {
@@ -71,6 +85,10 @@ interface Cell {
   hue?: number;
   /** Banked multiple on cashed plates. See CellInput.multiple. */
   multiple?: number;
+  /** Owner key, for finding a chatting player's cluster. See CellInput. */
+  group?: string;
+  /** Owner's character, worn as the corner seal. See CellInput. */
+  charId?: string;
 }
 
 interface Shard {
@@ -139,7 +157,12 @@ export class LatticeRenderer {
     bonanzaAt: null,
     youOutcome: "out",
     youCharId: "",
+    chat: [],
   };
+  /** Live chat bubbles, one per speaking owner, briefly over their cluster. */
+  private pops: { group: string; charId: string; text: string; shownAt: number }[] = [];
+  /** Highest chat id already seen; -1 until the first push seeds it. */
+  private lastChatId = -1;
   /** Your last known standing, so the moment it changes can be staged. */
   private youWas: LatticeSnapshot["youOutcome"] = "out";
   /**
@@ -347,10 +370,12 @@ export class LatticeRenderer {
     for (const input of snap.cells) {
       const cell = this.cells.get(input.id);
       if (!cell) continue;
-      // Rim tint and banked multiple refresh every push, before the state
-      // short-circuit — display-only, must never wait on a state change.
+      // Rim tint, banked multiple and identity refresh every push, before the
+      // state short-circuit — display-only, must never wait on a state change.
       cell.hue = input.hue;
       cell.multiple = input.multiple;
+      cell.group = input.group;
+      cell.charId = input.charId;
       if (cell.state === input.state) continue;
       cell.state = input.state;
       cell.t = 0;
@@ -374,6 +399,26 @@ export class LatticeRenderer {
       this.crownIds = [];
       for (const c of snap.cells)
         if (c.state === "live" || c.state === "you") this.crownIds.push(c.id);
+    }
+
+    // Fresh chat surfaces on the board as a bubble over its sender. The very
+    // first push seeds the id cursor silently, so a (re)connect replaying the
+    // whole backlog cannot burst thirty bubbles over the lattice at once.
+    if (this.lastChatId < 0) {
+      this.lastChatId = 0;
+      for (const m of snap.chat) if (m.id > this.lastChatId) this.lastChatId = m.id;
+    } else {
+      const now = Date.now();
+      for (const m of snap.chat) {
+        if (m.id <= this.lastChatId) continue;
+        this.lastChatId = m.id;
+        // Stale-at guard for the same reason as the cursor seed: only words
+        // said just now belong on the ice. System notices stay in the panel.
+        if (m.system || Math.abs(now - m.at) > 6000) continue;
+        this.pops = this.pops.filter((p) => p.group !== m.name);
+        this.pops.push({ group: m.name, charId: m.charId, text: m.text, shownAt: now });
+        if (this.pops.length > 4) this.pops.shift();
+      }
     }
   }
 
@@ -656,6 +701,8 @@ export class LatticeRenderer {
         born: prev?.born ?? 0,
         hue: input.hue,
         multiple: input.multiple,
+        group: input.group,
+        charId: input.charId,
       });
     }
     this.cells = kept;
@@ -805,11 +852,77 @@ export class LatticeRenderer {
     this.drawShards(sdt);
     if (this.goldWave > 0) this.drawGoldFlood();
     this.drawAtmosphere();
+    if (this.pops.length > 0) this.drawChatPops();
     if (this.finaleT >= 0 && this.crownIds.length > 0) this.drawCrown();
     if (this.hit > 0) this.drawHit();
     this.drawGrain();
 
     ctx.restore();
+  }
+
+  /**
+   * Words appearing where the speaker stands. The chat panel is where chat
+   * lives; this is the two-second proof that the plates are PEOPLE — a small
+   * bubble with the sender's face, floating over their cluster, then gone.
+   * Deliberately compact: it must never block reading the board.
+   */
+  private drawChatPops(): void {
+    const now = Date.now();
+    this.pops = this.pops.filter((p) => now - p.shownAt < 2600);
+    const { ctx } = this;
+    const r = this.radius;
+    for (const p of this.pops) {
+      // Cluster anchor: centroid x, topmost y of the sender's plates.
+      let sx = 0;
+      let n = 0;
+      let top = Infinity;
+      for (const c of this.cells.values()) {
+        if (c.group !== p.group || c.state === "dying") continue;
+        sx += c.x;
+        n++;
+        if (c.y < top) top = c.y;
+      }
+      if (n === 0) continue;
+
+      const k = (now - p.shownAt) / 2600;
+      const fade = k < 0.08 ? k / 0.08 : k > 0.82 ? (1 - k) / 0.18 : 1;
+      const text = p.text.length > 26 ? `${p.text.slice(0, 25)}…` : p.text;
+
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.font = '600 11px "Chakra Petch", ui-sans-serif, system-ui, sans-serif';
+      const head = 18;
+      const padX = 6;
+      const gap = 5;
+      const bw = padX * 2 + head + gap + ctx.measureText(text).width;
+      const bh = 26;
+      const bx = Math.max(6, Math.min(this.w - bw - 6, sx / n - bw / 2));
+      // Above the cluster, drifting up a touch as it lives; flipped below
+      // when the cluster already touches the top of the lattice. High enough
+      // to clear the YOU tag, which owns the band right over your plates.
+      let by = top - r * 2.0 - bh - k * 5;
+      if (by < 4) by = top + r * 1.45 + 8 + k * 5;
+
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bw, bh, 5);
+      ctx.fillStyle = "rgba(9, 15, 21, 0.92)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(140, 200, 226, 0.28)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      const face = charImage(p.charId, "head");
+      if (face) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(face, bx + padX, by + (bh - head) / 2, head, head);
+        ctx.imageSmoothingEnabled = true;
+      }
+      ctx.fillStyle = "#d4e8f4";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, bx + padX + head + gap, by + bh / 2 + 0.5);
+      ctx.restore();
+    }
   }
 
   /**
@@ -1226,6 +1339,32 @@ export class LatticeRenderer {
           // Crunchy, like every other blit of the pixel art.
           ctx.imageSmoothingEnabled = false;
           ctx.drawImage(face, c.x - side / 2 + jx, c.y - side / 2 + jy + dy, side, side);
+          ctx.restore();
+          ctx.globalAlpha = alpha;
+        }
+      }
+
+      // Everyone else's identity is a corner SEAL: their face, small and
+      // dimmed, stamped on the bottom-right vertex like wax on an envelope —
+      // never a portrait in the middle, because the centre belongs to the
+      // plate's state. (Centred faces on the whole field died twice at two
+      // sizes; the competition with the state signal was why.) Gone entirely
+      // when the lattice packs too tight to afford legible faces.
+      if (
+        c.charId !== undefined &&
+        c.state !== "you" &&
+        c.state !== "dying" &&
+        this.radius > 13
+      ) {
+        const face = charImage(c.charId, "head");
+        if (face) {
+          const side = this.radius * 0.62 * scale;
+          const vx = c.x + this.radius * 0.48 * scale;
+          const vy = c.y + this.radius * 0.72 * scale;
+          ctx.save();
+          ctx.globalAlpha = alpha * (c.state === "cashed" ? 0.45 : 0.72);
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(face, vx - side / 2 + jx, vy - side / 2 + jy + dy, side, side);
           ctx.restore();
           ctx.globalAlpha = alpha;
         }

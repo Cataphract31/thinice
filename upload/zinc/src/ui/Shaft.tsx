@@ -62,6 +62,7 @@ export function Shaft({
         id: p.id,
         you: p.you,
         group: p.name,
+        charId: p.charId,
         hue: !p.you && (counts.get(p.name) ?? 0) > 1 ? hueOf(p.name) : undefined,
         // Only exits carry their banked multiple onto the board; the state
         // mapping below keeps a last-stander out of "cashed", so the print
@@ -89,6 +90,7 @@ export function Shaft({
       bonanzaAt: snap.bonanza?.at ?? null,
       youOutcome: snap.you.joined ? snap.you.outcome : "out",
       youCharId: snap.charId,
+      chat: snap.chat,
     });
   }, [snap]);
 
