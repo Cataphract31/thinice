@@ -237,8 +237,10 @@ export interface Snapshot {
    */
   seat?: { guest: boolean; address: string };
   /** Rakeback that streamed in while the tab was closed. One-shot recap,
-      shown as a toast on return; null or absent when there is nothing. */
+      shown as a welcome-back card; null or absent when there is nothing. */
   away?: { ms: number; sol: number } | null;
+  /** Recent jackpot hits, newest first, for the bonanza history popover. */
+  bonanzaFires?: { round: number; name: string; charId: string; sol: number; at: number }[];
 }
 
 export interface BankState {
@@ -326,6 +328,8 @@ interface SaveState {
   lastFire?: number;
   /** When this save was written. Anchors the away-drip estimate on return. */
   at?: number;
+  /** Jackpot hit history, so the popover survives a reload. */
+  fires?: { round: number; name: string; charId: string; sol: number; at: number }[];
   /**
    * The CROWD's side of both ledgers, as one aggregate each. Restoring only
    * your own tickets and weight made you the sole holder after every reload:
@@ -600,6 +604,9 @@ export class GameClient {
   private lastFireRound = 0;
   /** Expected rakeback paid for the time the tab was closed. See ctor. */
   private awayRecap: Snapshot["away"] = null;
+  /** Recent jackpot hits, newest first, for the hit-history popover. */
+  private fireLog: { round: number; name: string; charId: string; sol: number; at: number }[] =
+    [];
   /** Set when the round ended because one owner held every live plate. */
   private soleOwnerKey: string | null = null;
   /** Owner that banked on the very tick every other standing player died:
@@ -682,6 +689,11 @@ export class GameClient {
       // Restored AFTER roundId so the drought (roundId - lastFireRound)
       // reads the real gap, not the whole round count since day one.
       this.lastFireRound = Math.min(num(save.lastFire), this.roundId);
+      if (Array.isArray(save.fires)) {
+        this.fireLog = save.fires
+          .filter((f) => f && typeof f.round === "number" && Number.isFinite(f.sol))
+          .slice(0, 15);
+      }
 
       // "While you were away": in production the server sums the real drip
       // rows; the demo cannot run rounds it never saw, so it pays the
@@ -1229,6 +1241,7 @@ export class GameClient {
         crowdBTickets: this.jackpot.totalTickets - this.jackpot.ticketsOf(YOU_ID),
         crowdRevWeight: this.revShare.totalWeight(now) - this.revShare.weightOf(YOU_ID, now),
         at: now,
+        fires: this.fireLog,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(s));
     } catch {
@@ -1256,12 +1269,22 @@ export class GameClient {
       this.stats.bonanzaWon = (this.stats.bonanzaWon ?? 0) + fire.amount;
     }
     this.lastFireRound = this.roundId;
+    const label = youWon ? "YOU" : (this.names.get(fire.winnerId) ?? "a ticket holder");
     this.bonanza = {
       amount: fire.amount,
-      winner: this.names.get(fire.winnerId) ?? "a ticket holder",
+      winner: label,
       youWon,
       at: Date.now(),
     };
+    // The hit joins the history the popover shows, and rides the save.
+    this.fireLog.unshift({
+      round: this.roundId,
+      name: label,
+      charId: youWon ? this.charId : (this.charMap.get(fire.winnerId) ?? ""),
+      sol: fire.amount,
+      at: Date.now(),
+    });
+    if (this.fireLog.length > 15) this.fireLog.pop();
     sfxBonanza();
     // The jackpot sequence needs room to play out before the next lobby.
     this.phaseEnd = Date.now() + this.config.timing.bonanzaMs;
@@ -1586,6 +1609,7 @@ export class GameClient {
       online: 1,
       connected: true,
       away: this.awayRecap,
+      bonanzaFires: this.fireLog,
     };
   }
 }

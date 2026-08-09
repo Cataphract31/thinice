@@ -11,6 +11,7 @@ import {
   loadMutePreference,
   setMuted,
   setVolume,
+  sfxExtract,
 } from "@/audio/sound";
 
 /** Flat icon button shared by the top bar's controls. */
@@ -305,6 +306,23 @@ function TicketsStat({
                 {snap.bonanzaDrought.toLocaleString()} rounds ago
               </span>
             </div>
+            {/* The proof the jackpot is real: the last few people it paid.
+                Three rows here; the bonanza bar holds the longer list. */}
+            {(snap.bonanzaFires ?? []).slice(0, 3).map((f) => (
+              <div key={f.round} className="mt-1 flex items-center gap-1.5">
+                <CharArt charId={f.charId} pose="head" size={14} />
+                <span
+                  className="truncate text-[11px] font-semibold"
+                  style={f.name === "YOU" ? { color: "var(--color-cyan)" } : undefined}
+                >
+                  {f.name}
+                </span>
+                <span className="tnum ml-auto text-[11px] font-bold text-[var(--color-gold)]">
+                  {f.sol.toFixed(1)} ◎
+                </span>
+                <span className="label w-[26px] text-right">{ago(Date.now() - f.at)}</span>
+              </div>
+            ))}
             <div className="mt-1 text-[10.5px] leading-snug text-[var(--color-dim)]">
               Fires about 1 round in{" "}
               {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()},
@@ -558,58 +576,136 @@ export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
   // and this whole bar was a row of chrome between the player and the ice.
   const pool = snap.bonanzaPool;
   const digits = poolDigits(pool);
+  const [open, setOpen] = useState(false);
+  const fires = snap.bonanzaFires ?? [];
   return (
-    <div className="breathe mx-3 flex items-center gap-3 rounded-sm bg-gradient-to-r from-[#1b1608] to-[#0f1319] px-3 py-1.5 max-sm:hidden">
-      <span className="label text-[var(--color-gold)]">bonanza</span>
-      <span className="tnum text-[17px] font-bold text-[var(--color-gold)]">
-        {pool.toFixed(digits)} ◎
-      </span>
-      {/* The drought is the sales pitch: every dry round is one more the
-          pool grew and one more it did not fire. Odds stay printed next to
-          it so the number reads as chance, never as "due". */}
-      <span className="label ml-auto hidden sm:inline">
-        last hit{" "}
-        <span className="tnum text-[var(--color-gold)]">
-          {snap.bonanzaDrought.toLocaleString()}
-        </span>{" "}
-        rounds ago · 1 in{" "}
-        {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()} every
-        round · one ticket takes all
-      </span>
+    <div className="relative mx-3 max-sm:hidden">
+      {/* The whole bar is the button: tap it and the jackpot shows its
+          receipts — who it paid, how much, how long ago. */}
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="breathe flex w-full items-center gap-3 rounded-sm bg-gradient-to-r from-[#1b1608] to-[#0f1319] px-3 py-1.5 text-left"
+      >
+        <span className="label text-[var(--color-gold)]">bonanza</span>
+        <span className="tnum text-[17px] font-bold text-[var(--color-gold)]">
+          {pool.toFixed(digits)} ◎
+        </span>
+        {/* The drought is the sales pitch: every dry round is one more the
+            pool grew and one more it did not fire. Odds stay printed next to
+            it so the number reads as chance, never as "due". */}
+        <span className="label ml-auto hidden sm:inline">
+          last hit{" "}
+          <span className="tnum text-[var(--color-gold)]">
+            {snap.bonanzaDrought.toLocaleString()}
+          </span>{" "}
+          rounds ago · 1 in{" "}
+          {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()} every
+          round · one ticket takes all · history ▾
+        </span>
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-50 mt-1.5 w-[320px] rounded-md bg-[var(--color-panel2)] p-3 shadow-[0_8px_30px_rgba(0,0,0,0.55)]">
+            <div className="label mb-1.5 text-[var(--color-gold)]">bonanza hits</div>
+            {fires.length === 0 ? (
+              <div className="text-[12px] text-[var(--color-dim)]">
+                No hits on record yet. Every dry round grows the pool.
+              </div>
+            ) : (
+              fires.slice(0, 10).map((f) => (
+                <div key={f.round} className="flex items-center gap-2 py-1">
+                  <CharArt charId={f.charId} pose="head" size={18} />
+                  <span
+                    className="truncate text-[12px] font-semibold"
+                    style={f.name === "YOU" ? { color: "var(--color-cyan)" } : undefined}
+                  >
+                    {f.name}
+                  </span>
+                  <span className="label">#{f.round.toLocaleString()}</span>
+                  <span className="tnum ml-auto text-[12px] font-bold text-[var(--color-gold)]">
+                    {f.sol.toFixed(1)} ◎
+                  </span>
+                  <span className="label w-[30px] text-right">{ago(Date.now() - f.at)}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
+/** How long ago, in the shortest spelling that still reads. */
+function ago(ms: number): string {
+  const h = ms / 3_600_000;
+  if (h >= 48) return `${Math.round(h / 24)}d`;
+  if (h >= 1) return `${Math.round(h)}h`;
+  return `${Math.max(1, Math.round(ms / 60_000))}m`;
+}
+
 /**
- * "While you were away": the rakeback that streamed in between visits, as a
- * one-shot toast over the board. This is the whole rev-share pitch made
- * visible — the stream pays whether you are watching it or not.
+ * The welcome-back card: an idle game's "while you were away" screen for the
+ * rev-share stream. One-shot, full takeover, big gold number counting up,
+ * one COLLECT button. This is the whole pitch made into a dopamine moment —
+ * your tickets earned while the tab was closed, here are the receipts.
  */
 export function AwayRecap({ snap }: { snap: Snapshot }): JSX.Element | null {
   const away = snap.away ?? null;
   const [shown, setShown] = useState<{ ms: number; sol: number } | null>(null);
+  const [val, setVal] = useState(0);
   useEffect(() => {
     if (!away || away.sol <= 0) return;
     setShown(away);
-    const t = window.setTimeout(() => setShown(null), 10_000);
-    return () => clearTimeout(t);
   }, [away]);
+  // The count-up IS the dopamine: the number climbs to its total with a
+  // fast start and a soft landing, like a payout being counted out.
+  useEffect(() => {
+    if (!shown) return;
+    setVal(0);
+    const t0 = performance.now();
+    const dur = 1700;
+    let raf = 0;
+    const step = (t: number): void => {
+      const k = Math.min(1, (t - t0 - 350) / dur);
+      if (k > 0) setVal(shown.sol * (1 - Math.pow(1 - k, 3)));
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [shown]);
   if (!shown) return null;
-  const hours = shown.ms / 3_600_000;
-  const spell =
-    hours >= 48
-      ? `${Math.round(hours / 24)}d`
-      : hours >= 1
-        ? `${Math.round(hours)}h`
-        : `${Math.max(2, Math.round(shown.ms / 60_000))}m`;
+
   return (
-    <div className="win-rise pointer-events-none absolute inset-x-0 top-2 z-30 flex justify-center">
-      <div className="flex items-baseline gap-2 rounded-sm bg-[var(--color-pit)]/95 px-3 py-2 shadow-[0_6px_24px_rgba(0,0,0,0.5)] backdrop-blur">
-        <span className="label">away {spell}</span>
-        <span className="tnum text-[15px] font-bold text-[var(--color-gold)]">
-          +{shown.sol.toFixed(4)} ◎
-        </span>
-        <span className="label">rakeback streamed in</span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+      <div className="win-slam w-[340px] max-w-full rounded-md bg-[var(--color-pit)] p-6 text-center shadow-[0_16px_60px_rgba(0,0,0,0.7)]">
+        <div className="label text-[var(--color-cyan)]">the stream never sleeps</div>
+        <h2 className="display mt-1.5 text-[19px] font-bold tracking-[0.16em]">
+          WHILE YOU WERE AWAY
+        </h2>
+        <div className="label mt-1">gone {ago(shown.ms)}</div>
+
+        <div className="breathe tnum mt-5 text-[40px] font-bold leading-none text-[var(--color-gold)]">
+          +{val.toFixed(4)} <span className="text-[24px]">◎</span>
+        </div>
+        <div className="label mt-1.5">rakeback streamed into your wallet</div>
+
+        <div className="mt-4 text-[12px] text-[var(--color-dim)]">
+          every sealed round pays your tickets their cut, awake or not
+        </div>
+
+        <button
+          onClick={() => {
+            initAudio();
+            sfxExtract();
+            setShown(null);
+          }}
+          className="display mt-5 w-full rounded-sm bg-[var(--color-gold)] py-3 text-[15px] font-bold tracking-[0.12em] text-[#241a05] transition-transform active:scale-[0.985]"
+        >
+          COLLECT
+        </button>
       </div>
     </div>
   );

@@ -23,7 +23,7 @@ from scipy import ndimage
 SRC = r"C:\ZINC\art-drop"
 DST = r"C:\ZINC\apps\web\public"
 POSES = {"head": 384, "win": 512, "lose": 512}
-CHARS = ["chad", "soyjak", "wojak", "ansem", "saylor", "pepe", "chud", "bogdanoff", "bobo", "mumu"]
+CHARS = ["chad", "soyjak", "wojak", "ansem", "saylor", "pepe", "chud", "bogdanoff", "bobo", "mumu", "milady"]
 TILES = ["base", "hairline", "heavy", "crack"]
 TILE_SIZE = 384
 COLORS = 96
@@ -98,7 +98,7 @@ def trim(img: Image.Image) -> Image.Image:
     )
 
 
-def drop_specks(img: Image.Image, min_frac: float = 0.01) -> Image.Image:
+def drop_specks(img: Image.Image, min_frac: float = 0.02) -> Image.Image:
     """Deletes anything that is not part of the character.
 
     Some generations come with a decorative border. The keyer eats the parts
@@ -107,6 +107,12 @@ def drop_specks(img: Image.Image, min_frac: float = 0.01) -> Image.Image:
     such fragment is its own island, so keeping only islands of a meaningful
     size relative to the subject removes them and leaves real detached pieces
     (a held phone, a raised fist) untouched.
+
+    The threshold also earns its keep on scenery: Milady is drawn kneeling
+    among spilled chips and cards, and a couple of those survived 1% and left
+    her floating above a litter of debris while every other loser stands alone
+    on the ice. 2% clears them. The real detached pieces on the roster are all
+    3.5% and up, so nothing that belongs to a character is anywhere near it.
     """
     a = np.asarray(img).copy()
     op = a[..., 3] > 8

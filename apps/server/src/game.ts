@@ -164,6 +164,8 @@ export class GameServer {
   private botStrategies = new Map<number, Strategy>();
   private bonanza: NetState["bonanza"] = null;
   private bonanzaWallet: string | null = null;
+  /** Recent jackpot hits, newest first. Loaded at boot, appended per fire. */
+  private fireLog: NetState["bonanzaFires"] = [];
   private lastBroadcast = 0;
   private teamWins: Record<string, number>;
 
@@ -186,6 +188,13 @@ export class GameServer {
       toSol(Number(db.getMeta("bonanzaPool") ?? 0)),
     );
     this.revShare = new RevShareLedger(this.config.revShare);
+    this.fireLog = this.db.bonanzaFires(15).map((f) => ({
+      round: f.roundId,
+      name: f.name,
+      charId: f.charId,
+      sol: toSol(f.lamports),
+      at: f.at,
+    }));
     this.restoreLedgers();
   }
 
@@ -971,8 +980,22 @@ export class GameServer {
         tickets: ticketRows,
         bonanzaPool: String(toLamports(this.jackpot.pool)),
         ...(bon.settle ? { lastFireRound: String(this.roundId) } : {}),
+        // (hit-history row rides this same transaction; see closeRound)
       },
     );
+
+    // The in-memory hit list appends only after the close committed, so it
+    // can never show a fire whose transaction rolled back.
+    if (bon.settle?.winner) {
+      this.fireLog.unshift({
+        round: this.roundId,
+        name: bon.settle.name ?? "?",
+        charId: bon.settle.charId ?? "",
+        sol: toSol(bon.settle.lamports),
+        at: Date.now(),
+      });
+      if (this.fireLog.length > 15) this.fireLog.pop();
+    }
 
     this.phase = "result";
     // A fire earns the longer result phase the celebration was written for.
@@ -1005,7 +1028,7 @@ export class GameServer {
         }
       | null;
     /** Fire payout for the close transaction. Null: the jackpot held. */
-    settle: { winner: string | null; lamports: number } | null;
+    settle: { winner: string | null; lamports: number; name: string; charId: string } | null;
   } {
     const fire = this.jackpot.roll(deriveRng(this.seedHex, BONANZA_TAG));
     const draws = this.jackpot.lastDraws;
@@ -1030,19 +1053,26 @@ export class GameServer {
     }
     this.lastFireRound = this.roundId;
     this.bonanzaWallet = winnerWallet || null;
+    // A bot winner is announced by its table name, not a wallet-shaped
+    // truncation of "bot:frosty" — the label rule holds everywhere.
+    const label = isBot(winnerWallet)
+      ? `bot·${winnerWallet.slice(4)}`
+      : shortAddress(winnerWallet || "?");
     this.bonanza = {
       amount: fire.amount,
-      // A bot winner is announced by its table name, not a wallet-shaped
-      // truncation of "bot:frosty" — the label rule holds everywhere.
-      winner: isBot(winnerWallet)
-        ? `bot·${winnerWallet.slice(4)}`
-        : shortAddress(winnerWallet || "?"),
+      winner: label,
       youWon: false,
       at: Date.now(),
     };
     return {
       trace,
-      settle: { winner: winnerWallet || null, lamports: winnerWallet ? toLamports(fire.amount) : 0 },
+      settle: {
+        winner: winnerWallet || null,
+        lamports: winnerWallet ? toLamports(fire.amount) : 0,
+        // Display identity frozen at fire time, for the hit-history row.
+        name: label,
+        charId: winnerWallet ? this.db.player(winnerWallet).charId : "",
+      },
     };
   }
 
@@ -1203,6 +1233,7 @@ export class GameServer {
       session: s.session,
       bonanzaPool: this.jackpot.pool,
       bonanzaDrought: Math.max(0, this.roundId - this.lastFireRound),
+      bonanzaFires: this.fireLog,
       bonanzaTickets: bonYours,
       revShareTickets: id === undefined ? 0 : this.revShare.lifetimeOf(id),
       // Both of these are compared on the full wallet, never the display name:

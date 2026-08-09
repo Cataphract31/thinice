@@ -134,6 +134,8 @@ export interface NetState {
   bonanzaTickets: number;
   revShareTickets: number;
   bonanza: { amount: number; winner: string; youWon: boolean; at: number } | null;
+  /** Recent jackpot hits, newest first, for the hit-history popover. */
+  bonanzaFires: { round: number; name: string; charId: string; sol: number; at: number }[];
   charId: string;
   winner: {
     name: string;

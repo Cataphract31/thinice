@@ -146,6 +146,17 @@ export class Database {
          table that grows without bound. */
       CREATE INDEX IF NOT EXISTS rakeback_wallet ON rakeback_payouts(wallet);
 
+      /* Jackpot hit history: one row per fire, display identity frozen at
+         fire time. Written inside the closeRound transaction. */
+      CREATE TABLE IF NOT EXISTS bonanza_fires (
+        roundId  INTEGER PRIMARY KEY,
+        wallet   TEXT    NOT NULL,
+        name     TEXT    NOT NULL,
+        charId   TEXT    NOT NULL DEFAULT '',
+        lamports INTEGER NOT NULL,
+        at       INTEGER NOT NULL
+      );
+
       /* On-chain movements. The PRIMARY KEY on the signature is the entire
          double-credit defence for deposits: a transaction can be presented a
          thousand times and only the first insert credits anything. */
@@ -636,8 +647,15 @@ export class Database {
     record: string,
     digest: string,
     settle: {
-      /** A fired jackpot: pay the winner and wipe every ticket. Null: no fire. */
-      bonanza: { winner: string | null; lamports: number } | null;
+      /** A fired jackpot: pay the winner and wipe every ticket. Null: no fire.
+          `name`/`charId` are the display identity frozen at fire time, for
+          the hit-history row — wallets are never shown raw. */
+      bonanza: {
+        winner: string | null;
+        lamports: number;
+        name?: string;
+        charId?: string;
+      } | null;
       /** Post-round ticket state for every wallet in either economy. */
       tickets: { wallet: string; bonanza: number; revLifetime: number; revWeight: number }[];
       /** The pool's new persisted value, in lamports, as meta text. */
@@ -675,6 +693,21 @@ export class Database {
               "UPDATE players SET balance = balance + ?, bonanzaWon = bonanzaWon + ? WHERE wallet = ?",
             )
             .run(settle.bonanza.lamports, settle.bonanza.lamports, settle.bonanza.winner);
+          // The hit-history row commits WITH the payout, so the list can
+          // never advertise a fire that a rollback then unpaid.
+          this.db
+            .prepare(
+              `INSERT OR REPLACE INTO bonanza_fires (roundId, wallet, name, charId, lamports, at)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+              id,
+              settle.bonanza.winner,
+              settle.bonanza.name ?? "?",
+              settle.bonanza.charId ?? "",
+              settle.bonanza.lamports,
+              Date.now(),
+            );
         }
         this.db.exec("UPDATE players SET bonanzaTickets = 0");
       }
@@ -694,6 +727,15 @@ export class Database {
       this.db.exec("ROLLBACK");
       throw err;
     }
+  }
+
+  /** The most recent jackpot hits, newest first, for the history popover. */
+  bonanzaFires(limit: number): { roundId: number; name: string; charId: string; lamports: number; at: number }[] {
+    return this.db
+      .prepare(
+        "SELECT roundId, name, charId, lamports, at FROM bonanza_fires ORDER BY roundId DESC LIMIT ?",
+      )
+      .all(limit) as unknown as { roundId: number; name: string; charId: string; lamports: number; at: number }[];
   }
 
   lastRoundId(): number {
