@@ -181,6 +181,10 @@ export class LatticeRenderer {
   private crownBearer: number | null = null;
   /** One plate per owner cluster wears the corner seal. */
   private sealIds = new Set<number>();
+  /** group -> the plate carrying its seal. STICKY: once chosen it stays put
+   *  until that plate dies or leaves, so the face does not hop around the
+   *  cluster every time a lobby join relays the board out. */
+  private sealBearer = new Map<string, number>();
   /** Where the deciding break happened; the zoom leans into it. */
   private focus = { x: 0, y: 0 };
   /** 1 to 0 over the beat after your own round ends. */
@@ -449,10 +453,14 @@ export class LatticeRenderer {
     }
 
     // One seal per owner: a cluster is already one holding (shared rim, one
-    // brain), so stamping every plate repeated the same face five times. The
-    // seal sits on the member nearest the cluster's centre of mass — defined
-    // for ANY size, including 2 and 4 where "the middle plate" does not
-    // exist — and walks to a surviving plate when its bearer breaks.
+    // brain), so stamping every plate repeated the same face five times.
+    // Placement is STICKY: a new cluster gets its seal on the member nearest
+    // its centre of mass — defined for ANY size, including 2 and 4 where
+    // "the middle plate" does not exist — and then the seal stays on that
+    // plate for good, only walking when its bearer dies. Recomputing the
+    // centre every push made the face dance around the stack with every
+    // lobby join; a face that keeps its plate reads as a person standing
+    // still while the room fills around them.
     this.sealIds.clear();
     const clusters = new Map<string, Cell[]>();
     for (const c of this.cells.values()) {
@@ -462,7 +470,12 @@ export class LatticeRenderer {
       if (!arr) clusters.set(key, (arr = []));
       arr.push(c);
     }
-    for (const arr of clusters.values()) {
+    for (const [key, arr] of clusters) {
+      const held = this.sealBearer.get(key);
+      if (held !== undefined && arr.some((c) => c.id === held)) {
+        this.sealIds.add(held);
+        continue;
+      }
       let cx = 0;
       let cy = 0;
       for (const c of arr) {
@@ -480,8 +493,12 @@ export class LatticeRenderer {
           best = c;
         }
       }
+      this.sealBearer.set(key, best.id);
       this.sealIds.add(best.id);
     }
+    // Groups gone from the board release their bearer slot.
+    for (const key of this.sealBearer.keys())
+      if (!clusters.has(key)) this.sealBearer.delete(key);
 
     // Fresh chat surfaces on the board as a bubble over its sender. The very
     // first push seeds the id cursor silently, so a (re)connect replaying the
@@ -984,9 +1001,8 @@ export class LatticeRenderer {
       const bh = 26;
       const bx = Math.max(6, Math.min(this.w - bw - 6, sx / n - bw / 2));
       // Above the cluster, drifting up a touch as it lives; flipped below
-      // when the cluster already touches the top of the lattice. High enough
-      // to clear the YOU tag, which owns the band right over your plates.
-      let by = top - r * 2.0 - bh - k * 5;
+      // when the cluster already touches the top of the lattice.
+      let by = top - r * 1.5 - bh - k * 5;
       if (by < 4) by = top + r * 1.45 + 8 + k * 5;
 
       ctx.beginPath();
@@ -1496,10 +1512,18 @@ export class LatticeRenderer {
       // with the hazard glow. Dying plates keep theirs while they fade, so a
       // cluster visibly loses a member rather than a stranger.
       if (c.hue !== undefined && c.state !== "cashed" && this.radius > 5) {
-        ctx.globalAlpha = alpha * 0.65;
-        ctx.strokeStyle = `hsl(${c.hue} 65% 60%)`;
-        ctx.lineWidth = Math.max(1, this.radius * 0.07);
-        hexPath(ctx, c.x + jx, c.y + jy + dy, this.radius * scale * 0.88);
+        // A rim you can actually USE to split two stacks at a glance: a dark
+        // underlay stroke first so the colour has an edge against the pale
+        // ice, then a thick saturated band. The old thin 65%-sat line was
+        // the polite version, and politely nobody could read it.
+        hexPath(ctx, c.x + jx, c.y + jy + dy, this.radius * scale * 0.86);
+        ctx.globalAlpha = alpha * 0.55;
+        ctx.strokeStyle = "rgba(4, 8, 12, 0.9)";
+        ctx.lineWidth = Math.max(2, this.radius * 0.2);
+        ctx.stroke();
+        ctx.globalAlpha = alpha * 0.95;
+        ctx.strokeStyle = `hsl(${c.hue} 92% 58%)`;
+        ctx.lineWidth = Math.max(1.5, this.radius * 0.12);
         ctx.stroke();
         ctx.globalAlpha = alpha;
       }
@@ -1545,58 +1569,10 @@ export class LatticeRenderer {
         ctx.restore();
       }
     }
-    this.drawYouTag();
+    // No floating YOU tag any more: the cyan plates and your big centred
+    // head already answer "whose are these", and the tag was a second voice
+    // saying the same thing over the same spot.
     ctx.globalAlpha = 1;
-  }
-
-  /**
-   * One floating marker over your whole holding. The per-plate cyan rims say
-   * "these plates are special"; this says WHOSE they are and how many, which
-   * multi-buy made ambiguous — a two-plate stack next to an owner-rimmed bot
-   * cluster read as just another cluster until you hunted for the cyan. The
-   * count falls as your plates die, so the tag doubles as a live stack gauge.
-   */
-  private drawYouTag(): void {
-    if (this.radius <= 5 || this.snap.phase === "result") return;
-    const { ctx } = this;
-    let n = 0;
-    let sx = 0;
-    let topY = Infinity;
-    for (const c of this.cells.values()) {
-      if (c.state !== "you") continue;
-      n++;
-      sx += c.x;
-      if (c.y < topY) topY = c.y;
-    }
-    if (n === 0) return;
-
-    const cx = sx / n;
-    const fs = Math.max(11, Math.min(17, this.radius * 0.55));
-    const bob = Math.sin(this.time * 2.6) * 1.6;
-    // Above the topmost plate of the cluster, clamped so a top-row cluster
-    // keeps the tag on screen instead of clipping it at the frame edge.
-    const y = Math.max(fs + 10, topY - this.radius * 1.32) + bob;
-    const label = n > 1 ? `YOU ×${n}` : "YOU";
-
-    ctx.save();
-    ctx.font = `700 ${fs}px "Chakra Petch", ui-sans-serif, system-ui, sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "alphabetic";
-    // Dark halo, not a chip: keeps the chrome boxless while staying legible
-    // over pale ice and hot seams alike.
-    ctx.shadowColor = "rgba(2, 12, 18, 0.95)";
-    ctx.shadowBlur = 5;
-    ctx.fillStyle = "#3fe0d8";
-    ctx.fillText(label, cx, y - 4);
-    // Chevron pointing down into the cluster.
-    const cw = fs * 0.34;
-    ctx.beginPath();
-    ctx.moveTo(cx - cw, y);
-    ctx.lineTo(cx + cw, y);
-    ctx.lineTo(cx, y + cw * 1.3);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
   }
 
   /** Broken ore in flight. Value shards home in on the multiplier. */

@@ -46,24 +46,44 @@ export function Shaft({
     // The layout clusters spatially by `group`, so array order carries no
     // meaning here any more — the renderer grows each owner a contiguous
     // blob of hexes itself, with yours pinned to the centre.
-    // Multi-plate owners get a rim tint hashed from the wallet name: stable
-    // for the whole round, needs no palette bookkeeping, and steers clear of
-    // the cyan band so nobody's stack masquerades as "you".
+    //
+    // Rim colours come from a palette ORDERED FOR CONTRAST, not from a name
+    // hash: the first clusters get far-apart colours (red, then green, then
+    // gold, then violet...), never neighbouring shades, so two stacks side
+    // by side cannot wear lookalike rims. Assignment is by each cluster's
+    // lowest plate id — stable for the whole round, reshuffled naturally
+    // between rounds by join order. No light blues or cyans anywhere: the
+    // ice itself is pale blue and cyan is YOU. No black either; the pit
+    // behind the lattice is near-black and the rim would vanish into it.
+    // Overflow past the palette walks the golden angle, skipping that band.
     const counts = new Map<string, number>();
     for (const p of snap.players) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
-    const hueOf = (name: string): number => {
-      let h = 0;
-      for (let i = 0; i < name.length; i++) h = (Math.imul(h, 31) + name.charCodeAt(i)) >>> 0;
-      const hue = h % 360;
-      return hue > 150 && hue < 210 ? (hue + 70) % 360 : hue;
-    };
+    const PALETTE = [348, 130, 48, 270, 26, 312, 224, 84];
+    const firstId = new Map<string, number>();
+    for (const p of snap.players) {
+      if (p.you || (counts.get(p.name) ?? 0) < 2) continue;
+      const cur = firstId.get(p.name);
+      if (cur === undefined || p.id < cur) firstId.set(p.name, p.id);
+    }
+    const hueByGroup = new Map<string, number>();
+    [...firstId.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .forEach(([name], i) => {
+        let hue =
+          i < PALETTE.length
+            ? PALETTE[i]!
+            : Math.round(PALETTE[i % PALETTE.length]! + 137.5 * Math.floor(i / PALETTE.length)) %
+              360;
+        if (hue > 150 && hue < 210) hue = (hue + 70) % 360;
+        hueByGroup.set(name, hue);
+      });
     r.update({
       cells: snap.players.map((p) => ({
         id: p.id,
         you: p.you,
         group: p.name,
         charId: p.charId,
-        hue: !p.you && (counts.get(p.name) ?? 0) > 1 ? hueOf(p.name) : undefined,
+        hue: hueByGroup.get(p.name),
         // Only exits carry their banked multiple onto the board; the state
         // mapping below keeps a last-stander out of "cashed", so the print
         // lands on leavers alone.
