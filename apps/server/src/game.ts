@@ -33,10 +33,20 @@ export function shortAddress(addr: string): string {
  * with (or impersonate) a real address, and each keeps ONE persistent wallet
  * so its profile card shows a genuine accumulated record rather than invented
  * numbers. The display name is the label: every surface — roster, lattice
- * profile, winner scene — says `bot·frosty`, never a wallet-shaped string.
+ * profile, winner scene — says `bot·rime`, never a wallet-shaped string.
+ *
+ * This is the SECOND fleet. The first — frosty, glacier, tundra, drift, floe,
+ * shiver, hail, slush — was retired once its records stopped being meaningful:
+ * one of them caught a 35 SOL jackpot and the rest carried thousands of rounds
+ * of history. Retiring is just dropping the name from this list, because a
+ * wallet that is never seated again can neither play nor earn. Their rounds
+ * stay in the history and still replay. Their ticket holdings were zeroed at
+ * the same time, which is what takes them out of the jackpot draw and the
+ * rev-share split for good: the ledgers only ever hydrate wallets that still
+ * hold something.
  */
 const BOT_NAMES = [
-  "frosty", "glacier", "tundra", "drift", "floe", "shiver", "hail", "slush",
+  "rime", "nilas", "hoar", "graupel", "brash", "sleet", "frazil", "calving",
 ];
 
 /**
@@ -54,14 +64,14 @@ const BOT_STYLE: Record<
   string,
   { t0: number; t1: number; panic: number; nerve: number; guts: number }
 > = {
-  frosty: { t0: 1.12, t1: 1.55, panic: 0.028, nerve: 0.95, guts: 0.1 },
-  glacier: { t0: 1.35, t1: 2.1, panic: 0.042, nerve: 0.55, guts: 0.35 },
-  tundra: { t0: 1.7, t1: 3.0, panic: 0.055, nerve: 0.4, guts: 0.6 },
-  drift: { t0: 2.4, t1: 5.0, panic: 0.085, nerve: 0.15, guts: 0.95 },
-  floe: { t0: 1.2, t1: 3.8, panic: 0.05, nerve: 0.6, guts: 0.5 },
-  shiver: { t0: 1.25, t1: 1.8, panic: 0.034, nerve: 0.85, guts: 0.2 },
-  hail: { t0: 1.9, t1: 3.4, panic: 0.068, nerve: 0.25, guts: 0.8 },
-  slush: { t0: 1.45, t1: 2.5, panic: 0.048, nerve: 0.5, guts: 0.45 },
+  rime: { t0: 1.12, t1: 1.55, panic: 0.028, nerve: 0.95, guts: 0.1 },
+  nilas: { t0: 1.35, t1: 2.1, panic: 0.042, nerve: 0.55, guts: 0.35 },
+  hoar: { t0: 1.7, t1: 3.0, panic: 0.055, nerve: 0.4, guts: 0.6 },
+  graupel: { t0: 2.4, t1: 5.0, panic: 0.085, nerve: 0.15, guts: 0.95 },
+  brash: { t0: 1.2, t1: 3.8, panic: 0.05, nerve: 0.6, guts: 0.5 },
+  sleet: { t0: 1.25, t1: 1.8, panic: 0.034, nerve: 0.85, guts: 0.2 },
+  frazil: { t0: 1.9, t1: 3.4, panic: 0.068, nerve: 0.25, guts: 0.8 },
+  calving: { t0: 1.45, t1: 2.5, panic: 0.048, nerve: 0.5, guts: 0.45 },
 };
 const isBot = (wallet: string): boolean => wallet.startsWith("bot:");
 
@@ -455,7 +465,7 @@ export class GameServer {
    * break every player's replay verification.
    */
   private makeBotBrain(name: string): Strategy {
-    const s = BOT_STYLE[name] ?? BOT_STYLE["glacier"]!;
+    const s = BOT_STYLE[name] ?? BOT_STYLE["nilas"]!;
     const target = s.t0 + this.rng.next() * (s.t1 - s.t0);
     const panicAt = s.panic + this.rng.next() * 0.015;
     const breakEven = 1 / (1 - totalRake(this.config));
@@ -1054,7 +1064,7 @@ export class GameServer {
     this.lastFireRound = this.roundId;
     this.bonanzaWallet = winnerWallet || null;
     // A bot winner is announced by its table name, not a wallet-shaped
-    // truncation of "bot:frosty" — the label rule holds everywhere.
+    // truncation of "bot:rime" — the label rule holds everywhere.
     const label = isBot(winnerWallet)
       ? `bot·${winnerWallet.slice(4)}`
       : shortAddress(winnerWallet || "?");

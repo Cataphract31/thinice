@@ -220,6 +220,29 @@ export class Database {
         COMMIT;
       `);
     }
+
+    // A face is dealt once, at wallet creation, and frozen — so every bot
+    // minted before the roster grew wears the old faces forever, and adding
+    // characters never puts a new face on the ice. Bots are set dressing with
+    // no identity worth preserving: redeal all of them across the full roster,
+    // once per roster SIZE (the meta key carries the count), so each future
+    // addition triggers exactly one reshuffle. Humans are never touched —
+    // their face may be their choice, and the picker is theirs to use.
+    const rosterKey = `charsRedealt.${CHARS.length}`;
+    const done = this.db
+      .prepare("SELECT value FROM meta WHERE key = ?")
+      .get(rosterKey) as { value: string } | undefined;
+    if (!done) {
+      const bots = this.db
+        .prepare("SELECT wallet FROM players WHERE wallet LIKE 'bot:%'")
+        .all() as unknown as { wallet: string }[];
+      const deal = this.db.prepare("UPDATE players SET charId = ? WHERE wallet = ?");
+      for (const b of bots)
+        deal.run(CHARS[Math.floor(Math.random() * CHARS.length)]!, b.wallet);
+      this.db
+        .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)")
+        .run(rosterKey, String(Date.now()));
+    }
   }
 
   /**

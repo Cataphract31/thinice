@@ -624,6 +624,17 @@ export class GameClient {
   charId: string = CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)]!.id;
   private charMap = new Map<number, string>();
   auto: AutoSettings = { enabled: false, target: 2, plates: 1 };
+  /**
+   * Stress knob: `?field=120` pins every lobby to that many plates instead of
+   * the configured draw. Demo-only by construction (this class IS the demo),
+   * for eyeballing how the lattice, seals, finale and zoom behave at crowds
+   * the tuned range never produces. Clamped to something the layout survives.
+   */
+  private readonly fieldOverride: number | null = (() => {
+    const raw = new URLSearchParams(window.location.search).get("field");
+    const n = raw === null ? NaN : Number(raw);
+    return Number.isFinite(n) ? Math.max(3, Math.min(300, Math.round(n))) : null;
+  })();
 
   private listeners = new Set<(s: Snapshot) => void>();
 
@@ -860,7 +871,7 @@ export class GameClient {
       this.emit();
     })();
 
-    const n = drawFieldSize(this.config, this.rng.next());
+    const n = this.fieldOverride ?? drawFieldSize(this.config, this.rng.next());
     const now = Date.now();
     this.bonanza = null;
     this.winner = null;
