@@ -16,14 +16,23 @@
    * material. These are the identical blue-greys with enough light on them to
    * look like brushed metal in a room.
    */
-  --color-pit: #0a1017;
-  --color-panel: #0e1620;
-  --color-panel2: #141f2a;
-  --color-edge: #223343;
-  --color-edge2: #33506a;
+  /*
+   * house-style branch: the CHROME goes neutral. crash.zinc.cash sits on a
+   * near-black with no blue in it, and that neutrality is most of why it
+   * reads sleek — every drop of colour on the page is spent on meaning. The
+   * glacial identity does not live in these greys; it lives in the lattice,
+   * the cyan, and the canvas atmosphere, and against a neutral ground the
+   * ice reads COLDER, the way a rink reads in a dark arena.
+   */
+  --color-pit: #0a0c0e;
+  --color-panel: #0e1114;
+  --color-panel2: #161b1f;
+  --color-edge: #272e34;
+  --color-edge2: #3d474f;
 
-  --color-text: #e6eff6;
-  --color-dim: #7891a6;
+  /* Bone ink and a grey-sage dim, both straight off the house site. */
+  --color-text: #eef1e8;
+  --color-dim: #8b9793;
 
   /* Rolled zinc */
   --color-zinc: #4a6478;
@@ -45,7 +54,7 @@
    * ink at 14% rather than as a filled edge, which is why its panels read as
    * one surface scored into regions instead of a stack of cards.
    */
-  --color-line: rgba(230, 239, 246, 0.14);
+  --color-line: rgba(238, 241, 232, 0.14);
 
   /*
    * Mono for every numeral — tabular figures do not reflow while animating,
@@ -121,6 +130,22 @@ body {
      "AUTO OFF" and "EXIT AT" onto second lines and shove the auto row out of
      alignment. Captions are two or three words; none of them should wrap. */
   white-space: nowrap;
+}
+
+/*
+ * Secondary actions are OUTLINED, not filled — the house treatment. A filled
+ * chip is a small light source; twelve of them make the chrome glow all over.
+ * An outline weighs nothing until you look at it, which leaves the two filled
+ * elements on the page (EXTRACT and CONNECT) as the only things shining.
+ */
+.chip {
+  border: 1px solid var(--color-line);
+  border-radius: 2px;
+  background: transparent;
+}
+.chip:hover:not(:disabled) {
+  border-color: var(--color-edge2);
+  color: var(--color-text);
 }
 
 ::-webkit-scrollbar {

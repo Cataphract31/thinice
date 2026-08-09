@@ -37,6 +37,7 @@ export const CHARACTERS: CharacterDef[] = [
   { id: "bobo", label: "BOBO", emoji: "\u{1F43B}", hue: 25 },
   { id: "mumu", label: "MUMU", emoji: "\u{1F402}", hue: 145 },
   { id: "milady", label: "MILADY", emoji: "\u{1F380}", hue: 240 },
+  { id: "sbf", label: "SBF", emoji: "\u{1F4B8}", hue: 70 },
 ];
 
 const FALLBACK = CHARACTERS[0]!;

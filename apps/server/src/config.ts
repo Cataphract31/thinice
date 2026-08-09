@@ -94,6 +94,7 @@ export const CHARS = [
   "bobo",
   "mumu",
   "milady",
+  "sbf",
 ];
 
 export const LAMPORTS = 1_000_000_000;

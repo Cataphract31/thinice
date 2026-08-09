@@ -212,7 +212,7 @@ function WalletButton({
       className={
         cta
           ? "label flex items-center gap-1.5 rounded-sm bg-[var(--color-text)] px-2.5 py-1.5 font-semibold text-[var(--color-pit)] hover:brightness-95"
-          : "label rounded-sm bg-[var(--color-panel2)] px-2.5 py-1.5 hover:text-[var(--color-text)]"
+          : "chip label px-2.5 py-1.5"
       }
       style={shown ? { color: "var(--color-cyan)" } : expired ? { color: "var(--color-warn)" } : undefined}
     >
@@ -473,7 +473,7 @@ export function TopBar({
   onShowBank?: () => void;
 }): JSX.Element {
   return (
-    <div className="border-b border-[var(--color-line)] px-3 py-2">
+    <div className="border-b border-[var(--color-line)] px-3 py-2.5">
       <div className="flex items-center gap-3">
         {/* The house lockup: a filled tile carrying the product glyph, then
             the wordmark. crash.zinc.cash opens with exactly this shape, and
@@ -515,7 +515,7 @@ export function TopBar({
           {onShowBank && (
             <button
               onClick={onShowBank}
-              className="label rounded-sm bg-[var(--color-panel2)] px-2.5 py-1.5 text-[var(--color-profit)] hover:text-[var(--color-text)]"
+              className="chip label px-2.5 py-1.5 text-[var(--color-profit)]"
             >
               bank
             </button>
@@ -528,7 +528,7 @@ export function TopBar({
           <button
             onClick={onShowInfo}
             aria-label="How it works"
-            className="label flex items-center gap-1.5 rounded-sm border border-[var(--color-line)] px-2 py-1.5 hover:border-[var(--color-edge2)] hover:text-[var(--color-text)]"
+            className="chip label flex items-center gap-1.5 px-2 py-1.5"
           >
             <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
               <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -578,12 +578,12 @@ export function AutoPanel({
     <div className="flex items-center gap-2 px-2.5 py-2">
       <button
         onClick={() => onChange({ enabled: !on })}
-        className="label rounded-sm px-2.5 py-1.5"
-        style={{
-          background: on ? "var(--color-cyan)" : "var(--color-panel2)",
-          color: on ? "#03211f" : undefined,
-          fontWeight: on ? 700 : 500,
-        }}
+        className={on ? "label rounded-sm px-2.5 py-1.5" : "chip label px-2.5 py-1.5"}
+        style={
+          on
+            ? { background: "var(--color-cyan)", color: "#03211f", fontWeight: 700 }
+            : undefined
+        }
       >
         auto {on ? "on" : "off"}
       </button>

@@ -127,7 +127,7 @@ export function ChatPanel({
         <button
           type="submit"
           disabled={offline || draft.trim() === ""}
-          className="label rounded-sm bg-[var(--color-panel2)] px-2.5 hover:text-[var(--color-text)] disabled:opacity-50"
+          className="chip label px-2.5 disabled:opacity-50"
         >
           send
         </button>
@@ -138,7 +138,9 @@ export function ChatPanel({
   if (bare) return <div className="flex h-full min-h-0 flex-col">{body}</div>;
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-baseline justify-between px-2 pt-1.5">
+      {/* Scored off the tabbed panel above it, same hairline as the tab row:
+          the rail reads as one surface divided into regions, not a stack. */}
+      <div className="flex shrink-0 items-baseline justify-between border-t border-[var(--color-line)] px-2 pt-1.5">
         <span className="label">chat</span>
         <span className="label tnum">{snap.online} online</span>
       </div>
