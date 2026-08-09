@@ -783,15 +783,15 @@ export class GameClient {
     const r = this.rng.next();
     const target =
       r < 0.32
-        ? 1.15 + this.rng.next() * 0.35
+        ? 1.2 + this.rng.next() * 0.4
         : r < 0.8
           ? 1.5 + -Math.log(Math.max(1e-9, this.rng.next())) * 1.0
           : 2.6 + -Math.log(Math.max(1e-9, this.rng.next())) * 3.2;
     const nerve = Math.pow(this.rng.next(), 1.3);
     // Expressed on the shared risk scale rather than as a raw rate. On the
     // knee scale these cover the same real-world hazards as always
-    // (~1.7% to ~4.2%).
-    const panicAt = 0.43 + this.rng.next() * 0.25;
+    // (~2% to ~4.6%).
+    const panicAt = 0.47 + this.rng.next() * 0.25;
     // Balances are quoted against the post-rake starting stake, so break-even
     // on the entry actually paid sits just above 1. Derived from the config,
     // not hardcoded — this was pinned at 0.07 and would have silently gone
@@ -801,13 +801,16 @@ export class GameClient {
     return (ctx) => {
       // Nobody bails while the air still holds — there is nothing to flee.
       if (ctx.tick <= this.config.hazard.graceTicks) return false;
-      // And nobody locks in a certain loss out of nerves.
-      if (ctx.multiple < breakEven) return false;
+      // And nobody locks in a certain loss out of nerves — nor a token win:
+      // the early hazard spike used to scare the timid out at 1.0-something,
+      // which no real person pays 5% rake to do. Below a modest profit the
+      // target is the only exit. Same EV either way; this is presentation.
+      if (ctx.multiple < breakEven * 1.07) return false;
       if (ctx.multiple >= target) return true;
       // Bot nerves roll on the CLIENT stream, never the round's. A strategy
       // that drew from the round RNG would shift the elimination sequence and
       // break replay verification.
-      return riskScale(ctx.q) > panicAt && this.rng.next() < nerve * 0.16;
+      return riskScale(ctx.q) > panicAt && this.rng.next() < nerve * 0.12;
     };
   }
 
@@ -867,6 +870,28 @@ export class GameClient {
     this.lobbyEntrants = [];
     this.arrivals.clear();
     this.charMap.clear();
+    // One face per owner for as long as the roster holds out, drawn from a
+    // shuffled bag rather than rolled fresh each time: an independent roll
+    // per owner repeats constantly at this table size, and a crowd wearing
+    // three of the same face reads as a rendering bug, not a coincidence.
+    // Your own character is left out of the bag, so nobody in the room is
+    // wearing your face either. Past a full roster the bag simply refills —
+    // duplicates are unavoidable then, and by that point the lattice is busy
+    // enough that a repeat no longer reads as one person twice.
+    const facePool: string[] = [];
+    const drawFace = (): string => {
+      if (facePool.length === 0) {
+        for (const c of CHARACTERS) if (c.id !== this.charId) facePool.push(c.id);
+        for (let j = facePool.length - 1; j > 0; j--) {
+          const k = Math.floor(this.rng.next() * (j + 1));
+          const t = facePool[j]!;
+          facePool[j] = facePool[k]!;
+          facePool[k] = t;
+        }
+      }
+      return facePool.pop() ?? CHARACTERS[0]!.id;
+    };
+
     // The field is generated as OWNERS, not plates: most walk in with one,
     // but some are multi-bettors holding a stack — one wallet, one face, one
     // shared cash-out — so the demo shows what other people's clusters look
@@ -879,7 +904,7 @@ export class GameClient {
       );
       // Every player is a wallet, shown ends-only like any on-chain platform.
       const name = shortAddress(fakeAddress(() => this.rng.next()));
-      const char = CHARACTERS[Math.floor(this.rng.next() * CHARACTERS.length)]!.id;
+      const char = drawFace();
       const strategy = this.makeOwnerStrategy(take);
       // Spread arrivals across most of the lobby so the shaft visibly fills
       // rather than blinking into existence fully populated. The draw leaves

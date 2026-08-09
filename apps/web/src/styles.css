@@ -406,32 +406,35 @@ body {
     transform: translateX(0);
   }
   50% {
-    transform: translateX(0.7px);
+    transform: translateX(1.4px);
   }
 }
 .crt-jit1 .crt-lines {
-  animation: crt-sway 3.2s ease-in-out infinite;
+  animation: crt-sway 2.6s ease-in-out infinite;
 }
 @keyframes crt-grip {
   0%,
   100% {
-    transform: translateX(0);
+    transform: translateX(0) translateY(0);
   }
   25% {
-    transform: translateX(-1.1px);
+    transform: translateX(-2.4px) translateY(0.6px);
   }
   50% {
-    transform: translateX(0.6px);
+    transform: translateX(1.5px) translateY(-0.5px);
   }
   75% {
-    transform: translateX(-0.4px);
+    transform: translateX(-1px) translateY(0.4px);
   }
 }
 .crt-jit2 .crt-lines {
-  animation: crt-grip 0.36s steps(4) infinite;
+  animation: crt-grip 0.34s steps(4) infinite;
+}
+.crt-jit2 .crt-rgb {
+  animation: crt-grip 0.51s steps(4) infinite;
 }
 .crt-jit2 .crt-roll {
-  animation-duration: 5s;
+  animation-duration: 4.5s;
 }
 
 /*
@@ -442,10 +445,13 @@ body {
 @keyframes crt-tear {
   0% {
     opacity: 1;
-    transform: translateX(-3px);
+    transform: translateX(-7px) scaleY(1);
   }
-  40% {
-    transform: translateX(2px);
+  35% {
+    transform: translateX(5px) scaleY(1.25);
+  }
+  70% {
+    transform: translateX(-3px) scaleY(1);
   }
   100% {
     opacity: 0;
@@ -453,25 +459,25 @@ body {
   }
 }
 .crt-tear {
-  height: 9%;
+  height: 13%;
   background: linear-gradient(
     to bottom,
     transparent,
-    rgba(255, 255, 255, 0.09) 45%,
-    rgba(120, 200, 255, 0.05) 55%,
+    rgba(255, 255, 255, 0.16) 40%,
+    rgba(120, 200, 255, 0.1) 60%,
     transparent
   );
-  animation: crt-tear 0.26s ease-out both;
+  animation: crt-tear 0.38s ease-out both;
 }
 @keyframes crt-slip {
   0% {
     transform: translateX(0);
   }
   30% {
-    transform: translateX(-2.5px);
+    transform: translateX(-5px);
   }
   60% {
-    transform: translateX(1.5px);
+    transform: translateX(3px);
   }
   100% {
     transform: translateX(0);
@@ -479,7 +485,49 @@ body {
 }
 .crt-glitching .crt-lines,
 .crt-glitching .crt-rgb {
-  animation: crt-slip 0.26s steps(3) both;
+  animation: crt-slip 0.38s steps(4) both;
+}
+
+/*
+ * The TV power cycle between the winner screen and the next lobby: the
+ * picture collapses to a bright horizontal line, then snaps back open on the
+ * fresh ice. Applied to the lattice frame itself — transform and filter,
+ * both composited — so the whole broadcast, winner card included, closes
+ * with the round. CRT mode only.
+ */
+@keyframes tv-off {
+  0% {
+    transform: scaleY(1);
+    filter: brightness(1);
+  }
+  75% {
+    transform: scaleY(0.014);
+    filter: brightness(2.6);
+  }
+  100% {
+    transform: scaleY(0.004);
+    filter: brightness(3.2);
+  }
+}
+.tv-off {
+  animation: tv-off 0.24s ease-in both;
+}
+@keyframes tv-on {
+  0% {
+    transform: scaleY(0.004);
+    filter: brightness(3.2);
+  }
+  55% {
+    transform: scaleY(1.035);
+    filter: brightness(1.3);
+  }
+  100% {
+    transform: scaleY(1);
+    filter: brightness(1);
+  }
+}
+.tv-on {
+  animation: tv-on 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -488,8 +536,11 @@ body {
   .crt-tear,
   .crt-jit1 .crt-lines,
   .crt-jit2 .crt-lines,
+  .crt-jit2 .crt-rgb,
   .crt-glitching .crt-lines,
-  .crt-glitching .crt-rgb {
+  .crt-glitching .crt-rgb,
+  .tv-off,
+  .tv-on {
     animation: none !important;
   }
   .crt-roll,

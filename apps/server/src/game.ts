@@ -17,7 +17,7 @@ import {
   type Rng,
   type Strategy,
 } from "@zinc/engine";
-import { CONFIG, toLamports, toSol } from "./config.ts";
+import { CHARS, CONFIG, toLamports, toSol } from "./config.ts";
 import type { Database } from "./db.ts";
 import type { NetChat, NetHistory, NetPlayer, NetState } from "./protocol.ts";
 
@@ -64,12 +64,12 @@ const BOT_STYLE: Record<
   string,
   { t0: number; t1: number; panic: number; nerve: number; guts: number }
 > = {
-  rime: { t0: 1.12, t1: 1.55, panic: 0.028, nerve: 0.95, guts: 0.1 },
+  rime: { t0: 1.18, t1: 1.6, panic: 0.03, nerve: 0.9, guts: 0.1 },
   nilas: { t0: 1.35, t1: 2.1, panic: 0.042, nerve: 0.55, guts: 0.35 },
   hoar: { t0: 1.7, t1: 3.0, panic: 0.055, nerve: 0.4, guts: 0.6 },
   graupel: { t0: 2.4, t1: 5.0, panic: 0.085, nerve: 0.15, guts: 0.95 },
-  brash: { t0: 1.2, t1: 3.8, panic: 0.05, nerve: 0.6, guts: 0.5 },
-  sleet: { t0: 1.25, t1: 1.8, panic: 0.034, nerve: 0.85, guts: 0.2 },
+  brash: { t0: 1.26, t1: 3.8, panic: 0.05, nerve: 0.6, guts: 0.5 },
+  sleet: { t0: 1.3, t1: 1.85, panic: 0.036, nerve: 0.8, guts: 0.2 },
   frazil: { t0: 1.9, t1: 3.4, panic: 0.068, nerve: 0.25, guts: 0.8 },
   calving: { t0: 1.45, t1: 2.5, panic: 0.048, nerve: 0.5, guts: 0.45 },
 };
@@ -206,6 +206,40 @@ export class GameServer {
       at: f.at,
     }));
     this.restoreLedgers();
+    this.dealBotFaces();
+  }
+
+  /**
+   * Gives every bot a face no other bot is wearing.
+   *
+   * Characters are dealt at random when a wallet is first seen, which for a
+   * fixed cast of eight drawn from twelve is a birthday problem: a collision
+   * is the common case, not the rare one, and the live table opened with
+   * three identical ansems standing on it. Eight strangers who look like
+   * three people reads as a rendering bug long before it reads as a
+   * coincidence.
+   *
+   * A bot keeps whatever it already wears unless an earlier bot has claimed
+   * it, so faces stay put across restarts and only the duplicates move. Runs
+   * at boot, before anyone is seated, and is a no-op once the cast is unique.
+   */
+  private dealBotFaces(): void {
+    // More bots than characters makes duplicates unavoidable; leave the
+    // random deal alone rather than pretending to fix it.
+    if (BOT_NAMES.length > CHARS.length) return;
+    const taken = new Set<string>();
+    for (const name of BOT_NAMES) {
+      const wallet = `bot:${name}`;
+      const current = this.db.player(wallet).charId;
+      if (CHARS.includes(current) && !taken.has(current)) {
+        taken.add(current);
+        continue;
+      }
+      const free = CHARS.find((c) => !taken.has(c));
+      if (!free) return;
+      taken.add(free);
+      this.db.setChar(wallet, free);
+    }
   }
 
   /**
@@ -485,7 +519,13 @@ export class GameServer {
         // fold within a few ticks, the gutsy sit on their target and make
         // the human beat them to it.
         if (ctx.liveCount <= 2) return this.rng.next() < (1 - s.guts) * 0.22;
-        return ctx.q > panicAt && this.rng.next() < s.nerve * 0.15;
+        // Nerves need something to protect. The early hazard spike used to
+        // panic the timid straight out at 1.0-something, which read as
+        // broken cowardice from the rail — no real person pays 5% rake to
+        // scalp 4%. Below a modest profit the only exits are the target and
+        // the heads-up fold. Costs nothing: every strategy has the same EV.
+        if (ctx.multiple < breakEven * 1.07) return false;
+        return ctx.q > panicAt && this.rng.next() < s.nerve * 0.12;
       })();
       return decision;
     };

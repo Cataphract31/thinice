@@ -968,13 +968,15 @@ export class LatticeRenderer {
       ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
     }
     if (this.finaleT >= 0 && !this.finaleQuiet) {
-      // Lean-in on the deciding plate: quick push to +13%, held through the
+      // Lean-in on the deciding plate: quick push to +19%, held through the
       // slow-mo, released as real time returns. Scaling up around an interior
-      // point always keeps the canvas covered, so no edges ever show.
+      // point always keeps the canvas covered, so no edges ever show. Pushed
+      // deeper when the crown emoji retired: the zoom and the halo carry the
+      // coronation alone now.
       const f = this.finaleT;
       const zin = 1 - Math.pow(1 - Math.min(1, f / 0.35), 3);
       const zout = f < 1.9 ? 1 : Math.max(0, 1 - (f - 1.9) / 0.8);
-      const z = 1 + 0.13 * zin * zout;
+      const z = 1 + 0.19 * zin * zout;
       if (z > 1.001) {
         ctx.translate(this.focus.x, this.focus.y);
         ctx.scale(z, z);
@@ -1061,46 +1063,35 @@ export class LatticeRenderer {
   }
 
   /**
-   * The coronation. Once the slow-mo break has landed, the last plate
-   * standing gets a gold halo and a crown dropped onto it — a split second
-   * of "that one won" on the board itself, before the winner screen takes
-   * over. The wipe has no crown; the ice is the only winner there.
+   * The victor's light. Once the slow-mo break has landed, the surviving
+   * cluster gets a swelling gold halo with a breathing pulse — a beat of
+   * "that one won" on the board itself, before the winner screen takes
+   * over. There used to be a crown emoji dropped on top; it read as a
+   * sticker from another product, and the light says it better. The wipe
+   * gets nothing; the ice is the only winner there.
    */
   private drawCrown(): void {
-    // Quiet endings crown sooner: there is no slow-mo break to wait out,
-    // just the fade — the crown lands as the stage finishes clearing.
+    // Quiet endings glow sooner: there is no slow-mo break to wait out,
+    // just the fade — the light lands as the stage finishes clearing.
     const t = this.finaleT - (this.finaleQuiet ? 0.8 : 1.45);
     if (t < 0) return;
     const { ctx } = this;
     const r = this.radius;
-    const k = Math.min(1, t / 0.28);
-    // easeOutBack: the crown overshoots a touch and settles, like it landed.
-    const c1 = 1.7;
-    const pop = 1 + (c1 + 1) * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2);
     const halo = Math.min(1, t / 0.5);
-    const size = Math.max(10, r * 1.5) * Math.max(0, pop);
+    // A slow breath on top of the swell, so the light feels alive while the
+    // result screen assembles over it.
+    const breathe = 0.85 + 0.15 * Math.sin(t * 3.2);
 
-    const cell = this.cells.get(this.crownBearer!);
-    if (!cell) return;
     ctx.save();
-    ctx.font = `${size}px "Segoe UI Emoji", "Apple Color Emoji", serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    // Gold halo swelling behind the whole surviving cluster, one crown on
-    // its centre plate.
     for (const id of this.keepIds) {
       const kc = this.cells.get(id);
       if (!kc) continue;
-      const g = ctx.createRadialGradient(kc.x, kc.y, r * 0.2, kc.x, kc.y, r * 3.2);
-      g.addColorStop(0, `rgba(255, 205, 110, ${0.3 * halo})`);
+      const g = ctx.createRadialGradient(kc.x, kc.y, r * 0.2, kc.x, kc.y, r * 3.6);
+      g.addColorStop(0, `rgba(255, 205, 110, ${0.38 * halo * breathe})`);
       g.addColorStop(1, "rgba(255, 205, 110, 0)");
       ctx.fillStyle = g;
-      ctx.fillRect(kc.x - r * 3.2, kc.y - r * 3.2, r * 6.4, r * 6.4);
+      ctx.fillRect(kc.x - r * 3.6, kc.y - r * 3.6, r * 7.2, r * 7.2);
     }
-    // Clamped inside the frame: a winner on the top row wears the crown
-    // low on the plate instead of poking out of the world.
-    const cy = Math.max(size * 0.62, cell.y - r * (1.6 + 0.3 * k));
-    ctx.fillText("\u{1F451}", cell.x, cy);
     ctx.restore();
   }
 
@@ -1552,13 +1543,13 @@ export class LatticeRenderer {
         // ice, then a thick saturated band. The old thin 65%-sat line was
         // the polite version, and politely nobody could read it.
         hexPath(ctx, c.x + jx, c.y + jy + dy, this.radius * scale * 0.86);
-        ctx.globalAlpha = alpha * 0.55;
+        ctx.globalAlpha = alpha * 0.5;
         ctx.strokeStyle = "rgba(4, 8, 12, 0.9)";
-        ctx.lineWidth = Math.max(2, this.radius * 0.17);
+        ctx.lineWidth = Math.max(1.5, this.radius * 0.12);
         ctx.stroke();
         ctx.globalAlpha = alpha * 0.95;
         ctx.strokeStyle = `hsl(${c.hue} 92% 58%)`;
-        ctx.lineWidth = Math.max(1.5, this.radius * 0.1);
+        ctx.lineWidth = Math.max(1.2, this.radius * 0.072);
         ctx.stroke();
         ctx.globalAlpha = alpha;
       }

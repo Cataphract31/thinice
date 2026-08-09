@@ -46,6 +46,23 @@ export default function App(): JSX.Element {
   const [crt, setCrtState] = useState(() => crtOn());
   useEffect(() => onCrtChange(setCrtState), []);
 
+  // The TV power cycle: when the result screen gives way to the next lobby,
+  // the picture collapses to a line and snaps back open on fresh ice.
+  const [tv, setTv] = useState<"off" | "on" | null>(null);
+  const prevPhase = useRef(snap.phase);
+  useEffect(() => {
+    const was = prevPhase.current;
+    prevPhase.current = snap.phase;
+    if (!crt || !(was === "result" && snap.phase === "lobby")) return;
+    setTv("off");
+    const t1 = setTimeout(() => setTv("on"), 240);
+    const t2 = setTimeout(() => setTv(null), 700);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [snap.phase, crt]);
+
   useEffect(() => client.subscribe(setSnap), [client]);
   // Ice faces are drawn in code now; only the character art loads from disk.
   useEffect(() => initCharAssets(), []);
@@ -110,7 +127,9 @@ export default function App(): JSX.Element {
               Its darker pit background is the only separation it needs. The
               tube filter warms the picture only while CRT mode is on. */}
           <div
-            className={`relative min-h-0 flex-1 overflow-hidden rounded-sm ${crt ? "crt-tube" : ""}`}
+            className={`relative min-h-0 flex-1 overflow-hidden rounded-sm ${crt ? "crt-tube" : ""} ${
+              tv === "off" ? "tv-off" : tv === "on" ? "tv-on" : ""
+            }`}
           >
             <Shaft snap={snap} onSelectCell={select} />
             {crt && <CrtLayer snap={snap} />}
