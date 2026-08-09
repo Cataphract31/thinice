@@ -58,7 +58,9 @@ export function Shaft({
     // Overflow past the palette walks the golden angle, skipping that band.
     const counts = new Map<string, number>();
     for (const p of snap.players) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
-    const PALETTE = [348, 130, 48, 270, 26, 312, 224, 84];
+    // Orange sits near the back: it is only 22 degrees from gold, and with
+    // both near the front a busy board wore the palette's one weak pair.
+    const PALETTE = [348, 130, 48, 270, 224, 312, 26, 84];
     const firstId = new Map<string, number>();
     for (const p of snap.players) {
       if (p.you || (counts.get(p.name) ?? 0) < 2) continue;

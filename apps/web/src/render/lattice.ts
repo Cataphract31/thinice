@@ -1356,6 +1356,9 @@ export class LatticeRenderer {
     const midY = b.y + b.h / 2;
     const span = Math.max(b.w, b.h) * 0.6 || 1;
 
+    const sealDraws: { charId: string; x: number; y: number; scale: number; alpha: number }[] =
+      [];
+
     for (const c of this.cells.values()) {
       c.t += dt;
       if (c.born < 1) c.born = Math.min(1, c.born + dt * 4);
@@ -1470,18 +1473,15 @@ export class LatticeRenderer {
       // sizes; the competition with the state signal was why.) Gone entirely
       // when the lattice packs too tight to afford legible faces.
       if (c.charId !== undefined && this.sealIds.has(c.id) && this.radius > 13) {
-        const face = charImage(c.charId, "head");
-        if (face) {
-          const side = this.radius * 0.62 * scale;
-          const vx = c.x + this.radius * 0.48 * scale;
-          const vy = c.y + this.radius * 0.72 * scale;
-          ctx.save();
-          ctx.globalAlpha = alpha * (c.state === "cashed" ? 0.45 : 0.72);
-          ctx.imageSmoothingEnabled = false;
-          ctx.drawImage(face, vx - side / 2 + jx, vy - side / 2 + jy + dy, side, side);
-          ctx.restore();
-          ctx.globalAlpha = alpha;
-        }
+        // Stash, draw later: hexes touch, so a face drawn here got painted
+        // over by the neighbouring plate (and its fat rim) a moment later.
+        sealDraws.push({
+          charId: c.charId,
+          x: c.x + jx,
+          y: c.y + jy + dy,
+          scale,
+          alpha: alpha * (c.state === "cashed" ? 0.45 : 0.85),
+        });
       }
 
       // An exited plate is BANKED money, not a casualty: it holds its ground
@@ -1569,6 +1569,28 @@ export class LatticeRenderer {
         ctx.restore();
       }
     }
+    // Seals in their own pass, AFTER every plate and rim, so nothing can
+    // bury a face. INSIDE the plate now — standing on its floor, clear of
+    // the rim band — instead of straddling the border the thick rims own.
+    if (sealDraws.length > 0) {
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      for (const s of sealDraws) {
+        const face = charImage(s.charId, "head");
+        if (!face) continue;
+        const side = this.radius * 0.6 * s.scale;
+        ctx.globalAlpha = s.alpha;
+        ctx.drawImage(
+          face,
+          s.x - side / 2,
+          s.y + this.radius * 0.38 * s.scale - side / 2,
+          side,
+          side,
+        );
+      }
+      ctx.restore();
+    }
+
     // No floating YOU tag any more: the cyan plates and your big centred
     // head already answer "whose are these", and the tag was a second voice
     // saying the same thing over the same spot.
