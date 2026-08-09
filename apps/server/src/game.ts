@@ -951,15 +951,32 @@ export class GameServer {
     const champSeat = champ ? this.seats.get(champ.id) : undefined;
     this.winnerWallet = champSeat?.wallet ?? null;
 
-    // Distinct wallets that banked exactly the champion's extraction. A
-    // simultaneous exit ties to the lamport, and calling one of them "best"
-    // is a coin flip dressed as a verdict — the scene says "dead heat".
+    // A sole-owner ending is "last one standing" in spirit: they outlasted
+    // every other WALLET. Only claimed when the champion IS that wallet — an
+    // earlier extraction at a higher multiple still wins the scene as an
+    // extraction. Decided BEFORE the tie count: a last-one-standing has no
+    // peers by definition, and computing ties anyway rendered "last one
+    // standing · YOU +2 more" over a walk-out.
+    const lastStanding =
+      champ !== undefined &&
+      champSeat !== undefined &&
+      (champ.lastStanding === true ||
+        (this.soleOwnerWallet !== null && champSeat.wallet === this.soleOwnerWallet) ||
+        (this.outlastedWallet !== null && champSeat.wallet === this.outlastedWallet));
+
+    // Distinct wallets that banked exactly the champion's extraction ON the
+    // champion's tick. A simultaneous exit ties to the lamport, and calling
+    // one of them "best" is a coin flip dressed as a verdict — the scene says
+    // "dead heat". Same tick matters: the multiple sits flat across ticks
+    // where nothing changes, so an earlier exit at the same price is the same
+    // ride sold sooner, not a dead heat.
     // Distinct WALLETS: one player's multi-plate cash-out always ties itself.
     let tied = 1;
-    if (champ && champSeat && champ.lastStanding !== true) {
+    if (champ && champSeat && !lastStanding) {
       const wallets = new Set<string>();
       for (const p of res.players) {
         if (p.outcome !== "cashed") continue;
+        if (p.ticksSurvived !== champ.ticksSurvived) continue;
         if (Math.abs(p.cashedOut - champ.cashedOut) > 1e-9) continue;
         const s2 = this.seats.get(p.id);
         if (s2) wallets.add(s2.wallet);
@@ -973,14 +990,7 @@ export class GameServer {
           you: false,
           multiple: champ.cashedOut / this.config.entry,
           amount: champ.cashedOut,
-          // A sole-owner ending is "last one standing" in spirit: they
-          // outlasted every other WALLET. Only claimed when the champion IS
-          // that wallet — an earlier extraction at a higher multiple still
-          // wins the scene as an extraction.
-          lastStanding:
-            champ.lastStanding === true ||
-            (this.soleOwnerWallet !== null && champSeat.wallet === this.soleOwnerWallet) ||
-            (this.outlastedWallet !== null && champSeat.wallet === this.outlastedWallet),
+          lastStanding,
           tied,
         }
       : null;

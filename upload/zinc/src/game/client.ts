@@ -1148,14 +1148,27 @@ export class GameClient {
         [...cashedPlayers].sort(
           (a, b) => b.cashedOut - a.cashedOut || b.ticksSurvived - a.ticksSurvived,
         )[0];
-      // Distinct owners at the champion's exact extraction — same rule as
-      // the server: a shared top exit renders "dead heat", never a coin-flip
-      // "best", and one owner's multi-plate cash-out never ties itself.
+      // Sole-owner endings are last-one-standing in spirit — but only when
+      // the champion IS that owner, not an earlier bigger exit. Decided
+      // BEFORE the tie count, same rule as the server: a last-one-standing
+      // has no peers by definition, and computing ties anyway rendered
+      // "last one standing · YOU +2 more" over a walk-out.
+      const lastStanding =
+        champ !== undefined &&
+        (champ.lastStanding === true ||
+          (this.soleOwnerKey !== null && this.ownerOf(champ.id) === this.soleOwnerKey) ||
+          (this.outlastedKey !== null && this.ownerOf(champ.id) === this.outlastedKey));
+      // Distinct owners at the champion's exact extraction on the champion's
+      // tick — same rule as the server: a shared top exit renders "dead
+      // heat", never a coin-flip "best"; one owner's multi-plate cash-out
+      // never ties itself; and an earlier exit at the same flat multiple is
+      // the same ride sold sooner, not a dead heat.
       let tied = 1;
-      if (champ && champ.lastStanding !== true) {
+      if (champ && !lastStanding) {
         const owners = new Set<string>();
         for (const p of res.players) {
           if (p.outcome !== "cashed") continue;
+          if (p.ticksSurvived !== champ.ticksSurvived) continue;
           if (Math.abs(p.cashedOut - champ.cashedOut) > 1e-9) continue;
           owners.add(this.ownerOf(p.id));
         }
@@ -1168,12 +1181,7 @@ export class GameClient {
             you: isYou(champ.id),
             multiple: champ.cashedOut / this.config.entry,
             amount: champ.cashedOut,
-            // Sole-owner endings are last-one-standing in spirit — but only
-            // when the champion IS that owner, not an earlier bigger exit.
-            lastStanding:
-              champ.lastStanding === true ||
-              (this.soleOwnerKey !== null && this.ownerOf(champ.id) === this.soleOwnerKey) ||
-              (this.outlastedKey !== null && this.ownerOf(champ.id) === this.outlastedKey),
+            lastStanding,
             tied,
           }
         : null;
