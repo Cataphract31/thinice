@@ -1,4 +1,4 @@
-import { type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import type { Snapshot } from "@/game/client";
 import { CHARACTERS, charById, charImage, type Pose } from "@/game/chars";
 
@@ -183,9 +183,25 @@ export function ShatterCard({ snap }: { snap: Snapshot }): JSX.Element | null {
  * took everyone" is the house's victory screen.
  */
 export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null {
-  if (snap.phase !== "result" || snap.bonanza) return null;
-
+  const isResult = snap.phase === "result";
   const w = snap.winner;
+  // The scene used to slam in on the exact frame the phase flipped, and its
+  // dark layer buried the break that decided the round — you just ... won.
+  // Now the lattice gets a beat to play the final shatter (or the wipe) in
+  // the clear before the curtain. Endings with no wreckage to watch (best
+  // extraction: everyone banked and walked) keep only a breath.
+  const holdMs = !w || w.lastStanding ? 1100 : 350;
+  const [curtain, setCurtain] = useState(false);
+  useEffect(() => {
+    if (!isResult) {
+      setCurtain(false);
+      return;
+    }
+    const t = window.setTimeout(() => setCurtain(true), holdMs);
+    return () => clearTimeout(t);
+  }, [isResult, snap.roundId, holdMs]);
+
+  if (!isResult || snap.bonanza || !curtain) return null;
   // The bottom strip is the record, not the wreckage: recent round winners,
   // newest first, the running "which team is dominant" ticker.
   const champs = snap.history.filter((h) => h.winnerChar).slice(0, 8);

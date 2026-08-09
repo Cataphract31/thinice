@@ -173,7 +173,10 @@ export const DEFAULT_CONFIG: GameConfig = {
   },
   // tickMs is a pure clock knob: it changes wall-clock pacing without touching
   // a single probability, so game feel can be tuned independently of economics.
-  timing: { lobbyMs: 7000, tickMs: 500, resultMs: 4500, bonanzaMs: 7000 },
+  // Lobby 10s, not 7: first live feedback was "by the time I decided, already
+  // gone" — deciding plus bonding five plates needs the extra beat, and it
+  // costs ~6% round throughput, nothing else.
+  timing: { lobbyMs: 10000, tickMs: 500, resultMs: 4500, bonanzaMs: 7000 },
   field: { min: 18, max: 34 },
 };
 

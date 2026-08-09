@@ -314,6 +314,16 @@ export class LatticeRenderer {
       this.youWas = snap.youOutcome;
     }
 
+    // ≤1 standing after this push means these deaths END the round: that break
+    // is the story beat the survivors paid to watch, so it lands heavier —
+    // more shards, thrown harder, under the biggest shake the scene does.
+    // First live feedback: "the final ice breaking is not depicted, you
+    // just... win". It was depicted; the winner screen was covering it.
+    let standing = 0;
+    for (const c of snap.cells)
+      if (c.state === "live" || c.state === "you") standing++;
+    const finale = standing <= 1;
+
     let deaths = 0;
     for (const input of snap.cells) {
       const cell = this.cells.get(input.id);
@@ -327,12 +337,15 @@ export class LatticeRenderer {
       cell.t = 0;
       if (input.state === "dying") {
         deaths++;
-        this.fracture(cell);
+        this.fracture(cell, finale ? 2 : 1);
       } else if (input.state === "cashed") {
         this.release(cell);
       }
     }
-    if (deaths > 0) this.shake = Math.min(1, this.shake + 0.14 + deaths * 0.04);
+    if (deaths > 0)
+      this.shake = finale
+        ? 1.5
+        : Math.min(1, this.shake + 0.14 + deaths * 0.04);
   }
 
   /**
@@ -619,12 +632,17 @@ export class LatticeRenderer {
     this.cells = kept;
   }
 
-  /** A plate breaking apart. Shards carry its value toward the multiplier. */
-  private fracture(cell: Cell): void {
+  /**
+   * A plate breaking apart. Shards carry its value toward the multiplier.
+   * boost > 1 is the round-ending break: double the debris, thrown harder,
+   * hanging a touch longer, so the kill that decides the round reads bigger
+   * than any mid-round crack.
+   */
+  private fracture(cell: Cell, boost = 1): void {
     const r = this.radius;
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 7 * boost; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = 40 + Math.random() * 130;
+      const sp = (40 + Math.random() * 130) * (boost > 1 ? 1.4 : 1);
       this.shards.push({
         x: cell.x,
         y: cell.y,
@@ -634,8 +652,8 @@ export class LatticeRenderer {
         vrot: (Math.random() - 0.5) * 9,
         size: r * (0.16 + Math.random() * 0.3),
         life: 0,
-        maxLife: 0.7 + Math.random() * 0.5,
-        kind: i < 4 ? "value" : "ore",
+        maxLife: (0.7 + Math.random() * 0.5) * (boost > 1 ? 1.3 : 1),
+        kind: i % 7 < 4 ? "value" : "ore",
       });
     }
   }

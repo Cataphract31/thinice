@@ -595,6 +595,24 @@ export function ActionBar({
   /** In-column placement (desktop) instead of the full-width bottom bar. */
   inline?: boolean;
 }): JSX.Element {
+  // Hold-to-fill machinery. joinRef only ever holds the lobby bond action,
+  // never extract, so a hold that outlives the phase flip fizzles instead of
+  // banking the player out at 0.95×. Hooks live above the early return.
+  const joinRef = useRef<(() => void) | null>(null);
+  const holdRef = useRef<{ t: number | null; i: number | null; held: boolean }>({
+    t: null,
+    i: null,
+    held: false,
+  });
+  const stopHold = (): void => {
+    const h = holdRef.current;
+    if (h.t !== null) clearTimeout(h.t);
+    if (h.i !== null) clearInterval(h.i);
+    h.t = null;
+    h.i = null;
+  };
+  useEffect(() => stopHold, []);
+
   const secs = Math.ceil(snap.msToPhaseEnd / 1000);
   let label = "";
   let action: (() => void) | null = null;
@@ -640,15 +658,28 @@ export function ActionBar({
     }
   } else if (snap.phase === "live") {
     if (snap.you.outcome === "in") {
-      // One press extracts every live plate at the shared multiple. The
-      // multiple shown is blended across ALL your plates (dead ones count as
-      // zero), so the button never advertises more than pressing it banks.
-      label =
-        k > 1
-          ? `Extract ×${snap.you.plates.alive} · ${snap.you.multiple.toFixed(2)}×`
-          : `Extract · ${snap.you.multiple.toFixed(2)}×`;
-      action = onWalkOut;
-      tone = "cash";
+      if (snap.grace) {
+        // This same button was "bond another" half a second ago, so a player
+        // still hammering it would extract at 0.95× before they can read.
+        // Nothing can shatter during grace, so keeping extraction shut for
+        // those ticks costs the player exactly nothing.
+        const s = Math.max(
+          1,
+          Math.ceil((snap.graceRemaining * DEFAULT_CONFIG.timing.tickMs) / 1000),
+        );
+        label = `Extract unlocks in ${s}s`;
+        tone = "lock";
+      } else {
+        // One press extracts every live plate at the shared multiple. The
+        // multiple shown is blended across ALL your plates (dead ones count as
+        // zero), so the button never advertises more than pressing it banks.
+        label =
+          k > 1
+            ? `Extract ×${snap.you.plates.alive} · ${snap.you.multiple.toFixed(2)}×`
+            : `Extract · ${snap.you.multiple.toFixed(2)}×`;
+        action = onWalkOut;
+        tone = "cash";
+      }
     } else if (snap.you.outcome === "cashed") {
       label = `Banked ${snap.you.multiple.toFixed(2)}×`;
     } else if (snap.you.outcome === "dead") {
@@ -665,7 +696,20 @@ export function ActionBar({
       ? "bg-[var(--color-cyan)] text-[#03211f]"
       : tone === "cash"
         ? "bg-[var(--color-profit)] text-[#03231a]"
-        : "bg-[var(--color-panel2)] text-[var(--color-dim)]";
+        : tone === "lock"
+          ? "bg-[var(--color-panel2)] text-[var(--color-profit)]"
+          : "bg-[var(--color-panel2)] text-[var(--color-dim)]";
+
+  // Only the lobby bond action is ever eligible for hold-repeat.
+  joinRef.current = snap.phase === "lobby" && tone === "go" ? action : null;
+
+  // Five plates is five taps under a closing lobby clock. Hold fills them.
+  const holdHint =
+    snap.phase === "lobby" && tone === "go" ? (
+      <div className="label mb-1 text-center">
+        tap = one plate · hold = all {snap.you.plates.max}
+      </div>
+    ) : null;
 
   // The way out. A bonded player whose lobby never fills would otherwise be
   // locked in with no exit — nothing between "wait indefinitely" and closing
@@ -684,10 +728,41 @@ export function ActionBar({
 
   return wrap(
     <>
+      {holdHint}
       <button
         disabled={!action}
-        onClick={action ?? undefined}
-        className={`display h-13 w-full rounded-sm py-3.5 text-[17px] font-bold tracking-[0.1em] transition-transform active:scale-[0.985] disabled:cursor-not-allowed ${bg}`}
+        onClick={() => {
+          // A completed hold already bonded its plates; the click that ends
+          // the hold must not buy one more on top.
+          const h = holdRef.current;
+          if (h.held) {
+            h.held = false;
+            return;
+          }
+          action?.();
+        }}
+        onPointerDown={() => {
+          if (!joinRef.current) return;
+          stopHold();
+          const h = holdRef.current;
+          h.held = false;
+          h.t = window.setTimeout(() => {
+            h.held = true;
+            joinRef.current?.();
+            h.i = window.setInterval(() => {
+              // Reads the CURRENT action each beat: when the last plate lands
+              // (or the lobby seals) joinRef goes null and the repeat stops.
+              if (joinRef.current) joinRef.current();
+              else stopHold();
+            }, 200);
+          }, 350);
+        }}
+        onPointerUp={stopHold}
+        onPointerLeave={stopHold}
+        onPointerCancel={stopHold}
+        onContextMenu={(e) => e.preventDefault()}
+        style={{ touchAction: "manipulation" }}
+        className={`display h-13 w-full select-none rounded-sm py-3.5 text-[17px] font-bold tracking-[0.1em] transition-transform active:scale-[0.985] disabled:cursor-not-allowed ${bg}`}
       >
         {label}
       </button>
