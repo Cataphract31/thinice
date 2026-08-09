@@ -349,10 +349,9 @@ function TicketsStat({
                 widths. Two places showing the same receipts in two styles was
                 the clutter, not the content. */}
             <div className="mt-1 text-[10.5px] leading-snug text-[var(--color-dim)]">
-              Fires about 1 round in{" "}
-              {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()},
-              same odds every round. Your share is your odds of taking the whole
-              pool; all tickets wipe on a fire.
+              1 in {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()}{" "}
+              every round. Your share is your chance of taking it all. A hit
+              wipes every ticket.
             </div>
 
             <div className="label mt-3 text-[var(--color-cyan)]">rev share</div>
@@ -369,8 +368,8 @@ function TicketsStat({
               </span>
             </div>
             <div className="mt-1 text-[10.5px] leading-snug text-[var(--color-dim)]">
-              2% of every entry streams to ticket holders, paid every round, even
-              rounds you sit out. Newer tickets weigh more.
+              2% of every entry streams to holders, every round, even ones you
+              skip. Tickets decay over time.
             </div>
           </div>
         </>
