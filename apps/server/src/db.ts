@@ -351,6 +351,22 @@ export class Database {
    * marker is what bounds the next payment, the entire lifetime total goes out
    * again on the very next round.
    */
+  /**
+   * Rakeback paid to a wallet by rounds sealed after `sinceMs`. Drives the
+   * "while you were away" recap on reconnect: the audit rows are already
+   * written per drip, so the recap is a sum, never a second bookkeeper.
+   */
+  rakebackSince(wallet: string, sinceMs: number): number {
+    const r = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(p.lamports), 0) AS n
+           FROM rakeback_payouts p JOIN rounds r ON r.id = p.roundId
+          WHERE p.wallet = ? AND r.endedAt > ?`,
+      )
+      .get(wallet, sinceMs) as { n: number };
+    return r.n;
+  }
+
   payRakeback(roundId: number, wallet: string, lamports: number, claimedTotal: number): void {
     this.db.exec("BEGIN");
     try {

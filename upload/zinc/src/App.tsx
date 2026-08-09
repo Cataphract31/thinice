@@ -9,7 +9,7 @@ import { StatsPanel } from "@/ui/Stats";
 import { TickRing } from "@/ui/TickRing";
 import { BonanzaOverlay } from "@/ui/Bonanza";
 import { BankPanel, type Banker } from "@/ui/Bank";
-import { ActionBar, AutoPanel, BonanzaBar, TopBar } from "@/ui/Hud";
+import { ActionBar, AutoPanel, AwayRecap, BonanzaBar, TopBar } from "@/ui/Hud";
 import { InfoOverlay } from "@/ui/Info";
 import { Tutorial, tutorialSeen } from "@/ui/Tutorial";
 import { CharArt, CharSelect, ShatterCard, WinnerOverlay } from "@/ui/Chars";
@@ -120,6 +120,7 @@ export default function App(): JSX.Element {
             <ShatterCard snap={snap} />
             <WinnerOverlay snap={snap} />
             <BonanzaOverlay event={snap.bonanza} />
+            <AwayRecap snap={snap} />
           </div>
         </div>
 

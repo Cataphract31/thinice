@@ -47,6 +47,8 @@ export interface NetExtras {
   guest: boolean;
   address: string;
   stats: NetStats;
+  /** Rakeback streamed in while the tab was closed. One-shot per return. */
+  away: { ms: number; sol: number } | null;
 }
 
 const EMPTY_STATS: NetStats = {
@@ -225,6 +227,7 @@ export class NetClient {
     guest: true,
     address: "",
     stats: EMPTY_STATS,
+    away: null,
   };
   private retry = 0;
   private reconnectTimer: number | null = null;
@@ -354,6 +357,11 @@ export class NetClient {
           connected: true,
           guest: Boolean(m.guest),
           address: String(m.wallet),
+          // The server only sends this after a real absence with a non-zero
+          // drip; a reconnect without it keeps whatever was already shown.
+          ...(typeof m.awayRakeback === "number" && m.awayRakeback > 0
+            ? { away: { ms: Number(m.awayMs ?? 0), sol: Number(m.awayRakeback) } }
+            : {}),
         };
         // A fresh signature minted a session token: store it, and every
         // later connection resumes silently instead of prompting Phantom.
@@ -395,6 +403,7 @@ export class NetClient {
           seat: this.extras.connected
             ? { guest: this.extras.guest, address: this.extras.address }
             : undefined,
+          away: this.extras.away,
         };
         this.cue(prev, this.snap);
         this.emit();

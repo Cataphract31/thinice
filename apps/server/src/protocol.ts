@@ -188,7 +188,17 @@ export type ServerMessage =
   /** `house` is where deposits go. Absent for guests, who have no chain identity.
       `token` arrives once, after a fresh signature: the client stores it and
       resumes with it instead of asking Phantom to sign every connection. */
-  | { t: "ready"; wallet: string; guest: boolean; house?: string; token?: string }
+  /** `awayMs`/`awayRakeback` (SOL): rakeback streamed in since the wallet was
+      last seen. Present only after a real absence with a non-zero drip. */
+  | {
+      t: "ready";
+      wallet: string;
+      guest: boolean;
+      house?: string;
+      token?: string;
+      awayMs?: number;
+      awayRakeback?: number;
+    }
   | { t: "state"; state: NetState }
   | { t: "history"; history: NetHistory[] }
   /** New chat line(s). The backlog on connect and live lines use one shape. */

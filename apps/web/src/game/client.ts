@@ -236,6 +236,9 @@ export interface Snapshot {
    * address), and the seat is the identity money moves under.
    */
   seat?: { guest: boolean; address: string };
+  /** Rakeback that streamed in while the tab was closed. One-shot recap,
+      shown as a toast on return; null or absent when there is nothing. */
+  away?: { ms: number; sol: number } | null;
 }
 
 export interface BankState {
@@ -321,6 +324,8 @@ interface SaveState {
   stats?: PlayerStats;
   /** Round the jackpot last fired in, so the drought survives a reload. */
   lastFire?: number;
+  /** When this save was written. Anchors the away-drip estimate on return. */
+  at?: number;
   /**
    * The CROWD's side of both ledgers, as one aggregate each. Restoring only
    * your own tickets and weight made you the sole holder after every reload:
@@ -593,6 +598,8 @@ export class GameClient {
   private winner: WinnerInfo | null = null;
   /** Round the demo jackpot last fired in, for the drought counter. */
   private lastFireRound = 0;
+  /** Expected rakeback paid for the time the tab was closed. See ctor. */
+  private awayRecap: Snapshot["away"] = null;
   /** Set when the round ended because one owner held every live plate. */
   private soleOwnerKey: string | null = null;
   /** Owner that banked on the very tick every other standing player died:
@@ -675,6 +682,28 @@ export class GameClient {
       // Restored AFTER roundId so the drought (roundId - lastFireRound)
       // reads the real gap, not the whole round count since day one.
       this.lastFireRound = Math.min(num(save.lastFire), this.roundId);
+
+      // "While you were away": in production the server sums the real drip
+      // rows; the demo cannot run rounds it never saw, so it pays the
+      // EXPECTED drip for the time the tab was closed — rounds missed x
+      // crowd handle x rev rake x your share of the restored weight. Time
+      // based, so reload spam earns nothing; zero weight earns nothing.
+      const awayMs = typeof save.at === "number" ? Date.now() - save.at : 0;
+      if (awayMs > 90_000) {
+        const now = Date.now();
+        const t = this.config.timing;
+        const roundMs = t.lobbyMs + 18 * t.tickMs + t.resultMs;
+        const missed = Math.floor(awayMs / roundMs);
+        const total = this.revShare.totalWeight(now);
+        const share = total > 0 ? this.revShare.weightOf(YOU_ID, now) / total : 0;
+        const est = missed * 20 * this.config.entry * this.config.rake.revShare * share;
+        if (missed > 0 && est >= 0.00005) {
+          this.wallet += est;
+          this.revStreamedLifetime += est;
+          this.stats.revEarned = this.revStreamedLifetime;
+          this.awayRecap = { ms: awayMs, sol: est };
+        }
+      }
     }
 
     this.openLobby();
@@ -1199,6 +1228,7 @@ export class GameClient {
         lastFire: this.lastFireRound,
         crowdBTickets: this.jackpot.totalTickets - this.jackpot.ticketsOf(YOU_ID),
         crowdRevWeight: this.revShare.totalWeight(now) - this.revShare.weightOf(YOU_ID, now),
+        at: now,
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(s));
     } catch {
@@ -1555,6 +1585,7 @@ export class GameClient {
       stats: this.stats,
       online: 1,
       connected: true,
+      away: this.awayRecap,
     };
   }
 }

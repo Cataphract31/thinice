@@ -580,6 +580,41 @@ export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
   );
 }
 
+/**
+ * "While you were away": the rakeback that streamed in between visits, as a
+ * one-shot toast over the board. This is the whole rev-share pitch made
+ * visible — the stream pays whether you are watching it or not.
+ */
+export function AwayRecap({ snap }: { snap: Snapshot }): JSX.Element | null {
+  const away = snap.away ?? null;
+  const [shown, setShown] = useState<{ ms: number; sol: number } | null>(null);
+  useEffect(() => {
+    if (!away || away.sol <= 0) return;
+    setShown(away);
+    const t = window.setTimeout(() => setShown(null), 10_000);
+    return () => clearTimeout(t);
+  }, [away]);
+  if (!shown) return null;
+  const hours = shown.ms / 3_600_000;
+  const spell =
+    hours >= 48
+      ? `${Math.round(hours / 24)}d`
+      : hours >= 1
+        ? `${Math.round(hours)}h`
+        : `${Math.max(2, Math.round(shown.ms / 60_000))}m`;
+  return (
+    <div className="win-rise pointer-events-none absolute inset-x-0 top-2 z-30 flex justify-center">
+      <div className="flex items-baseline gap-2 rounded-sm bg-[var(--color-pit)]/95 px-3 py-2 shadow-[0_6px_24px_rgba(0,0,0,0.5)] backdrop-blur">
+        <span className="label">away {spell}</span>
+        <span className="tnum text-[15px] font-bold text-[var(--color-gold)]">
+          +{shown.sol.toFixed(4)} ◎
+        </span>
+        <span className="label">rakeback streamed in</span>
+      </div>
+    </div>
+  );
+}
+
 export function ActionBar({
   snap,
   onJoin,

@@ -147,7 +147,13 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
   const seat = (wallet: string, guest: boolean, token?: string): void => {
     if (session) return;
-    db.player(wallet);
+    const before = db.player(wallet);
+    // The away recap: rakeback that streamed into this wallet since its last
+    // presence stamp (stamped at connect, join and disconnect). Gated on a
+    // real absence so a refresh stays silent, and read BEFORE touch below
+    // moves the stamp to now.
+    const awayMs = Date.now() - before.seenAt;
+    const awayRakeback = awayMs > 90_000 ? db.rakebackSince(wallet, before.seenAt) : 0;
     db.touch(wallet);
     session = {
       wallet,
@@ -167,6 +173,8 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // Minted only on a fresh signature. The client stores it and resumes
       // with it, so one Phantom prompt covers every future connection.
       ...(token ? { token } : {}),
+      // "While you were away": the stream kept paying. Sent only when it did.
+      ...(awayRakeback > 0 ? { awayMs, awayRakeback: toSol(awayRakeback) } : {}),
     });
     game.attach(session);
   };
@@ -516,7 +524,11 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     const left = (perIp.get(ip) ?? 1) - 1;
     if (left <= 0) perIp.delete(ip);
     else perIp.set(ip, left);
-    if (session) game.detach(session);
+    if (session) {
+      // Stamp the departure: "while you were away" measures from here.
+      db.touch(session.wallet);
+      game.detach(session);
+    }
   });
 });
 
