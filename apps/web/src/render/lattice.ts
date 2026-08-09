@@ -956,7 +956,10 @@ export class LatticeRenderer {
       g.addColorStop(1, "rgba(255, 205, 110, 0)");
       ctx.fillStyle = g;
       ctx.fillRect(cell.x - r * 3.2, cell.y - r * 3.2, r * 6.4, r * 6.4);
-      ctx.fillText("\u{1F451}", cell.x, cell.y - r * (1.6 + 0.3 * k));
+      // Clamped inside the frame: a winner on the top row wears the crown
+      // low on the plate instead of poking out of the world.
+      const cy = Math.max(size * 0.62, cell.y - r * (1.6 + 0.3 * k));
+      ctx.fillText("\u{1F451}", cell.x, cy);
     }
     ctx.restore();
   }
