@@ -21,7 +21,7 @@ export function TickRing({ snap, tickMs }: { snap: Snapshot; tickMs: number }): 
   // No card. The ring is its own shape — boxing it made the vitals strip
   // read as three crates in a row instead of instruments over the ice.
   return (
-    <div className="flex w-[88px] shrink-0 items-center justify-center p-2 sm:w-[118px]">
+    <div className="flex w-[88px] shrink-0 flex-col items-center justify-center p-2 sm:w-[118px]">
       <div className="relative aspect-square w-full max-w-[102px]">
         <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full -rotate-90">
           <circle
@@ -63,19 +63,21 @@ export function TickRing({ snap, tickMs }: { snap: Snapshot; tickMs: number }): 
             {live ? (snap.hazard * 100).toFixed(1) : "-"}
             {live && <span style={{ fontSize: 11, opacity: 0.7 }}>%</span>}
           </div>
-          <div className="label mt-0.5" style={{ color: live ? color : undefined }}>
+          <div className="label mt-1" style={{ color: live ? color : undefined }}>
             {live
               ? snap.grace
                 ? `safe · ${snap.graceRemaining}`
                 : bandLabel(band)
               : "danger"}
           </div>
-          {live && (
-            <div className="label tnum mt-0.5" style={{ fontSize: 8.5, opacity: 0.75 }}>
-              tick {snap.tick}
-            </div>
-          )}
         </div>
+      </div>
+      {/* The tick count moved OUT of the ring: three stacked lines inside a
+          ~90px circle was a crowd, and the count is pacing trivia next to the
+          hazard number the ring exists to carry. Fixed height so the strip
+          does not jump when the lobby has no tick to show. */}
+      <div className="label tnum h-3" style={{ fontSize: 8.5, opacity: 0.75 }}>
+        {live ? `tick ${snap.tick}` : ""}
       </div>
     </div>
   );
