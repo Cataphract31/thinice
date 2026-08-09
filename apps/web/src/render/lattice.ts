@@ -441,15 +441,48 @@ export class LatticeRenderer {
       }
     }
 
-    // Endings with no deciding break — everyone extracted, or a tied best
-    // ride — still clear the stage: a quick quiet fade, no slow-mo and no
-    // crown, so the curtain ALWAYS finds a board holding one crowned cluster
-    // or nothing at all, never a museum of gold ghosts.
+    // Endings with no deciding break still clear the stage with a quick
+    // quiet fade and no slow-mo (nothing exploded; there is nothing to slow
+    // down). But a walk-out can end the round with someone genuinely still
+    // standing — the engine auto-banks the survivor of a 1v1 whose opponent
+    // left — and the first cut faded THEM to black too, then showed a "last
+    // one standing" card over an empty board. The survivor keeps their
+    // plates and takes the crown; only a stage with nobody standing (all
+    // banked, tied best ride, wipe-by-walkout) fades to empty.
     if (wasPhase === "live" && snap.phase === "result" && this.finaleT < 0) {
       this.finaleT = 0;
       this.finaleQuiet = true;
       this.keepIds.clear();
       this.crownBearer = null;
+      const standingOwners = new Set<string>();
+      for (const c of snap.cells)
+        if (c.state === "live" || c.state === "you")
+          standingOwners.add(c.group ?? `#${c.id}`);
+      if (standingOwners.size === 1) {
+        let cx = 0;
+        let cy = 0;
+        for (const c of snap.cells)
+          if (c.state === "live" || c.state === "you") {
+            this.keepIds.add(c.id);
+            const cell = this.cells.get(c.id);
+            if (cell) {
+              cx += cell.x;
+              cy += cell.y;
+            }
+          }
+        cx /= this.keepIds.size;
+        cy /= this.keepIds.size;
+        let bd = Infinity;
+        for (const id of this.keepIds) {
+          const cell = this.cells.get(id);
+          if (!cell) continue;
+          const d = (cell.x - cx) ** 2 + (cell.y - cy) ** 2;
+          if (d < bd) {
+            bd = d;
+            this.crownBearer = id;
+          }
+        }
+      }
     }
 
     // One seal per owner: a cluster is already one holding (shared rim, one
@@ -1034,7 +1067,9 @@ export class LatticeRenderer {
    * over. The wipe has no crown; the ice is the only winner there.
    */
   private drawCrown(): void {
-    const t = this.finaleT - 1.45;
+    // Quiet endings crown sooner: there is no slow-mo break to wait out,
+    // just the fade — the crown lands as the stage finishes clearing.
+    const t = this.finaleT - (this.finaleQuiet ? 0.8 : 1.45);
     if (t < 0) return;
     const { ctx } = this;
     const r = this.radius;
