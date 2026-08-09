@@ -15,8 +15,8 @@ import { Tutorial, tutorialSeen } from "@/ui/Tutorial";
 import { CharArt, CharSelect, ShatterCard, WinnerOverlay } from "@/ui/Chars";
 import { ChatPanel } from "@/ui/Chat";
 import { initAudio } from "@/audio/sound";
+import { crtOn, onCrtChange } from "@/ui/fx";
 import { charById, initCharAssets } from "@/game/chars";
-import { initTileAssets } from "@/render/tiles";
 import { DEFAULT_CONFIG } from "@zinc/engine";
 
 // Read from the engine, not restated. A second copy of the tick interval means
@@ -43,10 +43,8 @@ export default function App(): JSX.Element {
   const [panelOpen, setPanelOpen] = useState(true);
 
   useEffect(() => client.subscribe(setSnap), [client]);
-  useEffect(() => {
-    initCharAssets();
-    initTileAssets();
-  }, []);
+  // Ice faces are drawn in code now; only the character art loads from disk.
+  useEffect(() => initCharAssets(), []);
 
   // Browsers block audio until the first gesture, so arm it on any interaction.
   useEffect(() => {
@@ -108,6 +106,7 @@ export default function App(): JSX.Element {
               Its darker pit background is the only separation it needs. */}
           <div className="relative min-h-0 flex-1 overflow-hidden rounded-sm">
             <Shaft snap={snap} onSelectCell={select} />
+            <CrtLayer />
 
             {chosen && (
               <PlayerCard
@@ -231,6 +230,25 @@ export default function App(): JSX.Element {
       </div>
 
       <Footer onShowInfo={() => setShowInfo(true)} />
+    </div>
+  );
+}
+
+/**
+ * The rink behind curved glass. Mounted directly over the canvas — under the
+ * player card and the winner scene, which are chrome, not broadcast — and it
+ * only exists while the toggle in the sound popover says so. Pure composited
+ * CSS: the canvas itself never pays a frame for it.
+ */
+function CrtLayer(): JSX.Element | null {
+  const [on, setOn] = useState(() => crtOn());
+  useEffect(() => onCrtChange(setOn), []);
+  if (!on) return null;
+  return (
+    <div className="crt-flicker pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="crt-scan absolute inset-0" />
+      <div className="crt-roll absolute inset-x-0" />
+      <div className="crt-glass absolute inset-0" />
     </div>
   );
 }

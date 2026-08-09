@@ -13,6 +13,7 @@ import {
   setVolume,
   sfxExtract,
 } from "@/audio/sound";
+import { crtOn, setCrt } from "./fx";
 
 /** Flat icon button shared by the top bar's controls. */
 function IconButton({
@@ -50,6 +51,7 @@ function VolumePopover(): JSX.Element {
   // the saved volume was actually loaded into the module.
   const [muteFlag, setMuteFlag] = useState(() => loadMutePreference());
   const [level, setLevel] = useState(() => getVolume());
+  const [crtFlag, setCrtFlag] = useState(() => crtOn());
   // One definition of "silent", used by the icon, the label and the toggle.
   // These were three different expressions, so the button could read "Unmute"
   // and mute, or show 🔊 over a game whose volume was zero.
@@ -115,6 +117,25 @@ function VolumePopover(): JSX.Element {
                 }}
                 className="w-full accent-[var(--color-cyan)]"
               />
+            </div>
+            {/* Screen effects ride in the sound popover: it is the de facto
+                settings surface, and one more icon in the top bar is chrome
+                the design does not want. */}
+            <div className="mt-3 flex items-center justify-between border-t border-[var(--color-line)] pt-2.5">
+              <span className="label">crt screen</span>
+              <button
+                onClick={() => {
+                  setCrt(!crtFlag);
+                  setCrtFlag(!crtFlag);
+                }}
+                className={
+                  crtFlag
+                    ? "label rounded-sm bg-[var(--color-cyan)] px-2 py-1 font-bold text-[#03211f]"
+                    : "chip label px-2 py-1"
+                }
+              >
+                {crtFlag ? "on" : "off"}
+              </button>
             </div>
           </div>
         </>
@@ -797,9 +818,14 @@ function ago(ms: number): string {
 
 /**
  * The welcome-back card: an idle game's "while you were away" screen for the
- * rev-share stream. One-shot, full takeover, big gold number counting up,
- * one COLLECT button. This is the whole pitch made into a dopamine moment —
- * your tickets earned while the tab was closed, here are the receipts.
+ * rev-share stream. One-shot, full takeover, one number counting up, one
+ * collect button. This is the whole pitch made into a dopamine moment — your
+ * tickets earned while the tab was closed, here are the receipts.
+ *
+ * Cyan, not gold. Gold is the bonanza and nothing else — the one warm thing
+ * in the freeze — and this number is rakeback, which the drip, the ledger and
+ * the stat block all draw in the rev-share cyan. A gold number here read as a
+ * jackpot the player never won.
  */
 export function AwayRecap({ snap }: { snap: Snapshot }): JSX.Element | null {
   const away = snap.away ?? null;
@@ -829,20 +855,24 @@ export function AwayRecap({ snap }: { snap: Snapshot }): JSX.Element | null {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-      <div className="win-slam w-[340px] max-w-full rounded-md bg-[var(--color-pit)] p-6 text-center shadow-[0_16px_60px_rgba(0,0,0,0.7)]">
+      <div className="win-slam w-[340px] max-w-full rounded-md border border-[var(--color-line)] bg-[var(--color-panel)] p-6 text-center shadow-[0_16px_60px_rgba(0,0,0,0.7)]">
         <div className="label text-[var(--color-cyan)]">the stream never sleeps</div>
         <h2 className="display mt-1.5 text-[19px] font-bold tracking-[0.16em]">
-          WHILE YOU WERE AWAY
+          while you were away
         </h2>
-        <div className="label mt-1">gone {ago(shown.ms)}</div>
 
-        <div className="breathe tnum mt-5 text-[40px] font-bold leading-none text-[var(--color-gold)]">
-          +{val.toFixed(4)} <span className="text-[24px]">◎</span>
+        {/* Scored into the card with hairlines rather than boxed in a filled
+            panel: the house draws divisions as one pixel of ink, and it keeps
+            the number the only lit thing above the button. */}
+        <div className="stream my-5 border-y border-[var(--color-line)] py-4">
+          <div className="tnum text-[40px] font-bold leading-none text-[var(--color-cyan)]">
+            +{val.toFixed(4)} <span className="text-[22px] text-[var(--color-zinc-hi)]">◎</span>
+          </div>
+          <div className="label mt-2">rakeback · gone {ago(shown.ms)}</div>
         </div>
-        <div className="label mt-1.5">rakeback streamed into your wallet</div>
 
-        <div className="mt-4 text-[12px] text-[var(--color-dim)]">
-          every sealed round pays your tickets their cut, awake or not
+        <div className="text-[12px] text-[var(--color-dim)]">
+          every sealed round pays your tickets, awake or not
         </div>
 
         <button
@@ -851,9 +881,9 @@ export function AwayRecap({ snap }: { snap: Snapshot }): JSX.Element | null {
             sfxExtract();
             setShown(null);
           }}
-          className="display mt-5 w-full rounded-sm bg-[var(--color-gold)] py-3 text-[15px] font-bold tracking-[0.12em] text-[#241a05] transition-transform active:scale-[0.985]"
+          className="display mt-5 h-13 w-full rounded-sm bg-[var(--color-cyan)] py-3.5 text-[17px] font-bold tracking-[0.1em] text-[#03211f] transition-transform active:scale-[0.985]"
         >
-          COLLECT
+          collect
         </button>
       </div>
     </div>

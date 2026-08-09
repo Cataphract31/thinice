@@ -254,6 +254,26 @@ body {
   animation: gold-breathe 3.4s ease-in-out infinite;
 }
 
+/*
+ * The same swell in the rev-share cyan, for the away recap. Rakeback gets the
+ * breathing glow because it is the one number in the product that grows while
+ * nobody is watching — but it cannot borrow the gold one, which belongs to the
+ * bonanza alone. Tuned dimmer than the gold: this sits behind a hairline rule
+ * rather than around a filled plate, so the same alpha would bloom.
+ */
+@keyframes stream-breathe {
+  0%,
+  100% {
+    box-shadow: inset 0 0 22px rgba(63, 224, 216, 0.05);
+  }
+  50% {
+    box-shadow: inset 0 0 40px rgba(63, 224, 216, 0.13);
+  }
+}
+.stream {
+  animation: stream-breathe 3.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .jolt,
   .ring,
@@ -294,6 +314,81 @@ body {
     rgba(0, 0, 0, 0.28) 0 1px,
     transparent 1px 3px
   );
+}
+
+/*
+ * CRT mode: the rink watched through an old monitor. Scanlines plus an RGB
+ * aperture at whisper alpha, a curved-glass vignette, a slow roll bar, and a
+ * breath of flicker. All composited CSS on one overlay — zero canvas cost —
+ * and everything that moves dies under prefers-reduced-motion.
+ */
+.crt-scan {
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 60, 90, 0.03) 0 1px,
+      rgba(70, 255, 140, 0.02) 1px 2px,
+      rgba(70, 120, 255, 0.03) 2px 3px
+    );
+}
+.crt-glass {
+  background:
+    radial-gradient(ellipse at 50% 45%, transparent 58%, rgba(0, 0, 0, 0.42) 100%);
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.35);
+}
+@keyframes crt-roll {
+  0% {
+    transform: translateY(-25%);
+  }
+  100% {
+    transform: translateY(410%);
+  }
+}
+.crt-roll {
+  height: 22%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(255, 255, 255, 0.045),
+    transparent
+  );
+  animation: crt-roll 9s linear infinite;
+}
+@keyframes crt-flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  93% {
+    opacity: 0.96;
+  }
+  94% {
+    opacity: 1;
+  }
+  97% {
+    opacity: 0.985;
+  }
+}
+.crt-flicker {
+  animation: crt-flicker 7s steps(1) infinite;
+}
+/* The tube pushes colour a touch hotter than the panel. */
+.crt-tube {
+  filter: saturate(1.12) contrast(1.05);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crt-roll,
+  .crt-flicker {
+    animation: none !important;
+  }
+  .crt-roll {
+    opacity: 0;
+  }
 }
 
 @keyframes win-flash {
@@ -381,6 +476,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .win-slam,
   .win-rise,
+  .stream,
   .tick-pop {
     animation: none !important;
   }
