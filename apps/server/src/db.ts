@@ -332,24 +332,6 @@ export class Database {
       .all() as unknown as PlayerRow[];
   }
 
-  /**
-   * Wipes a wallet's lifetime RECORD without touching money or standing:
-   * balance, tickets, rev-share weight and the claim accounting all survive.
-   * Exists for the practice bots, whose cards otherwise accumulate weeks of
-   * 24/7 grinding at 95% RTP — "-20 SOL lifetime" is an honest fact about a
-   * robot and a terrifying lie about the game a human is about to join.
-   */
-  resetLifetimeStats(wallet: string): void {
-    this.db
-      .prepare(
-        `UPDATE players
-            SET roundsPlayed = 0, roundsWon = 0, wagered = 0, returned = 0,
-                bestMultiple = 0, bonanzaWon = 0
-          WHERE wallet = ?`,
-      )
-      .run(wallet);
-  }
-
   revClaimed(wallet: string): number {
     const r = this.db.prepare("SELECT revClaimed FROM players WHERE wallet = ?").get(wallet) as
       | { revClaimed: number }

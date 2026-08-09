@@ -172,8 +172,15 @@ export class LatticeRenderer {
    * time ramps back as the crown lands on whoever is left standing.
    */
   private finaleT = -1;
-  /** The surviving plates that wear the crown. Empty on a total wipe. */
-  private crownIds: number[] = [];
+  /** True for endings with no deciding break: no slow-mo, just the fade. */
+  private finaleQuiet = false;
+  /** The winner's surviving plates — spared from the endgame fade. */
+  private keepIds = new Set<number>();
+  /** The ONE plate that wears the crown: the survivor nearest the cluster's
+   *  centre. Two crowns on a two-plate winner read as a joke, not a win. */
+  private crownBearer: number | null = null;
+  /** One plate per owner cluster wears the corner seal. */
+  private sealIds = new Set<number>();
   /** Where the deciding break happened; the zoom leans into it. */
   private focus = { x: 0, y: 0 };
   /** 1 to 0 over the beat after your own round ends. */
@@ -299,6 +306,7 @@ export class LatticeRenderer {
 
   update(snap: LatticeSnapshot): void {
     const wasBonanza = this.snap.bonanzaAt;
+    const wasPhase = this.snap.phase;
     this.snap = snap;
     if (snap.bonanzaAt && snap.bonanzaAt !== wasBonanza) {
       this.goldWave = 1;
@@ -351,7 +359,9 @@ export class LatticeRenderer {
     // A new lobby stands the clock back up for the next round's ending.
     if (snap.phase === "lobby" && this.finaleT >= 0) {
       this.finaleT = -1;
-      this.crownIds = [];
+      this.finaleQuiet = false;
+      this.keepIds.clear();
+      this.crownBearer = null;
     }
 
     // ≤1 OWNER standing after this push means these deaths END the round:
@@ -393,12 +403,84 @@ export class LatticeRenderer {
         : Math.min(1, this.shake + 0.14 + deaths * 0.04);
 
     // Cue the sequence exactly once per round, on the deciding deaths. Every
-    // surviving plate is the winner's, so the whole cluster gets crowned.
+    // surviving plate is the winner's and survives the fade; only the one
+    // nearest the cluster's centre wears the crown.
     if (deaths > 0 && finale && this.finaleT < 0) {
       this.finaleT = 0;
-      this.crownIds = [];
+      this.finaleQuiet = false;
+      this.keepIds.clear();
+      this.crownBearer = null;
+      let cx = 0;
+      let cy = 0;
       for (const c of snap.cells)
-        if (c.state === "live" || c.state === "you") this.crownIds.push(c.id);
+        if (c.state === "live" || c.state === "you") {
+          this.keepIds.add(c.id);
+          const cell = this.cells.get(c.id);
+          if (cell) {
+            cx += cell.x;
+            cy += cell.y;
+          }
+        }
+      if (this.keepIds.size > 0) {
+        cx /= this.keepIds.size;
+        cy /= this.keepIds.size;
+        let bd = Infinity;
+        for (const id of this.keepIds) {
+          const cell = this.cells.get(id);
+          if (!cell) continue;
+          const d = (cell.x - cx) ** 2 + (cell.y - cy) ** 2;
+          if (d < bd) {
+            bd = d;
+            this.crownBearer = id;
+          }
+        }
+      }
+    }
+
+    // Endings with no deciding break — everyone extracted, or a tied best
+    // ride — still clear the stage: a quick quiet fade, no slow-mo and no
+    // crown, so the curtain ALWAYS finds a board holding one crowned cluster
+    // or nothing at all, never a museum of gold ghosts.
+    if (wasPhase === "live" && snap.phase === "result" && this.finaleT < 0) {
+      this.finaleT = 0;
+      this.finaleQuiet = true;
+      this.keepIds.clear();
+      this.crownBearer = null;
+    }
+
+    // One seal per owner: a cluster is already one holding (shared rim, one
+    // brain), so stamping every plate repeated the same face five times. The
+    // seal sits on the member nearest the cluster's centre of mass — defined
+    // for ANY size, including 2 and 4 where "the middle plate" does not
+    // exist — and walks to a surviving plate when its bearer breaks.
+    this.sealIds.clear();
+    const clusters = new Map<string, Cell[]>();
+    for (const c of this.cells.values()) {
+      if (c.state === "dying" || c.state === "you" || c.charId === undefined) continue;
+      const key = c.group ?? `#${c.id}`;
+      let arr = clusters.get(key);
+      if (!arr) clusters.set(key, (arr = []));
+      arr.push(c);
+    }
+    for (const arr of clusters.values()) {
+      let cx = 0;
+      let cy = 0;
+      for (const c of arr) {
+        cx += c.x;
+        cy += c.y;
+      }
+      cx /= arr.length;
+      cy /= arr.length;
+      let best = arr[0]!;
+      let bd = Infinity;
+      for (const c of arr) {
+        const d = (c.x - cx) ** 2 + (c.y - cy) ** 2;
+        if (d < bd) {
+          bd = d;
+          best = c;
+        }
+      }
+      this.sealIds.add(best.id);
     }
 
     // Fresh chat surfaces on the board as a bubble over its sender. The very
@@ -809,8 +891,12 @@ export class LatticeRenderer {
     let timescale = 1;
     if (this.finaleT >= 0) {
       this.finaleT += dt;
-      const f = this.finaleT;
-      timescale = f < 0.9 ? 0.24 : f < 1.4 ? 0.24 + ((f - 0.9) / 0.5) * 0.76 : 1;
+      // Quiet endings (nobody broke) run at normal speed — slow-mo on a
+      // board where nothing is happening is just lag.
+      if (!this.finaleQuiet) {
+        const f = this.finaleT;
+        timescale = f < 1.4 ? 0.22 : f < 1.9 ? 0.22 + ((f - 1.4) / 0.5) * 0.78 : 1;
+      }
     }
     const sdt = dt * timescale;
 
@@ -831,13 +917,13 @@ export class LatticeRenderer {
       const s = this.shake * 4.5;
       ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
     }
-    if (this.finaleT >= 0) {
+    if (this.finaleT >= 0 && !this.finaleQuiet) {
       // Lean-in on the deciding plate: quick push to +13%, held through the
       // slow-mo, released as real time returns. Scaling up around an interior
       // point always keeps the canvas covered, so no edges ever show.
       const f = this.finaleT;
       const zin = 1 - Math.pow(1 - Math.min(1, f / 0.35), 3);
-      const zout = f < 1.3 ? 1 : Math.max(0, 1 - (f - 1.3) / 0.9);
+      const zout = f < 1.9 ? 1 : Math.max(0, 1 - (f - 1.9) / 0.8);
       const z = 1 + 0.13 * zin * zout;
       if (z > 1.001) {
         ctx.translate(this.focus.x, this.focus.y);
@@ -853,7 +939,7 @@ export class LatticeRenderer {
     if (this.goldWave > 0) this.drawGoldFlood();
     this.drawAtmosphere();
     if (this.pops.length > 0) this.drawChatPops();
-    if (this.finaleT >= 0 && this.crownIds.length > 0) this.drawCrown();
+    if (this.finaleT >= 0 && this.crownBearer !== null) this.drawCrown();
     if (this.hit > 0) this.drawHit();
     this.drawGrain();
 
@@ -932,7 +1018,7 @@ export class LatticeRenderer {
    * over. The wipe has no crown; the ice is the only winner there.
    */
   private drawCrown(): void {
-    const t = this.finaleT - 0.85;
+    const t = this.finaleT - 1.45;
     if (t < 0) return;
     const { ctx } = this;
     const r = this.radius;
@@ -943,24 +1029,27 @@ export class LatticeRenderer {
     const halo = Math.min(1, t / 0.5);
     const size = Math.max(10, r * 1.5) * Math.max(0, pop);
 
+    const cell = this.cells.get(this.crownBearer!);
+    if (!cell) return;
     ctx.save();
     ctx.font = `${size}px "Segoe UI Emoji", "Apple Color Emoji", serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    for (const id of this.crownIds) {
-      const cell = this.cells.get(id);
-      if (!cell) continue;
-      // Gold halo swelling behind the champion plate, crown dropped on top.
-      const g = ctx.createRadialGradient(cell.x, cell.y, r * 0.2, cell.x, cell.y, r * 3.2);
+    // Gold halo swelling behind the whole surviving cluster, one crown on
+    // its centre plate.
+    for (const id of this.keepIds) {
+      const kc = this.cells.get(id);
+      if (!kc) continue;
+      const g = ctx.createRadialGradient(kc.x, kc.y, r * 0.2, kc.x, kc.y, r * 3.2);
       g.addColorStop(0, `rgba(255, 205, 110, ${0.3 * halo})`);
       g.addColorStop(1, "rgba(255, 205, 110, 0)");
       ctx.fillStyle = g;
-      ctx.fillRect(cell.x - r * 3.2, cell.y - r * 3.2, r * 6.4, r * 6.4);
-      // Clamped inside the frame: a winner on the top row wears the crown
-      // low on the plate instead of poking out of the world.
-      const cy = Math.max(size * 0.62, cell.y - r * (1.6 + 0.3 * k));
-      ctx.fillText("\u{1F451}", cell.x, cy);
+      ctx.fillRect(kc.x - r * 3.2, kc.y - r * 3.2, r * 6.4, r * 6.4);
     }
+    // Clamped inside the frame: a winner on the top row wears the crown
+    // low on the plate instead of poking out of the world.
+    const cy = Math.max(size * 0.62, cell.y - r * (1.6 + 0.3 * k));
+    ctx.fillText("\u{1F451}", cell.x, cy);
     ctx.restore();
   }
 
@@ -1301,6 +1390,17 @@ export class LatticeRenderer {
         jy = Math.cos(this.time * 11.3 + c.seed * 31) * 1.2 * stress;
       }
 
+      // The endgame clears the stage: every plate not wearing the crown
+      // fades out during the finale, so the board the curtain finds holds
+      // exactly the winner's cluster — or nothing at all after a wipe or a
+      // banked-out ending. Gold ghosts included; their story is over too.
+      if (this.finaleT >= 0 && !this.keepIds.has(c.id)) {
+        const fs = this.finaleQuiet ? 0.15 : 1.0;
+        const fe = this.finaleQuiet ? 0.75 : 2.2;
+        alpha *= 1 - Math.min(1, Math.max(0, (this.finaleT - fs) / (fe - fs)));
+        if (alpha <= 0.01) continue;
+      }
+
       const sprite = atlas.get(c.state);
       ctx.globalAlpha = alpha;
       const dw = sprite.w * scale;
@@ -1353,12 +1453,7 @@ export class LatticeRenderer {
       // plate's state. (Centred faces on the whole field died twice at two
       // sizes; the competition with the state signal was why.) Gone entirely
       // when the lattice packs too tight to afford legible faces.
-      if (
-        c.charId !== undefined &&
-        c.state !== "you" &&
-        c.state !== "dying" &&
-        this.radius > 13
-      ) {
+      if (c.charId !== undefined && this.sealIds.has(c.id) && this.radius > 13) {
         const face = charImage(c.charId, "head");
         if (face) {
           const side = this.radius * 0.62 * scale;

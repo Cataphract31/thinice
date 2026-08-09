@@ -400,14 +400,6 @@ export class GameServer {
     if (row.balance < stake * plates) {
       this.db.adjustBalance(wallet, toLamports(1));
     }
-    // A bot's lifetime record resets on a human session's cadence. These
-    // eight wallets grind around the clock at 95% RTP, so left alone their
-    // cards march toward "-20 ◎ lifetime" — true of the robot, terrifying
-    // about the game. Staggered per name so the room never zeroes at once;
-    // balance, tickets and rev accounting are untouched.
-    let h = 0;
-    for (let i = 0; i < name.length; i++) h = (Math.imul(h, 31) + name.charCodeAt(i)) >>> 0;
-    if (row.roundsPlayed >= 46 + (h % 30)) this.db.resetLifetimeStats(wallet);
     const fresh = this.db.player(wallet);
     const botLid = this.ledgerIds.get(wallet);
     const lifetime = {

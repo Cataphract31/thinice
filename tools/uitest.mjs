@@ -129,11 +129,11 @@ await shot("chat_pop.png");
 // The ending: result phase flips the action bar to "Next round in". Shoot
 // early (slow-mo, lean-in) and at the crown beat, then the winner card.
 if (await waitFor("Next round in", 140)) {
-  await sleep(250);
+  await sleep(500);
   await shot("finale_slowmo.png");
-  await sleep(1000);
+  await sleep(1600);
   await shot("finale_crown.png");
-  await sleep(1200);
+  await sleep(1500);
   await shot("winner_card.png");
 } else {
   console.log("  ! round never ended while watching");

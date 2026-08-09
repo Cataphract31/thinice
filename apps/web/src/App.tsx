@@ -396,19 +396,22 @@ function PlayerCard({
               {p.lifetime.best > 0 ? `${p.lifetime.best.toFixed(2)}×` : "-"}
             </span>,
           )}
-          {line(
-            "lifetime p/l",
-            <span
-              className="tnum text-[11px] font-semibold"
-              style={{
-                color:
-                  p.lifetime.net >= 0 ? "var(--color-profit)" : "var(--color-danger)",
-              }}
-            >
-              {p.lifetime.net >= 0 ? "+" : ""}
-              {p.lifetime.net.toFixed(3)} ◎
-            </span>,
-          )}
+          {/* RTP, not net SOL. A 24/7 grinder's card would otherwise read
+              like a casualty report ("-20 ◎ lifetime") when the honest
+              summary of the same volume is "96% returned" — the number the
+              game actually promises. Green only at or above break-even;
+              below it stays neutral, because under 100% IS the expected
+              case, not damage. Hidden until a wallet has wagered anything. */}
+          {p.lifetime.wagered > 0 &&
+            line(
+              "lifetime rtp",
+              <span
+                className="tnum text-[11px] font-semibold"
+                style={p.lifetime.net >= 0 ? { color: "var(--color-profit)" } : undefined}
+              >
+                {(((p.lifetime.wagered + p.lifetime.net) / p.lifetime.wagered) * 100).toFixed(1)}%
+              </span>,
+            )}
           {/* Only for the few who have actually taken one — a row of zeroes
               on every other card would say nothing and cost a line. */}
           {p.lifetime.jackpots > 0 &&
