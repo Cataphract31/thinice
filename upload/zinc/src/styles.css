@@ -317,25 +317,37 @@ body {
 }
 
 /*
- * CRT mode: the rink watched through an old monitor. Scanlines plus an RGB
- * aperture at whisper alpha, a curved-glass vignette, a slow roll bar, and a
- * breath of flicker. All composited CSS on one overlay — zero canvas cost —
- * and everything that moves dies under prefers-reduced-motion.
+ * CRT mode: the rink watched through an old monitor, Balatro-style.
+ *
+ * The scanlines are DRAWN — a canvas of barrel-bent lines rebuilt only on
+ * resize — because the curvature is the whole trick: straight lines say
+ * "overlay", bent lines say "tube". Everything else is composited CSS: RGB
+ * aperture at whisper alpha, curved-glass vignette, roll bar, flicker, and a
+ * risk-reactive jitter ladder. Nothing here touches the game canvas's frame
+ * budget, and everything that moves dies under prefers-reduced-motion.
  */
-.crt-scan {
-  background-image:
-    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1px, transparent 1px 3px),
-    repeating-linear-gradient(
-      90deg,
-      rgba(255, 60, 90, 0.03) 0 1px,
-      rgba(70, 255, 140, 0.02) 1px 2px,
-      rgba(70, 120, 255, 0.03) 2px 3px
-    );
+.crt-rgb {
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(255, 60, 90, 0.03) 0 1px,
+    rgba(70, 255, 140, 0.02) 1px 2px,
+    rgba(70, 120, 255, 0.03) 2px 3px
+  );
 }
 .crt-glass {
-  background:
-    radial-gradient(ellipse at 50% 45%, transparent 58%, rgba(0, 0, 0, 0.42) 100%);
-  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
+  background: radial-gradient(ellipse at 50% 45%, transparent 56%, rgba(0, 0, 0, 0.46) 100%);
+  box-shadow:
+    inset 0 0 70px rgba(0, 0, 0, 0.4),
+    inset 0 0 8px rgba(0, 0, 0, 0.5);
+}
+/* One soft arc of window light on the glass, high and off-centre. */
+.crt-glare {
+  background: radial-gradient(
+    ellipse 90% 28% at 30% -6%,
+    rgba(210, 235, 255, 0.05),
+    transparent 70%
+  );
 }
 @keyframes crt-roll {
   0% {
@@ -376,17 +388,112 @@ body {
 .crt-flicker {
   animation: crt-flicker 7s steps(1) infinite;
 }
-/* The tube pushes colour a touch hotter than the panel. */
+/* The tube pushes colour a touch hotter than the panel. Applied to the frame
+   that holds the game canvas, so the picture itself warms up. */
 .crt-tube {
-  filter: saturate(1.12) contrast(1.05);
+  filter: saturate(1.1) contrast(1.04);
+}
+
+/*
+ * The jitter ladder: the tracking degrades as the hazard climbs. Stable ice
+ * holds a clean picture; tense ice breathes sideways under a sub-pixel sway;
+ * critical ice loses its grip in hard 90ms steps. The signal follows the
+ * danger, which makes the effect a channel instead of a costume.
+ */
+@keyframes crt-sway {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(0.7px);
+  }
+}
+.crt-jit1 .crt-lines {
+  animation: crt-sway 3.2s ease-in-out infinite;
+}
+@keyframes crt-grip {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-1.1px);
+  }
+  50% {
+    transform: translateX(0.6px);
+  }
+  75% {
+    transform: translateX(-0.4px);
+  }
+}
+.crt-jit2 .crt-lines {
+  animation: crt-grip 0.36s steps(4) infinite;
+}
+.crt-jit2 .crt-roll {
+  animation-duration: 5s;
+}
+
+/*
+ * The death glitch: one tear band and a horizontal slip, ~a quarter second,
+ * fired when a plate goes under. Overlay-only — the tracking slips, the
+ * world does not — which is exactly how a bad signal behaves.
+ */
+@keyframes crt-tear {
+  0% {
+    opacity: 1;
+    transform: translateX(-3px);
+  }
+  40% {
+    transform: translateX(2px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+}
+.crt-tear {
+  height: 9%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(255, 255, 255, 0.09) 45%,
+    rgba(120, 200, 255, 0.05) 55%,
+    transparent
+  );
+  animation: crt-tear 0.26s ease-out both;
+}
+@keyframes crt-slip {
+  0% {
+    transform: translateX(0);
+  }
+  30% {
+    transform: translateX(-2.5px);
+  }
+  60% {
+    transform: translateX(1.5px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+.crt-glitching .crt-lines,
+.crt-glitching .crt-rgb {
+  animation: crt-slip 0.26s steps(3) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .crt-roll,
-  .crt-flicker {
+  .crt-flicker,
+  .crt-tear,
+  .crt-jit1 .crt-lines,
+  .crt-jit2 .crt-lines,
+  .crt-glitching .crt-lines,
+  .crt-glitching .crt-rgb {
     animation: none !important;
   }
-  .crt-roll {
+  .crt-roll,
+  .crt-tear {
     opacity: 0;
   }
 }

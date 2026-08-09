@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import type { PlayerView, Snapshot } from "@/game/client";
 import { getClient } from "@/game/session";
 import { Shaft } from "@/ui/Shaft";
@@ -16,6 +16,7 @@ import { CharArt, CharSelect, ShatterCard, WinnerOverlay } from "@/ui/Chars";
 import { ChatPanel } from "@/ui/Chat";
 import { initAudio } from "@/audio/sound";
 import { crtOn, onCrtChange } from "@/ui/fx";
+import { riskBand } from "@/game/risk";
 import { charById, initCharAssets } from "@/game/chars";
 import { DEFAULT_CONFIG } from "@zinc/engine";
 
@@ -41,6 +42,9 @@ export default function App(): JSX.Element {
   // Mobile only: the bottom panel folds to its tab row so the lattice gets
   // the height back. Desktop's rail ignores this entirely.
   const [panelOpen, setPanelOpen] = useState(true);
+  // CRT mode, toggled from the sound popover, worn by the lattice frame.
+  const [crt, setCrtState] = useState(() => crtOn());
+  useEffect(() => onCrtChange(setCrtState), []);
 
   useEffect(() => client.subscribe(setSnap), [client]);
   // Ice faces are drawn in code now; only the character art loads from disk.
@@ -103,10 +107,13 @@ export default function App(): JSX.Element {
           </div>
 
           {/* Flat: the lattice reads as a surface, not a framed screenshot.
-              Its darker pit background is the only separation it needs. */}
-          <div className="relative min-h-0 flex-1 overflow-hidden rounded-sm">
+              Its darker pit background is the only separation it needs. The
+              tube filter warms the picture only while CRT mode is on. */}
+          <div
+            className={`relative min-h-0 flex-1 overflow-hidden rounded-sm ${crt ? "crt-tube" : ""}`}
+          >
             <Shaft snap={snap} onSelectCell={select} />
-            <CrtLayer />
+            {crt && <CrtLayer snap={snap} />}
 
             {chosen && (
               <PlayerCard
@@ -236,18 +243,90 @@ export default function App(): JSX.Element {
 
 /**
  * The rink behind curved glass. Mounted directly over the canvas — under the
- * player card and the winner scene, which are chrome, not broadcast — and it
- * only exists while the toggle in the sound popover says so. Pure composited
- * CSS: the canvas itself never pays a frame for it.
+ * player card and the winner scene, which are chrome, not broadcast. Pure
+ * composited CSS plus one canvas of BENT scanlines redrawn only on resize:
+ * the curvature is the whole trick, straight lines say overlay and bent
+ * lines say tube. The game canvas never pays a frame for any of it.
+ *
+ * The signal degrades with the danger: a sub-pixel sway when the ice is
+ * tense, hard tracking steps when it is critical, and a tear-band glitch
+ * the instant a plate goes under. Presentation reacting to the same number
+ * as the ring and the seams — a channel, not a costume.
  */
-function CrtLayer(): JSX.Element | null {
-  const [on, setOn] = useState(() => crtOn());
-  useEffect(() => onCrtChange(setOn), []);
-  if (!on) return null;
+function CrtLayer({ snap }: { snap: Snapshot }): JSX.Element {
+  const lines = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const c = lines.current;
+    if (!c) return;
+    const draw = (): void => {
+      const host = c.parentElement;
+      if (!host) return;
+      const w = host.clientWidth;
+      const h = host.clientHeight;
+      if (w === 0 || h === 0) return;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+      const x = c.getContext("2d");
+      if (!x) return;
+      x.scale(dpr, dpr);
+      x.strokeStyle = "rgba(0, 0, 0, 0.22)";
+      x.lineWidth = 1;
+      // Barrel curvature: each line bows away from the vertical centre, the
+      // way a tube's face bulges. A quadratic through-midpoint needs double
+      // the sag on its control point.
+      const bow = Math.min(9, h * 0.018);
+      for (let y = 1.5; y < h; y += 3) {
+        const v = (y / h) * 2 - 1;
+        x.beginPath();
+        x.moveTo(0, y);
+        x.quadraticCurveTo(w / 2, y + 2 * v * bow, w, y);
+        x.stroke();
+      }
+    };
+    draw();
+    const ro = new ResizeObserver(draw);
+    if (c.parentElement) ro.observe(c.parentElement);
+    return () => ro.disconnect();
+  }, []);
+
+  // One tear per death, riding wherever the clock happens to point.
+  const [glitch, setGlitch] = useState<{ key: number; top: number } | null>(null);
+  const prevDead = useRef(-1);
+  useEffect(() => {
+    if (prevDead.current >= 0 && snap.deadCount > prevDead.current) {
+      setGlitch({ key: Date.now(), top: 10 + ((Date.now() / 7) % 70) });
+    }
+    prevDead.current = snap.deadCount;
+  }, [snap.deadCount]);
+  useEffect(() => {
+    if (!glitch) return;
+    const t = setTimeout(() => setGlitch(null), 300);
+    return () => clearTimeout(t);
+  }, [glitch]);
+
+  const band = riskBand(snap.hazard, snap.grace);
+  const jit =
+    snap.phase === "live" ? (band === "critical" ? "crt-jit2" : band === "stressed" ? "crt-jit1" : "") : "";
+
   return (
-    <div className="crt-flicker pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="crt-scan absolute inset-0" />
+    <div
+      className={`crt-flicker pointer-events-none absolute inset-0 overflow-hidden ${jit} ${
+        glitch ? "crt-glitching" : ""
+      }`}
+    >
+      <canvas ref={lines} className="crt-lines absolute inset-0 h-full w-full" />
+      <div className="crt-rgb absolute inset-0" />
       <div className="crt-roll absolute inset-x-0" />
+      {glitch && (
+        <div
+          key={glitch.key}
+          className="crt-tear absolute inset-x-0"
+          style={{ top: `${glitch.top}%` }}
+        />
+      )}
+      <div className="crt-glare absolute inset-0" />
       <div className="crt-glass absolute inset-0" />
     </div>
   );

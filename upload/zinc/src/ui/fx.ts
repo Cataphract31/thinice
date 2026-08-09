@@ -1,19 +1,19 @@
 /**
  * CRT mode: the board behind curved-glass phosphor, Balatro-style.
  *
- * Pure presentation, defaulted OFF: scanlines and vignette cost a little
- * legibility, and this is a product where the numbers are money. The people
- * who want the arcade read flip it once and it stays flipped. Module-level
- * state with subscribers, the same shape the sound preferences use — the
- * toggle lives in the volume popover, the layer lives over the lattice, and
- * neither needs to know the other's tree.
+ * Pure presentation, ON by default — the broadcast look tested well enough to
+ * become the face of the game — with the toggle in the sound popover for
+ * anyone who wants the raw feed back. Module-level state with subscribers,
+ * the same shape the sound preferences use: the toggle and the layer never
+ * need to know each other's tree.
  */
 
 const KEY = "zinc.crt";
 
-let on = false;
+let on = true;
 try {
-  on = localStorage.getItem(KEY) === "1";
+  const stored = localStorage.getItem(KEY);
+  if (stored !== null) on = stored === "1";
 } catch {
   /* storage may be unavailable; the toggle just will not persist */
 }
