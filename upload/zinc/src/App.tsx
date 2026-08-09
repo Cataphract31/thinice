@@ -126,7 +126,10 @@ export default function App(): JSX.Element {
 
         {/* Desktop rail: your controls on top, at eye level with the game,
             the way every crash game places its bet panel. */}
-        <aside className="hidden w-[286px] shrink-0 lg:flex lg:flex-col lg:gap-1.5">
+        {/* Scored off the board by one hairline, not boxed: the house draws
+            its sidebar as a region of the same surface, and the whole page
+            stops reading as cards floating on a background. */}
+        <aside className="hidden w-[286px] shrink-0 border-l border-[var(--color-line)] pl-2 lg:flex lg:flex-col lg:gap-1.5">
           <ActionBar
             inline
             snap={snap}
@@ -232,6 +235,13 @@ export default function App(): JSX.Element {
   );
 }
 
+/** The other zinc.cash tables, named the way their own footer names them. */
+const FAMILY = [
+  { name: "classic", href: "https://crash.zinc.cash/play/classic" },
+  { name: "last man standing", href: "https://crash.zinc.cash/play/last-man-standing" },
+  { name: "no pain no gain", href: "https://crash.zinc.cash/play/no-pain-no-gain" },
+];
+
 /**
  * Slim anchor for the bottom of the page. Without it the layout just stops,
  * which reads as "did this fail to load" or "can I scroll"; with it the page
@@ -241,10 +251,28 @@ function Footer({ onShowInfo }: { onShowInfo: () => void }): JSX.Element {
   return (
     /* Hidden on phones: there the action bar already anchors the bottom of
        the page, and the footer would only cost the lattice another row. */
-    <footer className="hidden shrink-0 items-center justify-between px-3 py-2 lg:flex">
-      <span className="label">
-        THIN<span className="text-[var(--color-cyan)]">ICE</span> · a zinc game
+    <footer className="relative hidden shrink-0 items-center justify-between border-t border-[var(--color-line)] px-3 py-2 lg:flex">
+      <span className="display text-[12px] font-bold tracking-[0.16em]">
+        THIN<span className="text-[var(--color-cyan)]">ICE</span>
       </span>
+      {/* The family bar, centred, exactly as crash.zinc.cash carries its three
+          arenas: the sibling games by name, the one you are in lit. It is the
+          cheapest cross-promotion there is and it tells a first-time player
+          this is a house with several tables, not one page someone put up. */}
+      <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-5">
+        {FAMILY.map((g) => (
+          <a
+            key={g.name}
+            href={g.href}
+            target="_blank"
+            rel="noreferrer"
+            className="label hover:text-[var(--color-text)]"
+          >
+            {g.name}
+          </a>
+        ))}
+        <span className="label text-[var(--color-cyan)]">thin ice</span>
+      </nav>
       <span className="label flex items-center gap-3">
         <button onClick={onShowInfo} className="label hover:text-[var(--color-text)]">
           provably fair
@@ -494,13 +522,17 @@ function TabbedPanel({
   children: React.ReactNode;
 }): JSX.Element {
   const shown = open !== false;
+  // Active tab is a cyan underline on lit text — the house marks the current
+  // arena this way, and an underline says "section" where a filled pill said
+  // "button". The inactive border is transparent, not absent, so switching
+  // tabs never shifts the row by two pixels.
   const tabBtn = (id: Tab, label: string): JSX.Element => (
     <button
       onClick={() => onTab(id)}
-      className="label rounded-sm px-2 py-1"
+      className="label border-b-2 px-2 pb-1.5 pt-1"
       style={{
         color: tab === id && shown ? "var(--color-text)" : undefined,
-        background: tab === id && shown ? "var(--color-panel2)" : undefined,
+        borderColor: tab === id && shown ? "var(--color-cyan)" : "transparent",
       }}
     >
       {label}
@@ -508,7 +540,7 @@ function TabbedPanel({
   );
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-1 px-1 py-1">
+      <div className="flex shrink-0 items-center gap-1 border-b border-[var(--color-line)] px-1">
         {tabBtn("roster", `roster · ${snap.liveCount} in`)}
         {chat && tabBtn("chat", "chat")}
         {tabBtn("history", "history")}

@@ -23,7 +23,7 @@ from scipy import ndimage
 SRC = r"C:\ZINC\art-drop"
 DST = r"C:\ZINC\apps\web\public"
 POSES = {"head": 384, "win": 512, "lose": 512}
-CHARS = ["chad", "soyjak", "wojak", "ansem", "saylor", "pepe", "chud", "bogdanoff", "bobo", "mumu", "milady"]
+CHARS = ["chad", "soyjak", "wojak", "ansem", "saylor", "pepe", "chud", "bogdanoff", "bobo", "mumu", "milady", "sbf"]
 TILES = ["base", "hairline", "heavy", "crack"]
 TILE_SIZE = 384
 COLORS = 96
