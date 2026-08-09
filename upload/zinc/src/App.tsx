@@ -149,7 +149,6 @@ export default function App(): JSX.Element {
             <ShatterCard snap={snap} />
             <WinnerOverlay snap={snap} />
             <BonanzaOverlay event={snap.bonanza} />
-            <AwayRecap snap={snap} />
           </div>
         </div>
 
@@ -245,6 +244,10 @@ export default function App(): JSX.Element {
           onClose={() => setShowBank(false)}
         />
       )}
+      {/* Root level, NOT inside the lattice frame: the tube's filter turns any
+          ancestor into the containing block for fixed children, which caged
+          this "fullscreen" card inside the TV and clipped it on phones. */}
+      <AwayRecap snap={snap} />
 
       {/* Mobile keeps the thumb-reach bottom bar, with auto play just above. */}
       <div className="lg:hidden">

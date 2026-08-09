@@ -865,8 +865,10 @@ export function AwayRecap({ snap }: { snap: Snapshot }): JSX.Element | null {
             panel: the house draws divisions as one pixel of ink, and it keeps
             the number the only lit thing above the button. */}
         <div className="stream my-5 border-y border-[var(--color-line)] py-4">
-          <div className="tnum text-[40px] font-bold leading-none text-[var(--color-cyan)]">
-            +{val.toFixed(4)} <span className="text-[22px] text-[var(--color-zinc-hi)]">◎</span>
+          {/* Clamped to the viewport so a fat payout never wraps the ◎ onto
+              its own line on a narrow phone. */}
+          <div className="tnum whitespace-nowrap text-[min(40px,10.5vw)] font-bold leading-none text-[var(--color-cyan)]">
+            +{val.toFixed(4)} <span className="text-[0.55em] text-[var(--color-zinc-hi)]">◎</span>
           </div>
           <div className="label mt-2">rakeback · gone {ago(shown.ms)}</div>
         </div>
