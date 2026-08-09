@@ -3,6 +3,7 @@ import { TILE_TURN, TileAtlas, tileVersion, type TileName } from "./tiles";
 import { riskScale } from "@/game/risk";
 import { charImage } from "@/game/chars";
 import { crtOn } from "@/ui/fx";
+import { sfxStatic } from "@/audio/sound";
 
 /**
  * The seam.
@@ -379,6 +380,7 @@ export class LatticeRenderer {
         if (snap.youOutcome === "dead" && crtOn()) {
           this.glitch = 1;
           this.roll = 0;
+          if (!this.calmSignal) sfxStatic(1);
         }
       }
       this.youWas = snap.youOutcome;
@@ -430,8 +432,12 @@ export class LatticeRenderer {
         ? 1.5
         : Math.min(1, this.shake + 0.14 + deaths * 0.04);
       // Every break hits the signal too: tears rip across the picture for a
-      // quarter second, harder when several plates go at once.
-      if (crtOn()) this.glitch = Math.min(1, this.glitch + 0.4 + deaths * 0.12);
+      // quarter second, harder when several plates go at once. The crackle
+      // rides under the shatter — the tape complaining about the explosion.
+      if (crtOn()) {
+        this.glitch = Math.min(1, this.glitch + 0.4 + deaths * 0.12);
+        if (!this.calmSignal) sfxStatic(Math.min(0.55, 0.3 + deaths * 0.05));
+      }
     }
 
     // Cue the sequence exactly once per round, on the deciding deaths. Every
@@ -997,6 +1003,7 @@ export class LatticeRenderer {
         // Idle static: a small tracking fault every few seconds so the feed
         // reads live even on a calm board. Danger makes the tape worse.
         this.glitch = Math.max(this.glitch, 0.28 + this.heat * 0.25);
+        if (!this.calmSignal) sfxStatic(0.2 + this.heat * 0.3);
         this.strayIn = 3 + Math.random() * (9 - this.heat * 5);
       }
     }

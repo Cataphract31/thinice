@@ -673,6 +673,89 @@ export function sfxJoin(): void {
   sub({ freq: 140, dur: 0.22, gain: 0.07, attack: 0.014, wet: 0.3 });
 }
 
+/* ── Broadcast layer ────────────────────────────────────────────────────────
+ *
+ * CRT mode's hardware sounds — the FEED failing, not the ice. The world's
+ * audio above sits in a room, on the reverb bus; these sit on the glass:
+ * dry, close, quiet. Callers gate on CRT being enabled — the audio engine
+ * has no business knowing about a render flag.
+ */
+
+/**
+ * Tape damage. The renderer fires this on the exact frame a band tear or
+ * tracking fault hits the picture, so the crackle is what the tear sounds
+ * like rather than a sound that happens to play near it.
+ *
+ * `amount` is the fault's energy, 0-1: an idle tracking stray at the bottom,
+ * a full signal break at the top. More energy means more grains, denser and
+ * slightly brighter — never simply louder, same law as the shatter.
+ */
+export function sfxStatic(amount: number): void {
+  const a = Math.max(0, Math.min(1, amount));
+  if (a <= 0.01) return;
+  const grains = 1 + Math.round(a * 2);
+  for (let i = 0; i < grains; i++) {
+    texture({
+      dur: 0.018 + Math.random() * 0.05,
+      gain: 0.013 + a * 0.02,
+      freq: 2600 + Math.random() * 2800,
+      q: 0.8,
+      attack: 0.001,
+      wet: 0.05,
+      delay: i === 0 ? 0 : Math.random() * 0.1,
+    });
+  }
+  // A hard break also drags the low end for a beat — the picture physically
+  // losing its lock, not just the surface crackling.
+  if (a > 0.6) {
+    texture({
+      dur: 0.16,
+      gain: 0.045,
+      freq: 680,
+      sweepTo: 210,
+      q: 0.7,
+      type: "lowpass",
+      attack: 0.004,
+      wet: 0.1,
+    });
+  }
+}
+
+/**
+ * The set powers down between rounds: relay click, the scan collapsing to a
+ * line, the tube letting go. The falling whistle is a sine, which flirts with
+ * the no-tones rule — but at 200ms top-to-bottom it reads as machinery dying,
+ * not as a note, and nothing about it can be hummed.
+ */
+export function sfxTvOff(): void {
+  texture({ dur: 0.018, gain: 0.05, freq: 3400, q: 1.4, attack: 0.001, wet: 0.04 });
+  if (ctx && master && !muted) {
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(3100, t0);
+    osc.frequency.exponentialRampToValueAtTime(120, t0 + 0.2);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.026, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+    osc.connect(g);
+    connectVoice(g, 0.08);
+    osc.start(t0);
+    osc.stop(t0 + 0.24);
+  }
+  sub({ freq: 88, glideTo: 30, dur: 0.3, gain: 0.13, attack: 0.004, wet: 0.15, delay: 0.05 });
+}
+
+/**
+ * Power back on for the next round: a degauss shudder — low buzzy noise, the
+ * coil not a chord — and a small static pop as the picture snaps back.
+ */
+export function sfxTvOn(): void {
+  texture({ dur: 0.28, gain: 0.055, freq: 90, q: 3.2, attack: 0.02, wet: 0.18 });
+  sub({ freq: 44, glideTo: 58, dur: 0.26, gain: 0.085, attack: 0.02, wet: 0.15 });
+  texture({ dur: 0.05, gain: 0.028, freq: 3600, q: 0.9, attack: 0.001, wet: 0.06, delay: 0.1 });
+}
+
 /**
  * The jackpot — the one moment allowed to be musical.
  *

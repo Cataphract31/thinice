@@ -14,7 +14,7 @@ import { InfoOverlay } from "@/ui/Info";
 import { Tutorial, tutorialSeen } from "@/ui/Tutorial";
 import { CharArt, CharSelect, ShatterCard, WinnerOverlay } from "@/ui/Chars";
 import { ChatPanel } from "@/ui/Chat";
-import { initAudio } from "@/audio/sound";
+import { initAudio, sfxTvOff, sfxTvOn } from "@/audio/sound";
 import { crtOn, onCrtChange } from "@/ui/fx";
 import { riskBand } from "@/game/risk";
 import { charById, initCharAssets } from "@/game/chars";
@@ -55,7 +55,11 @@ export default function App(): JSX.Element {
     prevPhase.current = snap.phase;
     if (!crt || !(was === "result" && snap.phase === "lobby")) return;
     setTv("off");
-    const t1 = setTimeout(() => setTv("on"), 240);
+    sfxTvOff();
+    const t1 = setTimeout(() => {
+      setTv("on");
+      sfxTvOn();
+    }, 240);
     const t2 = setTimeout(() => setTv(null), 700);
     return () => {
       clearTimeout(t1);
