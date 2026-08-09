@@ -1480,7 +1480,7 @@ export class LatticeRenderer {
           x: c.x + jx,
           y: c.y + jy + dy,
           scale,
-          alpha: alpha * (c.state === "cashed" ? 0.45 : 0.85),
+          alpha: alpha * (c.state === "cashed" ? 0.43 : 0.8),
         });
       }
 
@@ -1519,11 +1519,11 @@ export class LatticeRenderer {
         hexPath(ctx, c.x + jx, c.y + jy + dy, this.radius * scale * 0.86);
         ctx.globalAlpha = alpha * 0.55;
         ctx.strokeStyle = "rgba(4, 8, 12, 0.9)";
-        ctx.lineWidth = Math.max(2, this.radius * 0.2);
+        ctx.lineWidth = Math.max(2, this.radius * 0.17);
         ctx.stroke();
         ctx.globalAlpha = alpha * 0.95;
         ctx.strokeStyle = `hsl(${c.hue} 92% 58%)`;
-        ctx.lineWidth = Math.max(1.5, this.radius * 0.12);
+        ctx.lineWidth = Math.max(1.5, this.radius * 0.1);
         ctx.stroke();
         ctx.globalAlpha = alpha;
       }
@@ -1578,7 +1578,7 @@ export class LatticeRenderer {
       for (const s of sealDraws) {
         const face = charImage(s.charId, "head");
         if (!face) continue;
-        const side = this.radius * 0.6 * s.scale;
+        const side = this.radius * 0.58 * s.scale;
         ctx.globalAlpha = s.alpha;
         ctx.drawImage(
           face,

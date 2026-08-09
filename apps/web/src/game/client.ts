@@ -595,6 +595,9 @@ export class GameClient {
   private lastFireRound = 0;
   /** Set when the round ended because one owner held every live plate. */
   private soleOwnerKey: string | null = null;
+  /** Owner that banked on the very tick every other standing player died:
+   *  faced the final roll, survived it — the survivor's claim. */
+  private outlastedKey: string | null = null;
   /** Demo chat is an echo chamber — there is nobody on the other end. */
   private chatLog: ChatMsg[] = [];
   private nextChatId = 1;
@@ -791,6 +794,7 @@ export class GameClient {
     this.roundId++;
     this.youPlates = 0;
     this.soleOwnerKey = null;
+    this.outlastedKey = null;
     this.round = null;
     this.names.clear();
     this.phaseEnd = Date.now() + this.config.timing.lobbyMs;
@@ -1052,10 +1056,28 @@ export class GameClient {
       // the scene matches the plates still visibly up on the board.
       // A total wipe (nobody banked anything) leaves no winner at all.
       const cashedPlayers = res.players.filter((p) => p.outcome === "cashed");
+
+      // Same rule as the server: the owner who banked on the very tick every
+      // other standing player died faced the final roll and survived it —
+      // last one standing in spirit, though the engine flagged nobody.
+      if (
+        !res.players.some((p) => p.lastStanding) &&
+        res.players.some((p) => p.outcome === "dead" && p.ticksSurvived === res.ticks)
+      ) {
+        const finalExits = new Set<string>();
+        for (const p of res.players)
+          if (p.outcome === "cashed" && p.ticksSurvived === res.ticks)
+            finalExits.add(this.ownerOf(p.id));
+        if (finalExits.size === 1) this.outlastedKey = [...finalExits][0]!;
+      }
+
       const champ =
         res.players.find((p) => p.lastStanding) ??
         (this.soleOwnerKey !== null
           ? cashedPlayers.find((p) => this.ownerOf(p.id) === this.soleOwnerKey)
+          : undefined) ??
+        (this.outlastedKey !== null
+          ? cashedPlayers.find((p) => this.ownerOf(p.id) === this.outlastedKey)
           : undefined) ??
         [...cashedPlayers].sort(
           (a, b) => b.cashedOut - a.cashedOut || b.ticksSurvived - a.ticksSurvived,
@@ -1084,7 +1106,8 @@ export class GameClient {
             // when the champion IS that owner, not an earlier bigger exit.
             lastStanding:
               champ.lastStanding === true ||
-              (this.soleOwnerKey !== null && this.ownerOf(champ.id) === this.soleOwnerKey),
+              (this.soleOwnerKey !== null && this.ownerOf(champ.id) === this.soleOwnerKey) ||
+              (this.outlastedKey !== null && this.ownerOf(champ.id) === this.outlastedKey),
             tied,
           }
         : null;
@@ -1410,9 +1433,10 @@ export class GameClient {
       ticksSurvived: p.ticksSurvived,
       lastStanding:
         p.lastStanding === true ||
-        (this.soleOwnerKey !== null &&
-          this.ownerOf(p.id) === this.soleOwnerKey &&
-          p.outcome === "cashed"),
+        ((this.soleOwnerKey !== null && this.ownerOf(p.id) === this.soleOwnerKey) ||
+          (this.outlastedKey !== null && this.ownerOf(p.id) === this.outlastedKey)
+          ? p.outcome === "cashed"
+          : false),
       lifetime: this.lifetimeOf(p.id),
     };
   }

@@ -154,6 +154,10 @@ export class GameServer {
   private lastFireRound = 0;
   /** Set when the round ended because one wallet owned every live plate. */
   private soleOwnerWallet: string | null = null;
+  /** Wallet that banked on the very tick every other standing player died.
+   *  It faced the final roll and survived it — the survivor's claim, even
+   *  though the walk-out left the engine with nobody to flag. */
+  private outlastedWallet: string | null = null;
   /** Practice bots this lobby aims for (drawn per round), and their brains. */
   private botTarget = 0;
   private nextBotAt = 0;
@@ -341,6 +345,7 @@ export class GameServer {
     this.winner = null;
     this.winnerWallet = null;
     this.soleOwnerWallet = null;
+    this.outlastedWallet = null;
     this.bonanza = null;
     this.bonanzaWallet = null;
     this.phaseEnd = Date.now() + this.config.timing.lobbyMs;
@@ -852,10 +857,34 @@ export class GameServer {
     // board. Seat-order ties crowned a wallet that left ten ticks earlier
     // while the board showed someone else's plates as the last ones up.
     const cashed = res.players.filter((p) => p.outcome === "cashed");
+
+    // The third "last one standing" in spirit: the engine flagged nobody
+    // (a walk-out emptied the ice), but ONE wallet banked on the very tick
+    // every other standing player died. Deaths roll before exits, so that
+    // wallet faced the final roll, survived it, and left with the pot —
+    // mechanically an extraction, narratively the survivor. Needs a death
+    // on that tick (a mutual final-tick walk-out is a dead heat, not a
+    // survival) and exactly one such wallet.
+    if (
+      !res.players.some((p) => p.lastStanding) &&
+      res.players.some((p) => p.outcome === "dead" && p.ticksSurvived === res.ticks)
+    ) {
+      const finalExits = new Set<string>();
+      for (const p of res.players) {
+        if (p.outcome !== "cashed" || p.ticksSurvived !== res.ticks) continue;
+        const s = this.seats.get(p.id);
+        if (s) finalExits.add(s.wallet);
+      }
+      if (finalExits.size === 1) this.outlastedWallet = [...finalExits][0]!;
+    }
+
     const champ =
       res.players.find((p) => p.lastStanding) ??
       (this.soleOwnerWallet !== null
         ? cashed.find((p) => this.seats.get(p.id)?.wallet === this.soleOwnerWallet)
+        : undefined) ??
+      (this.outlastedWallet !== null
+        ? cashed.find((p) => this.seats.get(p.id)?.wallet === this.outlastedWallet)
         : undefined) ??
       [...cashed].sort(
         (a, b) => b.cashedOut - a.cashedOut || b.ticksSurvived - a.ticksSurvived,
@@ -891,7 +920,8 @@ export class GameServer {
           // wins the scene as an extraction.
           lastStanding:
             champ.lastStanding === true ||
-            (this.soleOwnerWallet !== null && champSeat.wallet === this.soleOwnerWallet),
+            (this.soleOwnerWallet !== null && champSeat.wallet === this.soleOwnerWallet) ||
+            (this.outlastedWallet !== null && champSeat.wallet === this.outlastedWallet),
           tied,
         }
       : null;
@@ -1068,13 +1098,15 @@ export class GameServer {
       multiple: (p.outcome === "in" ? p.balance : p.cashedOut) / this.config.entry,
       balance: p.outcome === "in" ? p.balance : p.cashedOut,
       ticksSurvived: p.ticksSurvived,
-      // Sole-owner endings count: those plates stood until every other
-      // wallet was gone, which is the same claim the flag makes.
+      // Sole-owner and outlasted endings count: those plates stood until
+      // every other wallet was gone, which is the same claim the flag
+      // makes — and the flag keeps them standing on the end-screen board.
       lastStanding:
         p.lastStanding === true ||
-        (this.soleOwnerWallet !== null &&
-          seat.wallet === this.soleOwnerWallet &&
-          p.outcome === "cashed"),
+        ((this.soleOwnerWallet !== null && seat.wallet === this.soleOwnerWallet) ||
+          (this.outlastedWallet !== null && seat.wallet === this.outlastedWallet)
+          ? p.outcome === "cashed"
+          : false),
       lifetime: seat.lifetime,
     };
   }
