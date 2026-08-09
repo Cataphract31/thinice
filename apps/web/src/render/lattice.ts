@@ -2,6 +2,7 @@ import { CellAtlas, hexPath, type CellState } from "./cells";
 import { TILE_TURN, TileAtlas, tileVersion, type TileName } from "./tiles";
 import { riskScale } from "@/game/risk";
 import { charImage } from "@/game/chars";
+import { crtOn } from "@/ui/fx";
 
 /**
  * The seam.
@@ -187,6 +188,23 @@ export class LatticeRenderer {
   private sealBearer = new Map<string, number>();
   /** Where the deciding break happened; the zoom leans into it. */
   private focus = { x: 0, y: 0 };
+
+  /**
+   * The signal system, CRT mode's content-side half. The CSS overlay bends
+   * scanlines and rolls glare, but it can only decorate the glass — these
+   * warp and tear the PICTURE. `glitch` is burst energy: deaths inject it,
+   * idle static strays inject a little, and it decays fast. `roll` is the
+   * v-hold slip on YOUR death: the picture loses vertical lock and wraps
+   * once, the broadcast's version of the crimson flood.
+   */
+  private fxBuf: HTMLCanvasElement | null = null;
+  private glitch = 0;
+  private roll = -1;
+  private strayIn = 4;
+  /** Reduced motion keeps the static barrel warp but stills every fault. */
+  private readonly calmSignal =
+    typeof window !== "undefined" &&
+    (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
   /** 1 to 0 over the beat after your own round ends. */
   private hit = 0;
   private hitKind: "dead" | "cashed" = "dead";
@@ -356,6 +374,12 @@ export class LatticeRenderer {
       if (this.youWas === "in" && (snap.youOutcome === "dead" || snap.youOutcome === "cashed")) {
         this.hit = 1;
         this.hitKind = snap.youOutcome;
+        // YOUR death breaks the broadcast: full glitch burst and one v-hold
+        // roll. The camera does not flinch like this for anyone else.
+        if (snap.youOutcome === "dead" && crtOn()) {
+          this.glitch = 1;
+          this.roll = 0;
+        }
       }
       this.youWas = snap.youOutcome;
     }
@@ -401,10 +425,14 @@ export class LatticeRenderer {
         this.release(cell);
       }
     }
-    if (deaths > 0)
+    if (deaths > 0) {
       this.shake = finale
         ? 1.5
         : Math.min(1, this.shake + 0.14 + deaths * 0.04);
+      // Every break hits the signal too: tears rip across the picture for a
+      // quarter second, harder when several plates go at once.
+      if (crtOn()) this.glitch = Math.min(1, this.glitch + 0.4 + deaths * 0.12);
+    }
 
     // Cue the sequence exactly once per round, on the deciding deaths. Every
     // surviving plate is the winner's and survives the fade; only the one
@@ -961,6 +989,23 @@ export class LatticeRenderer {
     if (this.goldWave > 0) this.goldWave = Math.max(0, this.goldWave - sdt / 6);
     if (this.hit > 0) this.hit = Math.max(0, this.hit - sdt / 1.1);
 
+    // The signal's own clock runs on the WALL, not on slow-mo time: a
+    // broadcast fault does not care that the replay is in slow motion.
+    if (crtOn()) {
+      this.strayIn -= dt;
+      if (this.strayIn <= 0) {
+        // Idle static: a small tracking fault every few seconds so the feed
+        // reads live even on a calm board. Danger makes the tape worse.
+        this.glitch = Math.max(this.glitch, 0.28 + this.heat * 0.25);
+        this.strayIn = 3 + Math.random() * (9 - this.heat * 5);
+      }
+    }
+    if (this.glitch > 0) this.glitch = Math.max(0, this.glitch - dt * 2.4);
+    if (this.roll >= 0) {
+      this.roll += dt * 2.2;
+      if (this.roll >= 1) this.roll = -1;
+    }
+
     const ctx = this.ctx;
     ctx.save();
     if (this.shake > 0.01) {
@@ -995,6 +1040,81 @@ export class LatticeRenderer {
     if (this.hit > 0) this.drawHit();
     this.drawGrain();
 
+    ctx.restore();
+
+    this.applySignal();
+  }
+
+  /**
+   * The content-side CRT pass: the finished frame is copied to a buffer and
+   * redrawn in horizontal bands through a barrel curve — verticals genuinely
+   * bow, completing what the overlay's bent scanlines only imply. Glitch
+   * energy shears random bands sideways (tears in the picture itself), high
+   * energy adds a ghosted double-exposure, and your death rolls the whole
+   * frame through one vertical wrap. ~24 GPU blits per frame, only while CRT
+   * mode is on, and the game's own draw code never knows it happened.
+   */
+  private applySignal(): void {
+    if (!crtOn()) return;
+    const cv = this.ctx.canvas;
+    const W = cv.width;
+    const H = cv.height;
+    if (W === 0 || H === 0) return;
+    if (!this.fxBuf || this.fxBuf.width !== W || this.fxBuf.height !== H) {
+      this.fxBuf = document.createElement("canvas");
+      this.fxBuf.width = W;
+      this.fxBuf.height = H;
+    }
+    const b = this.fxBuf.getContext("2d")!;
+    b.setTransform(1, 0, 0, 1, 0, 0);
+    b.clearRect(0, 0, W, H);
+    b.drawImage(cv, 0, 0);
+
+    const ctx = this.ctx;
+    const g = this.calmSignal ? 0 : this.glitch;
+    // V-hold roll: ease through one full vertical wrap.
+    let yShift = 0;
+    if (!this.calmSignal && this.roll >= 0) {
+      const r = this.roll;
+      const e = r < 0.5 ? 2 * r * r : 1 - Math.pow(-2 * r + 2, 2) / 2;
+      yShift = Math.round(e * H) % H;
+    }
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const bow = Math.min(14, W * 0.007);
+    const bands = 24;
+    const bh = Math.ceil(H / bands);
+    // Offsets hold for ~70ms at a time so tears read as frames of damage,
+    // not per-frame noise.
+    const tbin = (this.time * 14) | 0;
+    for (let i = 0; i < bands; i++) {
+      const y = i * bh;
+      const h = Math.min(bh, H - y);
+      if (h <= 0) break;
+      const v = ((y + h / 2) / H) * 2 - 1;
+      // Barrel: rows near the vertical centre draw slightly wider, so the
+      // side edges bulge at the middle exactly as the scanlines promise.
+      const s = 1 + ((bow * 2) / W) * (1 - v * v);
+      let dx = (W - W * s) / 2;
+      if (g > 0.03 && LatticeRenderer.rnd(i * 7.31 + tbin * 0.173) < g * 0.4) {
+        dx += (LatticeRenderer.rnd(i * 3.17 + tbin * 0.31) - 0.5) * g * W * 0.035;
+      }
+      const sy = (y + yShift) % H;
+      const first = Math.min(h, H - sy);
+      ctx.drawImage(this.fxBuf, 0, sy, W, first, dx, y, W * s, first);
+      if (first < h) {
+        // The band crossed the bottom of the rolling source; wrap the rest.
+        ctx.drawImage(this.fxBuf, 0, 0, W, h - first, dx, y + first, W * s, h - first);
+      }
+    }
+    // Heavy bursts ghost the whole picture sideways for a beat.
+    if (g > 0.45) {
+      ctx.globalAlpha = 0.14 * g;
+      ctx.drawImage(this.fxBuf, g * W * 0.012, 0);
+      ctx.globalAlpha = 1;
+    }
     ctx.restore();
   }
 
