@@ -232,6 +232,13 @@ export default function App(): JSX.Element {
   );
 }
 
+/** The other zinc.cash tables, named the way their own footer names them. */
+const FAMILY = [
+  { name: "classic", href: "https://crash.zinc.cash/play/classic" },
+  { name: "last man standing", href: "https://crash.zinc.cash/play/last-man-standing" },
+  { name: "no pain no gain", href: "https://crash.zinc.cash/play/no-pain-no-gain" },
+];
+
 /**
  * Slim anchor for the bottom of the page. Without it the layout just stops,
  * which reads as "did this fail to load" or "can I scroll"; with it the page
@@ -241,10 +248,28 @@ function Footer({ onShowInfo }: { onShowInfo: () => void }): JSX.Element {
   return (
     /* Hidden on phones: there the action bar already anchors the bottom of
        the page, and the footer would only cost the lattice another row. */
-    <footer className="hidden shrink-0 items-center justify-between px-3 py-2 lg:flex">
-      <span className="label">
-        THIN<span className="text-[var(--color-cyan)]">ICE</span> · a zinc game
+    <footer className="relative hidden shrink-0 items-center justify-between border-t border-[var(--color-line)] px-3 py-2 lg:flex">
+      <span className="display text-[12px] font-bold tracking-[0.16em]">
+        THIN<span className="text-[var(--color-cyan)]">ICE</span>
       </span>
+      {/* The family bar, centred, exactly as crash.zinc.cash carries its three
+          arenas: the sibling games by name, the one you are in lit. It is the
+          cheapest cross-promotion there is and it tells a first-time player
+          this is a house with several tables, not one page someone put up. */}
+      <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-5">
+        {FAMILY.map((g) => (
+          <a
+            key={g.name}
+            href={g.href}
+            target="_blank"
+            rel="noreferrer"
+            className="label hover:text-[var(--color-text)]"
+          >
+            {g.name}
+          </a>
+        ))}
+        <span className="label text-[var(--color-cyan)]">thin ice</span>
+      </nav>
       <span className="label flex items-center gap-3">
         <button onClick={onShowInfo} className="label hover:text-[var(--color-text)]">
           provably fair

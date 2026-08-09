@@ -201,18 +201,36 @@ function WalletButton({
     }
   };
 
+  // Connected and re-sign stay dark chips — they are status, not a call to
+  // action. The one that IS a call to action is inverted to near-white, the
+  // house treatment: crash.zinc.cash puts its only solid light element on
+  // "CONNECT + SIGN IN" and nothing else on the page competes with it.
+  const cta = !shown && !expired;
   return (
     <button
       onClick={click}
-      className="label rounded-sm bg-[var(--color-panel2)] px-2.5 py-1.5 hover:text-[var(--color-text)]"
-      style={
-        shown
-          ? { color: "var(--color-cyan)" }
-          : expired
-            ? { color: "var(--color-warn)" }
-            : undefined
+      className={
+        cta
+          ? "label flex items-center gap-1.5 rounded-sm bg-[var(--color-text)] px-2.5 py-1.5 font-semibold text-[var(--color-pit)] hover:brightness-95"
+          : "label rounded-sm bg-[var(--color-panel2)] px-2.5 py-1.5 hover:text-[var(--color-text)]"
       }
+      style={shown ? { color: "var(--color-cyan)" } : expired ? { color: "var(--color-warn)" } : undefined}
     >
+      {cta && (
+        <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
+          <rect
+            x="1.5"
+            y="3.5"
+            width="13"
+            height="9.5"
+            rx="2"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+          />
+          <path d="M10.5 8.25h4" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+      )}
       {shown ? shortAddress(shown) : expired ? "re-sign" : "connect"}
     </button>
   );
@@ -455,11 +473,28 @@ export function TopBar({
   onShowBank?: () => void;
 }): JSX.Element {
   return (
-    <div className="px-3 py-2">
+    <div className="border-b border-[var(--color-line)] px-3 py-2">
       <div className="flex items-center gap-3">
-        <div className="display text-[15px] font-bold tracking-[0.16em]">
-          THIN<span className="text-[var(--color-cyan)]">ICE</span>
-        </div>
+        {/* The house lockup: a filled tile carrying the product glyph, then
+            the wordmark. crash.zinc.cash opens with exactly this shape, and
+            two zinc.cash games that start their headers the same way are
+            visibly the same company. The glyph is ours — a hex plate, not
+            their crash ring. */}
+        <span className="flex items-center gap-2">
+          <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+            <rect width="24" height="24" rx="6" fill="var(--color-cyan)" />
+            <path
+              d="M12 5.4l5.2 3v7.2l-5.2 3-5.2-3V8.4z"
+              fill="none"
+              stroke="var(--color-pit)"
+              strokeWidth="2"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span className="display text-[15px] font-bold tracking-[0.16em]">
+            THIN<span className="text-[var(--color-cyan)]">ICE</span>
+          </span>
+        </span>
         {/* Round 0 does not exist — the counter increments before the first
             lobby opens — so it must not be shown while still connecting. */}
         <div className="label">{snap.roundId > 0 ? `#${snap.roundId}` : "-"}</div>
@@ -486,9 +521,22 @@ export function TopBar({
             </button>
           )}
           <WalletButton seat={snap.seat} onChange={onWalletChange} />
-          <IconButton label="How it works" onClick={onShowInfo}>
-            ⓘ
-          </IconButton>
+          {/* An outlined RULES chip, the house affordance, instead of a bare
+              glyph. A lone ⓘ in a row of six controls is the least-pressed
+              thing on the page, and this is the screen that explains the
+              odds. The word drops on phones, where the row cannot spare it. */}
+          <button
+            onClick={onShowInfo}
+            aria-label="How it works"
+            className="label flex items-center gap-1.5 rounded-sm border border-[var(--color-line)] px-2 py-1.5 hover:border-[var(--color-edge2)] hover:text-[var(--color-text)]"
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M8 7.1v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              <circle cx="8" cy="4.7" r="0.95" fill="currentColor" />
+            </svg>
+            <span className="max-sm:hidden">rules</span>
+          </button>
           <VolumePopover />
         </div>
       </div>
