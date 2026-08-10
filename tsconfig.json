@@ -15,7 +15,7 @@
       "@zinc/engine": ["./packages/engine/src/index.ts"]
     }
   },
-  // Engine and sim only. The web app is browser code with its own DOM lib and
+  // Engine only. The web app is browser code with its own DOM lib and
   // JSX settings, and is checked by apps/web/tsconfig.json — checking it here
   // as well just reports every DOM global as missing.
   "include": ["packages/**/*.ts"]

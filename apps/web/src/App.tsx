@@ -113,12 +113,9 @@ export default function App(): JSX.Element {
     <div className="mx-auto flex h-full max-w-[1180px] flex-col">
       <TopNav
         snap={snap}
-        demo={client.isLocal}
         onShowInfo={() => setShowInfo(true)}
         onShowChars={() => setShowChars(true)}
-        onWalletChange={(connected) => {
-          if (!client.isLocal) client.reauth(connected);
-        }}
+        onWalletChange={(connected) => client.reauth(connected)}
         onShowBank={snap.bank ? () => setShowBank(true) : undefined}
       />
       <StateBar snap={snap} />
@@ -247,11 +244,11 @@ export default function App(): JSX.Element {
           onClose={() => setShowChars(false)}
         />
       )}
-      {showBank && snap.bank && !client.isLocal && (
+      {showBank && snap.bank && (
         <BankPanel
           snap={snap}
           bank={snap.bank}
-          client={client as unknown as Banker}
+          client={client}
           onClose={() => setShowBank(false)}
         />
       )}

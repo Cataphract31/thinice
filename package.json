@@ -10,23 +10,7 @@
   "scripts": {
     "dev": "npm run dev --workspace @zinc/web",
     "build": "npm run build --workspace @zinc/web",
-    "sim": "tsx packages/sim/src/run.ts",
-    "sim:invariants": "tsx packages/sim/src/invariants.ts",
-    "sim:fairness": "tsx packages/sim/src/fairness.ts",
     "server": "npm run start --workspace @zinc/server",
-    "test:server": "node tools/probe.mjs",
-    "test:crash": "cd tools && node crashtest.mjs",
-    "test:tvbug": "cd tools && node tvbug.mjs",
-    "test:edge": "cd tools && node edgecases.mjs",
-    "sim:payouts": "tsx packages/sim/src/payouts.ts",
-    "sim:diagnose": "tsx packages/sim/src/diagnose.ts",
-    "sim:pacing": "tsx packages/sim/src/pacing.ts",
-    "sim:sweep": "tsx packages/sim/src/sweep.ts",
-    "sim:composition": "tsx packages/sim/src/composition.ts",
-    "sim:rake": "tsx packages/sim/src/rake.ts",
-    "sim:multi": "tsx packages/sim/src/multi-study.ts",
-    "test:bank": "cd tools && node banktest.mjs",
-    "test:hold": "tsx tools/holdtest.mts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json"
   },
   "devDependencies": {

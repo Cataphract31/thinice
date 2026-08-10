@@ -2,9 +2,8 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import type { Snapshot } from "@/game/client";
 import { CharArt } from "./Chars";
 
-/** The one thing the panel needs from either client. Both satisfy it. */
+/** The one thing the panel needs from the client. */
 export interface Talker {
-  isLocal: boolean;
   sendChat(text: string): void;
 }
 
@@ -41,7 +40,7 @@ export function ChatPanel({
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [snap.chat.length]);
 
-  const offline = !client.isLocal && !snap.connected;
+  const offline = !snap.connected;
   const submit = (): void => {
     const t = draft.trim();
     if (!t || offline) return;
@@ -60,11 +59,7 @@ export function ChatPanel({
         className="scroll-fade min-h-0 flex-1 overflow-y-auto px-1 py-1.5"
       >
         {snap.chat.length === 0 && (
-          <div className="label px-1 py-1">
-            {client.isLocal
-              ? "offline demo: nobody can hear you"
-              : "quiet ice. say something."}
-          </div>
+          <div className="label px-1 py-1">quiet ice. say something.</div>
         )}
         {snap.chat.map((m) =>
           m.system ? (

@@ -27,17 +27,10 @@ into the bundle during the build**. There is no runtime config file to edit and
 no environment variable the browser reads. If you change where the server lives,
 you must rebuild the client.
 
-Worse, it fails quietly in a specific way: **if `VITE_SERVER_URL` is unset at
-build time, the whole networking layer is tree-shaken out** and you get a fully
-playable single-player demo with simulated opponents and a fake `localStorage`
-balance. It looks like a working game. It is not connected to anything.
-
-Verify which build you produced before shipping it — this is one grep:
-
-```bash
-grep -c signAndSendTransaction apps/web/dist/assets/*.js
-# 0 = offline demo build   |   1 = real networked build
-```
+There is no offline fallback to fail into: the demo client is deleted, and a
+production build bakes the beta server address in `apps/web/vite.config.ts`
+unless `VITE_SERVER_URL` overrides it. A build that somehow ends up with no
+URL at all refuses to boot with an explicit error instead of playing pretend.
 
 Beware `apps/web/.env.local`. It is gitignored (so it will not reach you from
 this repo), but if one exists on the build machine it silently overrides the
@@ -92,13 +85,6 @@ The fairness panel replays finished rounds in the browser and hashes them with
 the code detects this and honestly labels rounds "unverifiable" rather than
 faking a verdict — but the headline feature of the product is then dead. Serve
 over HTTPS and connect the websocket with `wss://`.
-
-### `upload/zinc` — ignore it
-
-That directory is a generated standalone copy of the client that builds without
-the monorepo, used for a free preview deploy. If you are building from this repo
-you do not need it and should not edit it. It is committed only so the preview
-stays in sync.
 
 ---
 

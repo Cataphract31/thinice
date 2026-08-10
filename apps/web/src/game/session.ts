@@ -1,28 +1,31 @@
-import { getGameClient, type GameClient } from "./client";
 import { NetClient } from "./net";
 
 /**
- * Which game you are actually playing.
+ * The one client this build can produce.
  *
- * With `VITE_SERVER_URL` set the browser talks to the real server and decides
- * nothing; without it, it runs the local demo against bots. Both produce the
- * same `Snapshot`, so every component upstream of here is identical in both
- * modes — which is what makes going live a configuration change rather than a
- * rewrite.
+ * There used to be a second: with no server URL configured, the browser fell
+ * back to a full offline simulation. That fallback put the demo on the
+ * production domain once, wearing the live game's face, so it is gone — the
+ * URL is resolved at build time (vite.config.ts bakes the beta address into
+ * production builds) and a build that somehow lacks one refuses to boot
+ * rather than quietly playing pretend.
  */
-export type AnyClient = GameClient | NetClient;
-
 const url = import.meta.env.VITE_SERVER_URL as string | undefined;
 
-let instance: AnyClient | null = null;
+let instance: NetClient | null = null;
 
-export function getClient(): AnyClient {
-  if (!instance) instance = url ? new NetClient(url) : getGameClient();
+export function getClient(): NetClient {
+  if (!instance) {
+    if (!url) {
+      throw new Error(
+        "no VITE_SERVER_URL: this build has no game server. " +
+          "Set it in apps/web/.env.local (dev) or the build environment.",
+      );
+    }
+    instance = new NetClient(url);
+  }
   return instance;
 }
-
-/** True when this build is pointed at a server. */
-export const NETWORKED = Boolean(url);
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {

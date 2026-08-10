@@ -49,23 +49,17 @@ packages/engine    Authoritative game logic. Rounds, hazard curve, RNG,
                    ledgers, the provable-fairness record format.
                    Zero dependencies, runs identically in Node and a browser.
 
-packages/sim       Verification. Not tests of the code — measurements of the
-                   ECONOMICS, over hundreds of thousands of rounds. These are
-                   what back the RTP claims.
-
 apps/server        The authoritative game server. Node 22 + node:sqlite + ws.
                    Owns rounds, balances, the clock, the fairness ceremony,
                    and the house wallet. Money is integer LAMPORTS here.
 
-apps/web           React 19 + Vite. Two clients behind one `Snapshot` type:
+apps/web           React 19 + Vite. A pure screen for the server's state.
                    NetClient (talks to the server) and GameClient (a local
                    single-player demo used when no server is configured).
                    Every component upstream is identical in both modes.
 
 tools              End-to-end tests that run against a real server process.
 
-upload/zinc        BUILD ARTIFACT — a standalone copy of the web client for
-                   Vercel. Generated, never edited by hand. See Deploying.
 
 art-drop           Raw art masters (gitignored). The README in it has the
                    exact generation prompts; the packed output ships in
@@ -100,16 +94,14 @@ Nothing below is a claim you have to take on faith. All of it runs.
 
 ```bash
 npm run typecheck       # all three projects
-npm run sim:fairness    # RNG quality, replay determinism, jackpot derivation
-npm run sim:invariants  # the martingale + pot conservation, asserted
-npm run sim             # full economics: RTP by strategy, pacing, jackpot
-npm run test:server     # 30 end-to-end checks against a running server
-npm run test:crash      # kills the server mid-round, asserts nobody loses money
-npm run test:hold       # unsettled seal-time rakeback cannot be withdrawn
-npm run test:bank       # real devnet deposit + withdraw round trip
 ```
 
-`test:server` and `test:crash` need a server; `test:bank` starts its own.
+The economics simulators and the adversarial test harnesses (crash recovery,
+withdrawal holds, devnet banking round trips) live in the private dev
+repository, where they run against this code unchanged. The fairness claims a
+player can check are the ones that matter publicly, and those verify in the
+client itself: every finished round replays in the browser from its revealed
+seed, against the commitment published before it sealed.
 
 > `test:bank` **skips** if devnet's faucet is rate-limited. It has not yet
 > completed a full green run for that reason — the deposit/withdraw path is the
@@ -277,35 +269,6 @@ chain) and the one migration trap when real money later arrives.
 
 Nothing in the code is platform-specific. The `vercel.json` at the root exists
 only because the current free preview deploy runs there; any host can ignore it.
-
-### The `upload/zinc` preview copy
-
-`upload/zinc` is a **standalone copy** of the client that builds with no
-monorepo around it (it carries its own copy of the engine, aliased in its
-`vite.config.ts`), used for a zero-cost preview deploy. If you are building
-from this repo you do not need it. It is generated output:
-
-```bash
-rm -rf upload/zinc/src upload/zinc/engine upload/zinc/public
-cp -r apps/web/src        upload/zinc/src
-cp -r packages/engine/src upload/zinc/engine
-cp -r apps/web/public     upload/zinc/public
-cp    apps/web/index.html upload/zinc/index.html
-```
-
-**Never edit `upload/zinc/src` or `upload/zinc/engine` directly** — it silently
-diverges from the real source, and has done so before. Re-sync after any client
-change and verify with `diff -rq apps/web/src upload/zinc/src`.
-
-For the current preview it is copied into the `void-website` repo under `zinc/`,
-and nothing goes at that repo's root.
-
-Set `VITE_SERVER_URL` at build time or you get the offline demo — with no server
-URL the entire networking and wallet layer is tree-shaken out and the deploy is
-single-player against simulated opponents. It looks like a working game, which
-is exactly what makes it worth stating twice.
-
----
 
 ## Conventions
 

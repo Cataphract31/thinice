@@ -216,7 +216,6 @@ const IDLE: Snapshot = {
 };
 
 export class NetClient {
-  readonly isLocal = false;
   private ws: WebSocket | null = null;
   private snap: Snapshot = IDLE;
   private listeners = new Set<(s: Snapshot) => void>();

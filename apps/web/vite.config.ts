@@ -16,17 +16,17 @@ import { fileURLToPath } from "node:url";
  * a dashboard field.
  *
  * So: production builds default to the beta server. `VITE_SERVER_URL` still
- * overrides for any other deployment, and the literal value `demo` opts a
- * build back into the offline game on purpose. Dev is the opposite — it
- * defaults to whatever `.env.local` says (the local server, usually), and to
- * the offline demo when nothing is set, because `npm run dev` on a fresh
- * clone must never quietly attach to the public beta.
+ * overrides for any other deployment. There is no offline mode to fall into
+ * any more — the demo client is deleted — so a build without a URL produces a
+ * client that refuses to boot, loudly, instead of playing pretend. Dev takes
+ * its URL from `.env.local` (the local server), never a baked default,
+ * because `npm run dev` on a fresh clone must not quietly attach to the
+ * public beta.
  */
 const DEFAULT_BETA = "wss://34.70.75.204.sslip.io";
 
 export default defineConfig(({ command }) => {
-  const raw = process.env.VITE_SERVER_URL ?? (command === "build" ? DEFAULT_BETA : undefined);
-  const url = raw === "demo" ? "" : raw;
+  const url = process.env.VITE_SERVER_URL ?? (command === "build" ? DEFAULT_BETA : undefined);
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
@@ -37,9 +37,8 @@ export default defineConfig(({ command }) => {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
       },
     },
-    // Set explicitly so the resolution above is the single authority: without
-    // this, an .env file could hand the raw variable straight to the client
-    // and bypass the "demo" opt-out spelling.
+    // Set explicitly so the resolution above is the single authority over
+    // what a production bundle connects to.
     define: url !== undefined ? { "import.meta.env.VITE_SERVER_URL": JSON.stringify(url) } : {},
     server: { port: 5173 },
   };
