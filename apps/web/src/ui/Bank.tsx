@@ -41,7 +41,7 @@ export function BankPanel({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[360px] rounded-md bg-[var(--color-panel)] p-4 shadow-[0_12px_40px_rgba(0,0,0,0.6)]"
+        className="w-full max-w-[360px] rounded-sm bg-[var(--color-panel)] p-4 shadow-[0_12px_40px_rgba(0,0,0,0.6)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center">

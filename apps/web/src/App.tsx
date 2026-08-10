@@ -132,7 +132,7 @@ export default function App(): JSX.Element {
               Its darker pit background is the only separation it needs. The
               tube filter warms the picture only while CRT mode is on. */}
           <div
-            className={`relative min-h-0 flex-1 overflow-hidden rounded-sm ${crt ? "crt-tube" : ""} ${
+            className={`bleed relative min-h-0 flex-1 overflow-hidden ${crt ? "crt-tube" : ""} ${
               tv === "off" ? "tv-off" : tv === "on" ? "tv-on" : ""
             }`}
           >
@@ -158,7 +158,7 @@ export default function App(): JSX.Element {
         {/* Scored off the board by one hairline, not boxed: the house draws
             its sidebar as a region of the same surface, and the whole page
             stops reading as cards floating on a background. */}
-        <aside className="hidden w-[286px] shrink-0 border-l border-[var(--color-line)] pl-2 lg:flex lg:flex-col lg:gap-1.5">
+        <aside className="hidden w-[286px] shrink-0 border-l border-[var(--color-line-soft)] pl-3 lg:flex lg:flex-col lg:gap-1.5">
           <ActionBar
             inline
             snap={snap}
@@ -396,7 +396,7 @@ function PlayerCard({
   );
 
   return (
-    <div className="absolute bottom-2 left-2 z-20 max-h-[calc(100%-16px)] w-[208px] overflow-y-auto rounded-md bg-[var(--color-pit)]/95 p-2.5 shadow-[0_6px_28px_rgba(0,0,0,0.55)] backdrop-blur">
+    <div className="absolute bottom-2 left-2 z-20 max-h-[calc(100%-16px)] w-[208px] overflow-y-auto rounded-sm bg-[var(--color-pit)]/95 p-2.5 shadow-[0_6px_28px_rgba(0,0,0,0.55)] backdrop-blur">
       <button
         onClick={onClose}
         aria-label="Close"

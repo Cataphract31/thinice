@@ -244,7 +244,7 @@ export function Tutorial({
       {/* Stacked on phones (visual on top, never hidden), side-by-side from
           sm up, and genuinely large on big monitors — a 760px card read as a
           postage stamp on 4K. */}
-      <div className="flex w-full max-w-[780px] flex-col overflow-hidden rounded-md bg-[var(--color-panel)] shadow-[0_20px_80px_rgba(0,0,0,0.6)] sm:flex-row xl:max-w-[940px] 2xl:max-w-[1100px]">
+      <div className="flex w-full max-w-[780px] flex-col overflow-hidden rounded-sm bg-[var(--color-panel)] shadow-[0_20px_80px_rgba(0,0,0,0.6)] sm:flex-row xl:max-w-[940px] 2xl:max-w-[1100px]">
         <div className="flex h-[150px] w-full shrink-0 items-center justify-center bg-[var(--color-pit)] sm:h-auto sm:w-[300px] xl:w-[380px] 2xl:w-[450px]">
           <Visual kind={s.visual} />
         </div>

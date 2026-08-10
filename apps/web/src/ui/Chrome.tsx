@@ -78,7 +78,7 @@ export function TopNav({
         <button
           onClick={onShowChars}
           aria-label="Choose character"
-          className="rounded-md p-1 hover:bg-[var(--color-panel2)]"
+          className="rounded-sm p-1 hover:bg-[var(--color-panel2)]"
         >
           <CharArt charId={snap.charId} pose="head" size={22} />
         </button>
@@ -141,7 +141,7 @@ export function StateBar({ snap }: { snap: Snapshot }): JSX.Element {
 
         {/* Wallet, session and tickets keep their own component: the wallet
             float animation and the ticket popover both live inside it. */}
-        <div className="flex items-center gap-5 border-l border-[var(--color-line)] px-3.5 py-1.5">
+        <div className="flex items-center gap-5 border-l border-[var(--color-line-soft)] px-4 py-1.5">
           <Stats snap={snap} />
         </div>
 
@@ -151,7 +151,7 @@ export function StateBar({ snap }: { snap: Snapshot }): JSX.Element {
         <button
           onClick={() => setOpen(true)}
           title="Bonanza history"
-          className="ml-auto flex items-center gap-5 border-l border-[var(--color-line)] px-3.5 py-1.5 hover:bg-[var(--color-panel2)]"
+          className="ml-auto flex items-center gap-5 border-l border-[var(--color-line-soft)] px-4 py-1.5 hover:bg-[var(--color-panel2)]"
         >
           <span className="text-right">
             <span className="label block text-[var(--color-gold)]">bonanza</span>

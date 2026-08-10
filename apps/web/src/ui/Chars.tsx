@@ -102,7 +102,7 @@ export function CharSelect({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[420px] rounded-md bg-[var(--color-panel)] p-4"
+        className="w-full max-w-[420px] rounded-sm bg-[var(--color-panel)] p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-baseline justify-between">
@@ -127,7 +127,7 @@ export function CharSelect({
                   onPick(c.id);
                   onClose();
                 }}
-                className="flex flex-col items-center gap-2 rounded-md p-3"
+                className="flex flex-col items-center gap-2 rounded-sm p-3"
                 style={{
                   background: active ? "var(--color-panel2)" : undefined,
                   boxShadow: active ? "inset 0 0 0 1.5px var(--color-cyan)" : undefined,

@@ -37,7 +37,7 @@ export function InfoOverlay({
       onClick={onClose}
     >
       <div
-        className="h-fit w-full max-w-[640px] rounded-md bg-[var(--color-panel)]"
+        className="h-fit w-full max-w-[640px] rounded-sm bg-[var(--color-panel)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 flex items-center gap-3 rounded-t-md bg-[var(--color-panel)] px-4 py-3">
