@@ -621,7 +621,7 @@ export class LatticeRenderer {
       return;
     }
 
-    const padX = this.w * 0.05;
+    const padX = this.w * 0.045;
     const top = this.h * 0.03;
     const bottom = this.h * 0.05;
     const availW = this.w - padX * 2;
@@ -647,7 +647,12 @@ export class LatticeRenderer {
     // beta lobby huddled in the middle of a frame four times its size. Small
     // fields own the frame; the capacity loop below still shrinks whatever
     // cannot actually fit, so overflow stays impossible.
-    const fillShare = n <= 4 ? 0.3 : n <= 9 ? 0.24 : n <= 16 ? 0.19 : 0.16;
+    // Retuned upward after watching real sparse lobbies on a desktop frame:
+    // at the old tiers an 11-plate field claimed barely a third of the frame
+    // and the rest was dead gradient. The capacity loop below still shrinks
+    // whatever cannot actually fit, so these caps only decide how much of the
+    // frame a small field is ALLOWED to own, never whether it overflows.
+    const fillShare = n <= 4 ? 0.34 : n <= 9 ? 0.28 : n <= 16 ? 0.22 : 0.18;
     const roomy = Math.max(70, Math.min(availW, availH) * fillShare);
     r = Math.min(r, roomy, availW / 2.4, availH / (hexH * 1.6));
     let cols = 0;
