@@ -228,8 +228,29 @@ export class LatticeRenderer {
   private keyG: CanvasGradient | null = null;
   private atmosG: CanvasGradient | null = null;
 
-  resize(): void {
-    const rect = this.canvas.getBoundingClientRect();
+  /**
+   * Measure the LAYOUT box, never the visual one.
+   *
+   * getBoundingClientRect() reports the rect after ancestor transforms, and
+   * the lattice sits inside the element that plays the TV power cycle: for
+   * 700ms between rounds it is scaled down to 0.4% of its height. Any resize
+   * landing inside that window measured a board two pixels tall, built the
+   * backing store and packed the hexes for it, and then never recovered,
+   * because reverting a transform does not change the content box and so
+   * never fires the observer a second time. The result sat there stretched
+   * and blurry until the next phase change happened to resize the bar again.
+   *
+   * The observer hands us the content box; clientWidth/clientHeight are the
+   * same quantity when it does not. Both ignore transforms entirely.
+   */
+  resize(box?: { width: number; height: number }): void {
+    const w = box?.width ?? this.canvas.clientWidth;
+    const h = box?.height ?? this.canvas.clientHeight;
+    // A degenerate box is never worth committing to. Layout is thrown away and
+    // rebuilt on the next real measurement, so skipping costs one frame of the
+    // previous picture; acting on it costs the whole round.
+    if (w < 8 || h < 8) return;
+    const rect = { width: w, height: h };
     // Re-read the pixel ratio here rather than trusting the one sampled at
     // construction: dragging the window to a display with a different density,
     // or zooming the browser, changes it, and a backing store rebuilt at the

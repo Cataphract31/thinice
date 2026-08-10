@@ -16,6 +16,7 @@
     "server": "npm run start --workspace @zinc/server",
     "test:server": "node tools/probe.mjs",
     "test:crash": "cd tools && node crashtest.mjs",
+    "test:tvbug": "cd tools && node tvbug.mjs",
     "sim:payouts": "tsx packages/sim/src/payouts.ts",
     "sim:diagnose": "tsx packages/sim/src/diagnose.ts",
     "sim:pacing": "tsx packages/sim/src/pacing.ts",

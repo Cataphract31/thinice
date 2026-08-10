@@ -23,7 +23,14 @@ export function Shaft({
     r.setSinkPoint(0.5, -0.08);
     r.start();
 
-    const ro = new ResizeObserver(() => r.resize());
+    // Hand the renderer the observed content box rather than letting it
+    // measure itself: contentRect is transform-free and fractional, where a
+    // self-measurement can only be integral and, done with a client rect,
+    // can be caught mid-animation by the between-rounds TV transform.
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[entries.length - 1]?.contentRect;
+      r.resize(box ? { width: box.width, height: box.height } : undefined);
+    });
     ro.observe(canvas);
     return () => {
       ro.disconnect();
