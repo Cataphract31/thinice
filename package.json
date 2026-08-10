@@ -17,6 +17,7 @@
     "test:server": "node tools/probe.mjs",
     "test:crash": "cd tools && node crashtest.mjs",
     "test:tvbug": "cd tools && node tvbug.mjs",
+    "test:edge": "cd tools && node edgecases.mjs",
     "sim:payouts": "tsx packages/sim/src/payouts.ts",
     "sim:diagnose": "tsx packages/sim/src/diagnose.ts",
     "sim:pacing": "tsx packages/sim/src/pacing.ts",

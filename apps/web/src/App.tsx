@@ -54,7 +54,16 @@ export default function App(): JSX.Element {
   useEffect(() => {
     const was = prevPhase.current;
     prevPhase.current = snap.phase;
-    if (!crt || !(was === "result" && snap.phase === "lobby")) return;
+    if (!crt || !(was === "result" && snap.phase === "lobby")) {
+      // A cycle interrupted mid-flight must not leave the picture collapsed.
+      // Re-running this effect clears the pending timers below, and those
+      // timers are the only thing that ever restores the screen: toggling CRT
+      // off during the 700ms blink, or a reconnect jumping the phase inside
+      // it, would otherwise strand tv at "off" — the board held at 0.4% of
+      // its height by the animation's fill mode, invisible for good.
+      setTv((t) => (t === null ? t : null));
+      return;
+    }
     setTv("off");
     sfxTvOff();
     const t1 = setTimeout(() => {
