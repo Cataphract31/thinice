@@ -669,7 +669,7 @@ export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
           <span className="tnum text-[13px] font-semibold text-[var(--color-zinc-hi)]">
             {snap.bonanzaDrought.toLocaleString()}
           </span>
-          <span className="label">rounds dry</span>
+          <span className="label">last hit</span>
         </span>
       </button>
 
@@ -740,8 +740,8 @@ export function BonanzaOverlay({
             1 in {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()}, every
             round
           </Line>
-          <Line label="dry for">
-            <span className="tnum">{snap.bonanzaDrought.toLocaleString()}</span> rounds
+          <Line label="last hit">
+            <span className="tnum">{snap.bonanzaDrought.toLocaleString()}</span> rounds ago
           </Line>
           <Line label="your share" gold>
             {pct}

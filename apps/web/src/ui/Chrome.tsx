@@ -74,29 +74,6 @@ export function TopNav({
         </span>
       </span>
 
-      {/* The navbar the footer used to hide. Same names, same order, same
-          per-arena colour as the lobby, and the table you are standing on is
-          not a link at all: it is the lit tab. */}
-      <nav className="hidden items-center gap-1 lg:flex">
-        <span className="mr-2 h-4 w-px bg-[var(--color-line)]" />
-        {ARENAS.map((a) => (
-          <a
-            key={a.name}
-            href={a.href}
-            target="_blank"
-            rel="noreferrer"
-            className="label flex items-center gap-1.5 rounded-sm px-2 py-1.5 hover:bg-[var(--color-panel2)] hover:text-[var(--color-text)]"
-          >
-            <Dot color={a.dot} />
-            {a.name}
-          </a>
-        ))}
-        <span className="label flex items-center gap-1.5 rounded-sm bg-[var(--color-panel2)] px-2 py-1.5 text-[var(--color-text)]">
-          <Dot color="var(--color-cyan)" />
-          thin ice
-        </span>
-      </nav>
-
       <div className="ml-auto flex shrink-0 items-center gap-1">
         <button
           onClick={onShowChars}
@@ -183,7 +160,10 @@ export function StateBar({ snap }: { snap: Snapshot }): JSX.Element {
             </span>
           </span>
           <span className="text-right">
-            <span className="label block">rounds dry</span>
+            {/* Counted in rounds, and the unit is left implicit: the figure
+                beside it is a jackpot, so "last hit 20" can only mean rounds.
+                The window this opens spells it out for anyone who wonders. */}
+            <span className="label block">last hit</span>
             <span className="tnum mt-0.5 block text-[13px] font-semibold text-[var(--color-zinc-hi)]">
               {snap.bonanzaDrought.toLocaleString()}
             </span>
@@ -196,16 +176,38 @@ export function StateBar({ snap }: { snap: Snapshot }): JSX.Element {
 }
 
 /**
- * The footer stops carrying navigation. With the arenas promoted into the
- * navbar it has one job left: end the page, and hold the two links that are
- * genuinely footer material.
+ * The family bar stays in the footer, where crash.zinc.cash carries its own,
+ * but it stops being indistinguishable from the legal links beside it. Each
+ * arena wears the colour the lobby gives it, and the table you are standing
+ * on is not a link at all: it is the lit one. A row of coloured dots reads as
+ * a switcher at a glance; four grey words in a row of grey words did not.
  */
 export function SlimFooter({ onShowInfo }: { onShowInfo: () => void }): JSX.Element {
   return (
-    <footer className="hidden shrink-0 items-center justify-between border-t border-[var(--color-line)] px-3 py-2 lg:flex">
+    <footer className="relative hidden shrink-0 items-center justify-between border-t border-[var(--color-line)] px-3 py-2 lg:flex">
       <span className="display text-[12px] font-bold tracking-[0.16em]">
         THIN<span className="text-[var(--color-cyan)]">ICE</span>
       </span>
+
+      <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-1">
+        {ARENAS.map((a) => (
+          <a
+            key={a.name}
+            href={a.href}
+            target="_blank"
+            rel="noreferrer"
+            className="label flex items-center gap-1.5 rounded-sm px-2.5 py-1 hover:bg-[var(--color-panel2)] hover:text-[var(--color-text)]"
+          >
+            <Dot color={a.dot} />
+            {a.name}
+          </a>
+        ))}
+        <span className="label flex items-center gap-1.5 rounded-sm bg-[var(--color-panel2)] px-2.5 py-1 text-[var(--color-text)]">
+          <Dot color="var(--color-cyan)" />
+          thin ice
+        </span>
+      </nav>
+
       <span className="label flex items-center gap-4">
         <button onClick={onShowInfo} className="label hover:text-[var(--color-text)]">
           provably fair
