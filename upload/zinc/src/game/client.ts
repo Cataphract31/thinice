@@ -309,6 +309,9 @@ export function commitPreimage(roundId: number, seedHex: string, rulesHash: stri
 
 const SAVE_KEY = "zinc.save.v1";
 
+/** How long away before auto play lapses. Mirrors the server's default. */
+const AUTO_LAPSE_MS = 10 * 60_000;
+
 interface SaveState {
   wallet: number;
   session: number;
@@ -649,7 +652,12 @@ export class GameClient {
       if (typeof save.autoTarget === "number" && save.autoTarget >= 1.05) {
         this.auto.target = save.autoTarget;
       }
-      this.auto.enabled = save.autoEnabled === true;
+      // Auto play lapses over a long absence — see CONFIG.autoLapseMs on the
+      // server, which owns this rule in real play. Coming back to find
+      // yourself already staked in a round you never chose to enter is the
+      // one thing auto must never do.
+      const gone = typeof save.at === "number" ? Date.now() - save.at : 0;
+      this.auto.enabled = save.autoEnabled === true && gone <= AUTO_LAPSE_MS;
       this.auto.plates = Math.min(MAX_PLATES, Math.max(1, Math.round(num(save.autoPlates, 1))));
       // charById falls back to the default character on any unknown slug.
       if (save.charId) this.charId = charById(save.charId).id;

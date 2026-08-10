@@ -57,6 +57,14 @@
   --color-line: rgba(238, 241, 232, 0.14);
 
   /*
+   * The internal hairline, at half the strength of the one that closes a
+   * region. Dividing cells inside a band at full weight turns the band into a
+   * row of crates; at 6% the division is felt rather than drawn, and only the
+   * rule that ends a region is allowed to be seen.
+   */
+  --color-line-soft: rgba(238, 241, 232, 0.06);
+
+  /*
    * Mono for every numeral — tabular figures do not reflow while animating,
    * and monospaced digits are what financial products are read in.
    *
@@ -138,13 +146,21 @@ body {
  * An outline weighs nothing until you look at it, which leaves the two filled
  * elements on the page (EXTRACT and CONNECT) as the only things shining.
  */
+/*
+ * No outline. A drawn rectangle around a two-word control is the single most
+ * boxed-in thing a dark instrument panel can do, and the page carried six of
+ * them in one corner. The affordance is carried by the ground instead: the
+ * control is bare text until the cursor is on it, and then it sits on a lit
+ * surface. Nothing is closed on four sides.
+ */
 .chip {
-  border: 1px solid var(--color-line);
+  border: 0;
   border-radius: 2px;
   background: transparent;
+  transition: background-color 120ms linear, color 120ms linear;
 }
 .chip:hover:not(:disabled) {
-  border-color: var(--color-edge2);
+  background: var(--color-panel2);
   color: var(--color-text);
 }
 
@@ -647,4 +663,40 @@ body {
     animation: none !important;
     opacity: 0;
   }
+}
+
+/*
+ * The ice has no frame.
+ *
+ * The board was a rounded rectangle with a visible edge sitting on the page,
+ * which is a box by any other name. Now its own atmosphere fades out at every
+ * side, so the rink dissolves into the pit instead of stopping at a line. The
+ * separation is entirely a change of ground.
+ */
+.bleed {
+  -webkit-mask-image:
+    linear-gradient(to right, transparent 0, #000 64px, #000 calc(100% - 64px), transparent 100%),
+    linear-gradient(to bottom, transparent 0, #000 44px, #000 calc(100% - 44px), transparent 100%);
+  mask-image:
+    linear-gradient(to right, transparent 0, #000 64px, #000 calc(100% - 64px), transparent 100%),
+    linear-gradient(to bottom, transparent 0, #000 44px, #000 calc(100% - 44px), transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+
+/*
+ * Fields are a line you write on, not a trough you type into. No fill, no
+ * ring; the baseline lights when the field has focus and that is the whole
+ * affordance.
+ */
+.field {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--color-line);
+  border-radius: 0;
+  outline: none;
+  transition: border-color 120ms linear;
+}
+.field:focus {
+  border-bottom-color: var(--color-cyan);
 }

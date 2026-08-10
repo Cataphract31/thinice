@@ -29,7 +29,7 @@ function IconButton({
     <button
       onClick={onClick}
       aria-label={label}
-      className="rounded-md px-2 py-1.5 text-[15px] leading-none text-[var(--color-dim)] hover:bg-[var(--color-panel2)] hover:text-[var(--color-text)]"
+      className="rounded-sm px-2 py-1.5 text-[15px] leading-none text-[var(--color-dim)] hover:bg-[var(--color-panel2)] hover:text-[var(--color-text)]"
     >
       {children}
     </button>
@@ -44,7 +44,7 @@ function IconButton({
  * and the slider is still there so a player who finds the game slightly too
  * loud has a better option than silence. Both persist.
  */
-function VolumePopover(): JSX.Element {
+export function VolumePopover(): JSX.Element {
   const [open, setOpen] = useState(false);
   // Load the stored preferences BEFORE reading the level: initializers run
   // in order, and the old order captured the 0.7 default one line before
@@ -73,7 +73,7 @@ function VolumePopover(): JSX.Element {
         <>
           {/* Click-away layer. Sits under the popover, over everything else. */}
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-50 mt-1.5 w-[196px] rounded-md bg-[var(--color-panel2)] p-3 shadow-[0_8px_30px_rgba(0,0,0,0.55)]">
+          <div className="absolute right-0 top-full z-50 mt-1.5 w-[196px] rounded-sm bg-[var(--color-panel2)] p-3 shadow-[0_8px_30px_rgba(0,0,0,0.55)]">
             <div className="flex items-center gap-2.5">
               <button
                 onClick={() => {
@@ -170,7 +170,7 @@ function phantom(): PhantomProvider | null {
  * a guest ledger. That mismatch now renders as an explicit "re-sign" state
  * whose click runs the signature ceremony again.
  */
-function WalletButton({
+export function WalletButton({
   seat,
   onChange,
 }: {
@@ -262,7 +262,7 @@ function WalletButton({
  * at one decimal it sat frozen at "0.0" through its entire infancy — the one
  * number whose whole job is visibly growing.
  */
-function poolDigits(pool: number): number {
+export function poolDigits(pool: number): number {
   return pool < 1 ? 3 : pool < 100 ? 2 : 1;
 }
 
@@ -325,7 +325,7 @@ function TicketsStat({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-50 mt-1.5 w-[240px] rounded-md bg-[var(--color-panel2)] p-3 text-left shadow-[0_8px_30px_rgba(0,0,0,0.55)]">
+          <div className="absolute right-0 top-full z-50 mt-1.5 w-[240px] rounded-sm bg-[var(--color-panel2)] p-3 text-left shadow-[0_8px_30px_rgba(0,0,0,0.55)]">
             <div className="label text-[var(--color-gold)]">bonanza</div>
             <div className="mt-1 flex items-baseline justify-between">
               <span className="tnum text-[12px] font-semibold">
@@ -378,7 +378,7 @@ function TicketsStat({
   );
 }
 
-function BonanzaStat({ snap }: { snap: Snapshot }): JSX.Element {
+export function BonanzaStat({ snap }: { snap: Snapshot }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -394,7 +394,7 @@ function BonanzaStat({ snap }: { snap: Snapshot }): JSX.Element {
   );
 }
 
-function Stats({
+export function Stats({
   snap,
   mobile = false,
 }: {
@@ -528,7 +528,7 @@ export function TopBar({
           <button
             onClick={onShowChars}
             aria-label="Choose character"
-            className="rounded-md p-1 hover:bg-[var(--color-panel2)]"
+            className="rounded-sm p-1 hover:bg-[var(--color-panel2)]"
           >
             <CharArt charId={snap.charId} pose="head" size={22} />
           </button>
@@ -619,7 +619,7 @@ export function AutoPanel({
           if (e.key === "Enter") e.currentTarget.blur();
         }}
         aria-label="Auto exit target"
-        className="tnum w-[64px] rounded-sm bg-[var(--color-panel2)] px-1.5 py-1 text-right text-[13px] font-semibold text-[var(--color-text)] outline-none focus:ring-1 focus:ring-[var(--color-cyan)]"
+        className="field tnum w-[64px] px-1.5 py-1 text-right text-[13px] font-semibold text-[var(--color-text)]"
       />
       <span className="label">×</span>
       {/* How many plates each auto round buys. A select, not a stepper: five
@@ -628,7 +628,7 @@ export function AutoPanel({
         value={snap.auto.plates}
         onChange={(e) => onChange({ plates: Number(e.target.value) })}
         aria-label="Auto plate count"
-        className="tnum rounded-sm bg-[var(--color-panel2)] px-1 py-1 text-[13px] font-semibold text-[var(--color-text)] outline-none focus:ring-1 focus:ring-[var(--color-cyan)]"
+        className="field tnum px-1 py-1 text-[13px] font-semibold text-[var(--color-text)]"
       >
         {Array.from({ length: Math.max(1, snap.you.plates.max || 5) }, (_, i) => (
           <option key={i + 1} value={i + 1}>
@@ -669,7 +669,7 @@ export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
           <span className="tnum text-[13px] font-semibold text-[var(--color-zinc-hi)]">
             {snap.bonanzaDrought.toLocaleString()}
           </span>
-          <span className="label">rounds dry</span>
+          <span className="label">last hit</span>
         </span>
       </button>
 
@@ -685,7 +685,7 @@ export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
  * the one screen that has to feel like money — a 240px dropdown of grey rows
  * cannot carry a jackpot, and the bar it hung from was already overloaded.
  */
-function BonanzaOverlay({
+export function BonanzaOverlay({
   snap,
   onClose,
 }: {
@@ -711,7 +711,7 @@ function BonanzaOverlay({
       onClick={onClose}
     >
       <div
-        className="win-slam w-full max-w-[400px] rounded-md bg-[var(--color-panel)] shadow-[0_24px_90px_rgba(0,0,0,0.8)]"
+        className="win-slam w-full max-w-[400px] rounded-sm bg-[var(--color-panel)] shadow-[0_24px_90px_rgba(0,0,0,0.8)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center px-4 pt-3">
@@ -740,8 +740,8 @@ function BonanzaOverlay({
             1 in {Math.round(1 / DEFAULT_CONFIG.bonanza.fireProb).toLocaleString()}, every
             round
           </Line>
-          <Line label="dry for">
-            <span className="tnum">{snap.bonanzaDrought.toLocaleString()}</span> rounds
+          <Line label="last hit">
+            <span className="tnum">{snap.bonanzaDrought.toLocaleString()}</span> rounds ago
           </Line>
           <Line label="your share" gold>
             {pct}
@@ -854,7 +854,7 @@ export function AwayRecap({ snap }: { snap: Snapshot }): JSX.Element | null {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-      <div className="win-slam w-[340px] max-w-full rounded-md border border-[var(--color-line)] bg-[var(--color-panel)] p-6 text-center shadow-[0_16px_60px_rgba(0,0,0,0.7)]">
+      <div className="win-slam w-[340px] max-w-full rounded-sm border border-[var(--color-line)] bg-[var(--color-panel)] p-6 text-center shadow-[0_16px_60px_rgba(0,0,0,0.7)]">
         <div className="label text-[var(--color-cyan)]">the stream never sleeps</div>
         <h2 className="display mt-1.5 text-[19px] font-bold tracking-[0.16em]">
           while you were away
@@ -918,7 +918,7 @@ export function ActionBar({
     return wrap(
       <button
         disabled
-        className="display h-13 w-full rounded-sm bg-[var(--color-panel2)] py-3.5 text-[17px] font-bold tracking-[0.1em] text-[var(--color-warn)]"
+        className="display h-13 w-full py-3.5 text-[17px] font-bold tracking-[0.1em] text-[var(--color-dim)]"
       >
         Reconnecting…
       </button>,
@@ -990,8 +990,8 @@ export function ActionBar({
       : tone === "cash"
         ? "bg-[var(--color-profit)] text-[#03231a]"
         : tone === "lock"
-          ? "bg-[var(--color-panel2)] text-[var(--color-profit)]"
-          : "bg-[var(--color-panel2)] text-[var(--color-dim)]";
+          ? "text-[var(--color-profit)]"
+          : "text-[var(--color-dim)]";
 
   // The way out. A bonded player whose lobby never fills would otherwise be
   // locked in with no exit — nothing between "wait indefinitely" and closing
@@ -1002,7 +1002,7 @@ export function ActionBar({
     snap.phase === "lobby" && snap.you.joined && snap.connected && onStepOff ? (
       <button
         onClick={onStepOff}
-        className="mt-1.5 w-full rounded-sm bg-[var(--color-panel2)] py-2.5 text-[12px] font-semibold tracking-[0.04em] text-[var(--color-warn)] transition-transform active:scale-[0.985]"
+        className="chip mt-1.5 w-full py-2.5 text-[12px] font-semibold tracking-[0.04em] text-[var(--color-warn)] transition-transform active:scale-[0.985]"
       >
         step off · refund {(k * snap.entry).toFixed(1)} ◎
       </button>

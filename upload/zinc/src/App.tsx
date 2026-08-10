@@ -9,7 +9,8 @@ import { StatsPanel } from "@/ui/Stats";
 import { TickRing } from "@/ui/TickRing";
 import { BonanzaOverlay } from "@/ui/Bonanza";
 import { BankPanel, type Banker } from "@/ui/Bank";
-import { ActionBar, AutoPanel, AwayRecap, BonanzaBar, TopBar } from "@/ui/Hud";
+import { ActionBar, AutoPanel, AwayRecap } from "@/ui/Hud";
+import { SlimFooter, StateBar, TopNav } from "@/ui/Chrome";
 import { InfoOverlay } from "@/ui/Info";
 import { Tutorial, tutorialSeen } from "@/ui/Tutorial";
 import { CharArt, CharSelect, ShatterCard, WinnerOverlay } from "@/ui/Chars";
@@ -101,7 +102,7 @@ export default function App(): JSX.Element {
 
   return (
     <div className="mx-auto flex h-full max-w-[1180px] flex-col">
-      <TopBar
+      <TopNav
         snap={snap}
         onShowInfo={() => setShowInfo(true)}
         onShowChars={() => setShowChars(true)}
@@ -110,7 +111,7 @@ export default function App(): JSX.Element {
         }}
         onShowBank={snap.bank ? () => setShowBank(true) : undefined}
       />
-      <BonanzaBar snap={snap} />
+      <StateBar snap={snap} />
 
       <div className="mt-1.5 flex min-h-0 flex-1 gap-2 px-1.5 lg:px-3">
         <div className="relative flex min-h-0 flex-1 flex-col">
@@ -131,7 +132,7 @@ export default function App(): JSX.Element {
               Its darker pit background is the only separation it needs. The
               tube filter warms the picture only while CRT mode is on. */}
           <div
-            className={`relative min-h-0 flex-1 overflow-hidden rounded-sm ${crt ? "crt-tube" : ""} ${
+            className={`bleed relative min-h-0 flex-1 overflow-hidden ${crt ? "crt-tube" : ""} ${
               tv === "off" ? "tv-off" : tv === "on" ? "tv-on" : ""
             }`}
           >
@@ -157,7 +158,7 @@ export default function App(): JSX.Element {
         {/* Scored off the board by one hairline, not boxed: the house draws
             its sidebar as a region of the same surface, and the whole page
             stops reading as cards floating on a background. */}
-        <aside className="hidden w-[286px] shrink-0 border-l border-[var(--color-line)] pl-2 lg:flex lg:flex-col lg:gap-1.5">
+        <aside className="hidden w-[286px] shrink-0 border-l border-[var(--color-line-soft)] pl-3 lg:flex lg:flex-col lg:gap-1.5">
           <ActionBar
             inline
             snap={snap}
@@ -262,7 +263,7 @@ export default function App(): JSX.Element {
         />
       </div>
 
-      <Footer onShowInfo={() => setShowInfo(true)} />
+      <SlimFooter onShowInfo={() => setShowInfo(true)} />
     </div>
   );
 }
@@ -358,61 +359,6 @@ function CrtLayer({ snap }: { snap: Snapshot }): JSX.Element {
   );
 }
 
-/** The other zinc.cash tables, named the way their own footer names them. */
-const FAMILY = [
-  { name: "classic", href: "https://crash.zinc.cash/play/classic" },
-  { name: "last man standing", href: "https://crash.zinc.cash/play/last-man-standing" },
-  { name: "no pain no gain", href: "https://crash.zinc.cash/play/no-pain-no-gain" },
-];
-
-/**
- * Slim anchor for the bottom of the page. Without it the layout just stops,
- * which reads as "did this fail to load" or "can I scroll"; with it the page
- * visibly ends on purpose.
- */
-function Footer({ onShowInfo }: { onShowInfo: () => void }): JSX.Element {
-  return (
-    /* Hidden on phones: there the action bar already anchors the bottom of
-       the page, and the footer would only cost the lattice another row. */
-    <footer className="relative hidden shrink-0 items-center justify-between border-t border-[var(--color-line)] px-3 py-2 lg:flex">
-      <span className="display text-[12px] font-bold tracking-[0.16em]">
-        THIN<span className="text-[var(--color-cyan)]">ICE</span>
-      </span>
-      {/* The family bar, centred, exactly as crash.zinc.cash carries its three
-          arenas: the sibling games by name, the one you are in lit. It is the
-          cheapest cross-promotion there is and it tells a first-time player
-          this is a house with several tables, not one page someone put up. */}
-      <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-5">
-        {FAMILY.map((g) => (
-          <a
-            key={g.name}
-            href={g.href}
-            target="_blank"
-            rel="noreferrer"
-            className="label hover:text-[var(--color-text)]"
-          >
-            {g.name}
-          </a>
-        ))}
-        <span className="label text-[var(--color-cyan)]">thin ice</span>
-      </nav>
-      <span className="label flex items-center gap-3">
-        <button onClick={onShowInfo} className="label hover:text-[var(--color-text)]">
-          provably fair
-        </button>
-        <a
-          href="https://zinc.cash"
-          target="_blank"
-          rel="noreferrer"
-          className="hover:text-[var(--color-text)]"
-        >
-          zinc.cash
-        </a>
-      </span>
-    </footer>
-  );
-}
-
 /**
  * Everything about one player on one plate.
  *
@@ -450,7 +396,7 @@ function PlayerCard({
   );
 
   return (
-    <div className="absolute bottom-2 left-2 z-20 max-h-[calc(100%-16px)] w-[208px] overflow-y-auto rounded-md bg-[var(--color-pit)]/95 p-2.5 shadow-[0_6px_28px_rgba(0,0,0,0.55)] backdrop-blur">
+    <div className="absolute bottom-2 left-2 z-20 max-h-[calc(100%-16px)] w-[208px] overflow-y-auto rounded-sm bg-[var(--color-pit)]/95 p-2.5 shadow-[0_6px_28px_rgba(0,0,0,0.55)] backdrop-blur">
       <button
         onClick={onClose}
         aria-label="Close"

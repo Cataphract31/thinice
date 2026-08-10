@@ -122,7 +122,7 @@ export function ChatPanel({
           placeholder={offline ? "reconnecting…" : "say something"}
           disabled={offline}
           aria-label="Chat message"
-          className="min-w-0 flex-1 rounded-sm bg-[var(--color-panel2)] px-2 py-1.5 text-[12px] text-[var(--color-text)] outline-none placeholder:text-[var(--color-dim)] focus:ring-1 focus:ring-[var(--color-cyan)] disabled:opacity-50"
+          className="field min-w-0 flex-1 px-1 py-1.5 text-[12px] text-[var(--color-text)] placeholder:text-[var(--color-dim)] disabled:opacity-50"
         />
         <button
           type="submit"
