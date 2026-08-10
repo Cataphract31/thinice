@@ -154,6 +154,15 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     // moves the stamp to now.
     const awayMs = Date.now() - before.seenAt;
     const awayRakeback = awayMs > 90_000 ? db.rakebackSince(wallet, before.seenAt) : 0;
+    // Auto play lapses over a long absence, and it must lapse HERE: the seat
+    // is attached to the game below, and from that moment the next lobby tick
+    // buys this wallet in. Clearing it after attach would be a race the
+    // player pays for.
+    const autoLapsed =
+      before.autoEnabled === 1 &&
+      CONFIG.autoLapseMs > 0 &&
+      awayMs > CONFIG.autoLapseMs;
+    if (autoLapsed) db.setAuto(wallet, false, before.autoTarget, before.autoPlates ?? 1);
     db.touch(wallet);
     session = {
       wallet,

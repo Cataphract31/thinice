@@ -57,6 +57,22 @@ export const CONFIG = {
    * a bot may never share a table with real money.
    */
   bots: num("BOTS", 0, 0, 8),
+  /**
+   * Auto play lapses after this long away from the table, in minutes.
+   *
+   * Auto is an intent for a sitting, not a standing order. Left permanent, a
+   * player who closed the tab with auto on is bought into a live round the
+   * instant they reopen the site hours later — money staked before they have
+   * even seen the screen, by a decision they made in a session that ended.
+   * The window is deliberately wide enough that a refresh, a dropped
+   * connection or a phone locking for a minute all keep the setting: those
+   * are interruptions to a sitting, not the end of one. 0 disables lapsing.
+   *
+   * This does NOT touch auto's other job. Auto cash-out is still enforced
+   * server side for a player whose connection dies mid-round — that is the
+   * promise that auto keeps while you cannot act, and it is untouched here.
+   */
+  autoLapseMs: num("AUTO_LAPSE_MIN", 10, 0, 1440) * 60_000,
 } as const;
 
 if (CONFIG.bots > 0 && CONFIG.banking) {
