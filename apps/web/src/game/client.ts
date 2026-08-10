@@ -2,7 +2,6 @@ import {
   canonicalConfig,
   outcomeDigest,
   replayRound,
-  rngFromSeedHex,
   verifyBonanzaDraw,
   type GameConfig,
   type RoundRecord,
@@ -235,22 +234,6 @@ export interface PlayerStats {
    */
   bonanzaWon?: number;
 }
-
-/**
- * The ledger identity for "you" in the demo, and the base id for your plates.
- * Multi-betting gives you several PLATE ids in a round (YOU_BASE + i), but
- * tickets and rakeback accrue under the single YOU_ID so persistence and the
- * standings read one player, however many plates they stood on.
- */
-const YOU_ID = 9999;
-const YOU_BASE = 9900;
-/**
- * The restored crowd, as one ledger id. Plate ids are non-negative and YOU
- * lives above YOU_BASE, so a negative id can never collide with either.
- */
-const CROWD_ID = -2;
-const MAX_PLATES = 5;
-const isYou = (id: number): boolean => id >= YOU_BASE;
 
 /**
  * sha256 as lowercase hex, or null where the browser will not provide it.

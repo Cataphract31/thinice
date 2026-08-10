@@ -1,4 +1,5 @@
 import { useEffect, useState, type JSX } from "react";
+import { useEscape } from "@/ui/esc";
 import type { Snapshot } from "@/game/client";
 import { CHARACTERS, charById, charImage, type Pose } from "@/game/chars";
 
@@ -96,6 +97,7 @@ export function CharSelect({
   onPick: (id: string) => void;
   onClose: () => void;
 }): JSX.Element {
+  useEscape(onClose);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"

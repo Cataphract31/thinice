@@ -225,3 +225,34 @@ export function SlimFooter({ onShowInfo }: { onShowInfo: () => void }): JSX.Elem
     </footer>
   );
 }
+
+/**
+ * Connection lost, said once and plainly.
+ *
+ * The only tell used to be the word "Reconnecting" on a disabled button at the
+ * very bottom of the screen, while everything above it kept rendering the last
+ * snapshot: a multiplier, a bonded count, a seal countdown, a wallet balance.
+ * All of it stale, none of it labelled as such. On a product where people have
+ * money on the table, "is this frozen or is my stake gone" is the one question
+ * the screen must never leave open.
+ */
+export function OfflineBar({ snap }: { snap: Snapshot }): JSX.Element | null {
+  if (snap.connected) return null;
+  return (
+    <div
+      role="status"
+      className="flex shrink-0 items-center gap-2.5 border-b border-[var(--color-line)] bg-[var(--color-panel)] px-3 py-1.5"
+    >
+      <span
+        aria-hidden="true"
+        className="breathe inline-block h-[6px] w-[6px] shrink-0 rounded-full"
+        style={{ background: "var(--color-warn)" }}
+      />
+      <span className="label text-[var(--color-warn)]">connection lost</span>
+      <span className="label">
+        reconnecting. nothing below is live, and no round can take your stake
+        while this shows.
+      </span>
+    </div>
+  );
+}

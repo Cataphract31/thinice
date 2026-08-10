@@ -1,4 +1,5 @@
 import { useState, type JSX } from "react";
+import { useEscape } from "@/ui/esc";
 import type { BankState, Snapshot } from "@/game/client";
 
 /** The two moves a bank can make. NetClient implements this; the demo cannot. */
@@ -29,6 +30,7 @@ export function BankPanel({
   client: Banker;
   onClose: () => void;
 }): JSX.Element {
+  useEscape(onClose);
   const [draft, setDraft] = useState("");
 
   const amount = Number(draft);

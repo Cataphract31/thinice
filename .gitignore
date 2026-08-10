@@ -31,3 +31,8 @@ art-drop/**/*.png
 # Python bytecode from the art pipeline
 __pycache__/
 *.pyc
+
+# Built output under any name. `dist/` alone missed `dist-demo/`, which is how
+# a 2 MB build of the retired offline demo sat tracked in a public repo that is
+# supposed to contain no demo at all.
+dist-*/

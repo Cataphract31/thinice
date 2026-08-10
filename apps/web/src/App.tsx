@@ -8,9 +8,9 @@ import { HistoryPanel } from "@/ui/History";
 import { StatsPanel } from "@/ui/Stats";
 import { TickRing } from "@/ui/TickRing";
 import { BonanzaOverlay } from "@/ui/Bonanza";
-import { BankPanel, type Banker } from "@/ui/Bank";
+import { BankPanel } from "@/ui/Bank";
 import { ActionBar, AutoPanel, AwayRecap } from "@/ui/Hud";
-import { SlimFooter, StateBar, TopNav } from "@/ui/Chrome";
+import { OfflineBar, SlimFooter, StateBar, TopNav } from "@/ui/Chrome";
 import { InfoOverlay } from "@/ui/Info";
 import { Tutorial, tutorialSeen } from "@/ui/Tutorial";
 import { CharArt, CharSelect, ShatterCard, WinnerOverlay } from "@/ui/Chars";
@@ -118,6 +118,7 @@ export default function App(): JSX.Element {
         onWalletChange={(connected) => client.reauth(connected)}
         onShowBank={snap.bank ? () => setShowBank(true) : undefined}
       />
+      <OfflineBar snap={snap} />
       <StateBar snap={snap} />
 
       <div className="mt-1.5 flex min-h-0 flex-1 gap-2 px-1.5 lg:px-3">
