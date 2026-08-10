@@ -12,6 +12,12 @@ dist/
 *.db-wal
 *.db-shm
 house-keypair.json
+# The bank test spins up its own throwaway house wallet and deletes it on every
+# run. One got swept into the first commit: a real secret key, in what is now a
+# public repo. The pattern, not the filename, so the next test harness that
+# invents a name cannot repeat it.
+*-house.json
+*-keypair.json
 
 # Raw art masters. ~36 MB of green-screen generator output that was already
 # chroma-keyed and packed into apps/web/public — nothing here ships, and none
