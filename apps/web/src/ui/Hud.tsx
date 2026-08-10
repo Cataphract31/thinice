@@ -44,7 +44,7 @@ function IconButton({
  * and the slider is still there so a player who finds the game slightly too
  * loud has a better option than silence. Both persist.
  */
-function VolumePopover(): JSX.Element {
+export function VolumePopover(): JSX.Element {
   const [open, setOpen] = useState(false);
   // Load the stored preferences BEFORE reading the level: initializers run
   // in order, and the old order captured the 0.7 default one line before
@@ -170,7 +170,7 @@ function phantom(): PhantomProvider | null {
  * a guest ledger. That mismatch now renders as an explicit "re-sign" state
  * whose click runs the signature ceremony again.
  */
-function WalletButton({
+export function WalletButton({
   seat,
   onChange,
 }: {
@@ -262,7 +262,7 @@ function WalletButton({
  * at one decimal it sat frozen at "0.0" through its entire infancy — the one
  * number whose whole job is visibly growing.
  */
-function poolDigits(pool: number): number {
+export function poolDigits(pool: number): number {
   return pool < 1 ? 3 : pool < 100 ? 2 : 1;
 }
 
@@ -378,7 +378,7 @@ function TicketsStat({
   );
 }
 
-function BonanzaStat({ snap }: { snap: Snapshot }): JSX.Element {
+export function BonanzaStat({ snap }: { snap: Snapshot }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -394,7 +394,7 @@ function BonanzaStat({ snap }: { snap: Snapshot }): JSX.Element {
   );
 }
 
-function Stats({
+export function Stats({
   snap,
   mobile = false,
 }: {
@@ -685,7 +685,7 @@ export function BonanzaBar({ snap }: { snap: Snapshot }): JSX.Element {
  * the one screen that has to feel like money — a 240px dropdown of grey rows
  * cannot carry a jackpot, and the bar it hung from was already overloaded.
  */
-function BonanzaOverlay({
+export function BonanzaOverlay({
   snap,
   onClose,
 }: {
