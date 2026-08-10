@@ -44,12 +44,15 @@ function Dot({ color }: { color: string }): JSX.Element {
  */
 export function TopNav({
   snap,
+  demo = false,
   onShowInfo,
   onShowChars,
   onWalletChange,
   onShowBank,
 }: {
   snap: Snapshot;
+  /** Offline single-player build: no server, simulated crowd, pretend money. */
+  demo?: boolean;
   onShowInfo: () => void;
   onShowChars: () => void;
   onWalletChange?: (connected: boolean) => void;
@@ -73,6 +76,16 @@ export function TopNav({
           THIN<span className="text-[var(--color-cyan)]">ICE</span>
         </span>
       </span>
+
+      {/* Worn openly, next to the name. The offline build once reached
+          production wearing the live game's face, and the only tell was a
+          chat placeholder — a simulated room with a simulated crowd must say
+          so where every screenshot includes it. */}
+      {demo && (
+        <span className="label rounded-sm bg-[var(--color-panel2)] px-2 py-1 text-[var(--color-warn)]">
+          demo
+        </span>
+      )}
 
       <div className="ml-auto flex shrink-0 items-center gap-1">
         <button

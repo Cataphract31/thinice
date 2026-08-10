@@ -113,6 +113,7 @@ export default function App(): JSX.Element {
     <div className="mx-auto flex h-full max-w-[1180px] flex-col">
       <TopNav
         snap={snap}
+        demo={client.isLocal}
         onShowInfo={() => setShowInfo(true)}
         onShowChars={() => setShowChars(true)}
         onWalletChange={(connected) => {
