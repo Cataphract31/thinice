@@ -186,8 +186,13 @@ export const DEFAULT_CONFIG: GameConfig = {
    * per client on every broadcast — measure egress before raising it on a
    * machine that matters. Both sides hash this into the fairness commitment,
    * so server and client must ship together when it moves.
+   *
+   * The MINIMUM is not a live rule at all — only the simulators read it, to
+   * sample representative rounds. It has to track what actually runs or the
+   * economics get certified over rooms the game never sees: with the practice
+   * roster down to ten, and none at all at launch, a real lobby is small.
    */
-  field: { min: 24, max: 250 },
+  field: { min: 8, max: 250 },
 };
 
 /** Draws a field size from the configured lobby range. */
