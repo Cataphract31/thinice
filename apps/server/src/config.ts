@@ -57,16 +57,13 @@ export const CONFIG = {
    * a bot may never share a table with real money.
    */
   /*
-   * Ceiling of 16, and it is two limits agreeing rather than one round
-   * number. The roster in game.ts holds sixteen named temperaments and the
-   * seating loop indexes it by position, so seventeen would seat nobody new.
-   * And the lobby caps at field.max plates while a bot buys 1.35 of them on
-   * average, so sixteen bots occupy roughly two thirds of a full room and
-   * leave the rest for humans — push it much past this and the bots fill the
-   * lattice during the lobby window, and a real player gets told the room is
-   * full by a room containing nobody real.
+   * No small ceiling. The roster generates names and temperaments, the hazard
+   * curve reads crowding as a FRACTION so it is scale-free, and the lattice
+   * renderer was built for a thousand cells. What actually bounds this is the
+   * box: state is serialised per client five times a second, so cost grows as
+   * clients x plates. Measure before raising it on a machine that matters.
    */
-  bots: num("BOTS", 0, 0, 16),
+  bots: num("BOTS", 0, 0, 500),
   /**
    * Auto play lapses after this long away from the table, in minutes.
    *

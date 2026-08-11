@@ -45,10 +45,30 @@ export function shortAddress(addr: string): string {
  * rev-share split for good: the ledgers only ever hydrate wallets that still
  * hold something.
  */
-const BOT_NAMES = [
+/*
+ * The roster is generated, not hand-maintained.
+ *
+ * A fixed list meant the bot ceiling was silently the list's length, and every
+ * increase needed a matching block of hand-tuned temperaments — which is how a
+ * request for sixteen bots quietly seated ten. These are real glaciology and
+ * sea-ice terms so the table still reads as a cast rather than bot001..bot400,
+ * and past the end of the list the roster laps with a numeral.
+ */
+const BOT_ROOTS = [
   "rime", "nilas", "hoar", "graupel", "brash", "sleet", "frazil", "calving",
   "verglas", "firn", "floe", "shuga", "growler", "hummock", "serac", "moulin",
+  "bergy", "grease", "pancake", "candle", "anchor", "fast", "drift", "ridge",
+  "lead", "polynya", "sastrugi", "neve", "crevasse", "icefall", "bergschrund", "till",
+  "erratic", "moraine", "drumlin", "esker", "kettle", "outwash", "varve", "roche",
+  "cirque", "arete", "horn", "tarn", "col", "nunatak", "ogive", "seracfall",
 ];
+
+/** Stable per-name index into the roster: `bot:rime`, then `bot:rime2`. */
+function botNameAt(i: number): string {
+  const root = BOT_ROOTS[i % BOT_ROOTS.length]!;
+  const lap = Math.floor(i / BOT_ROOTS.length);
+  return lap === 0 ? root : `${root}${lap + 1}`;
+}
 
 /**
  * A fixed temperament per bot name, so the table reads as characters rather
@@ -65,27 +85,87 @@ const BOT_STYLE: Record<
   string,
   { t0: number; t1: number; panic: number; nerve: number; guts: number }
 > = {
-  rime: { t0: 1.18, t1: 1.6, panic: 0.03, nerve: 0.9, guts: 0.1 },
-  nilas: { t0: 1.35, t1: 2.1, panic: 0.042, nerve: 0.55, guts: 0.35 },
-  hoar: { t0: 1.7, t1: 3.0, panic: 0.055, nerve: 0.4, guts: 0.6 },
-  graupel: { t0: 2.4, t1: 5.0, panic: 0.085, nerve: 0.15, guts: 0.95 },
-  brash: { t0: 1.26, t1: 3.8, panic: 0.05, nerve: 0.6, guts: 0.5 },
-  sleet: { t0: 1.3, t1: 1.85, panic: 0.036, nerve: 0.8, guts: 0.2 },
-  frazil: { t0: 1.9, t1: 3.4, panic: 0.068, nerve: 0.25, guts: 0.8 },
-  calving: { t0: 1.45, t1: 2.5, panic: 0.048, nerve: 0.5, guts: 0.45 },
-  // The second eight widen the spread rather than crowding the middle: the
-  // room only reads as a crowd if the tail has both the wallet that bolts at
-  // the first crack and the one that will not leave at any price.
-  verglas: { t0: 1.15, t1: 1.45, panic: 0.028, nerve: 0.95, guts: 0.05 },
-  firn: { t0: 1.22, t1: 1.7, panic: 0.034, nerve: 0.85, guts: 0.15 },
-  floe: { t0: 1.5, t1: 2.2, panic: 0.045, nerve: 0.52, guts: 0.4 },
-  shuga: { t0: 1.28, t1: 3.2, panic: 0.052, nerve: 0.58, guts: 0.55 },
-  growler: { t0: 1.6, t1: 2.6, panic: 0.05, nerve: 0.45, guts: 0.65 },
-  hummock: { t0: 1.8, t1: 2.8, panic: 0.06, nerve: 0.3, guts: 0.72 },
-  serac: { t0: 2.1, t1: 4.2, panic: 0.075, nerve: 0.2, guts: 0.88 },
-  moulin: { t0: 2.8, t1: 6.0, panic: 0.095, nerve: 0.12, guts: 0.98 },
+  // Rebalanced braver across the whole roster: the old timid end bailed around
+  // 1.15x, which put a wall of exits on the board before the multiplier had
+  // gone anywhere and made every round feel like it ended before it started.
+  // Nobody now leaves below 1.30x, the middle sits near 2x, and the deep end
+  // rides past 5x. The ORDERING is untouched — the point was never that every
+  // bot should be brave, it is that the table needs both the wallet that goes
+  // early and the one that will not leave, or an endgame has no texture.
+
+  // Cautious: still first out, but they take something with them now.
+  verglas: { t0: 1.3, t1: 1.75, panic: 0.04, nerve: 0.8, guts: 0.2 },
+  rime: { t0: 1.35, t1: 1.9, panic: 0.042, nerve: 0.75, guts: 0.25 },
+  firn: { t0: 1.4, t1: 2.0, panic: 0.045, nerve: 0.7, guts: 0.3 },
+  sleet: { t0: 1.45, t1: 2.1, panic: 0.048, nerve: 0.65, guts: 0.35 },
+
+  // The middle of the table.
+  nilas: { t0: 1.55, t1: 2.4, panic: 0.055, nerve: 0.5, guts: 0.45 },
+  floe: { t0: 1.65, t1: 2.6, panic: 0.058, nerve: 0.46, guts: 0.5 },
+  brash: { t0: 1.6, t1: 3.6, panic: 0.06, nerve: 0.45, guts: 0.55 },
+  calving: { t0: 1.75, t1: 2.8, panic: 0.062, nerve: 0.42, guts: 0.55 },
+
+  // Hold well past break-even and mean it heads-up.
+  shuga: { t0: 1.8, t1: 3.4, panic: 0.068, nerve: 0.35, guts: 0.62 },
+  hoar: { t0: 2.0, t1: 3.4, panic: 0.07, nerve: 0.32, guts: 0.68 },
+  growler: { t0: 2.1, t1: 3.2, panic: 0.072, nerve: 0.3, guts: 0.72 },
+  hummock: { t0: 2.2, t1: 3.6, panic: 0.078, nerve: 0.25, guts: 0.78 },
+
+  // The deep end. moulin is the one that dies on the ice rather than leave.
+  frazil: { t0: 2.4, t1: 4.2, panic: 0.085, nerve: 0.2, guts: 0.85 },
+  serac: { t0: 2.6, t1: 5.0, panic: 0.092, nerve: 0.16, guts: 0.9 },
+  graupel: { t0: 2.9, t1: 5.8, panic: 0.1, nerve: 0.12, guts: 0.95 },
+  moulin: { t0: 3.2, t1: 7.0, panic: 0.11, nerve: 0.08, guts: 0.99 },
 };
+
+/**
+ * Every other bot's temperament, derived from its name.
+ *
+ * The sixteen above are hand-tuned and stay that way — they are the characters
+ * regulars learn. Past them the roster is generated, so the personality has to
+ * be too, or a big room fills with one policy in four hundred hats. A stable
+ * hash places each name on the same timid-to-degen spectrum the curated set
+ * spans, which means the SPREAD survives at any size: a four-hundred-plate
+ * room still has its first-crack bolters and its will-not-leave whales, in
+ * roughly the proportions the small room had.
+ */
+function derivedStyle(name: string): { t0: number; t1: number; panic: number; nerve: number; guts: number } {
+  // FNV-1a over the name, mapped to 0..1. Deterministic, so a bot's character
+  // survives restarts exactly like the hand-tuned ones.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  const u = h / 0xffffffff;
+  // Skew toward the middle so the extremes stay rare and keep their meaning.
+  const k = (u + (h >>> 16) / 0x10000) / 2;
+  return {
+    t0: 1.3 + k * 1.9,
+    t1: 1.75 + k * 5.25 + (1 - k) * 0.5,
+    panic: 0.04 + k * 0.07,
+    nerve: 0.8 - k * 0.72,
+    guts: 0.2 + k * 0.79,
+  };
+}
+
+/** Hand-tuned where one exists, derived otherwise. */
+function styleFor(name: string): { t0: number; t1: number; panic: number; nerve: number; guts: number } {
+  return BOT_STYLE[name] ?? derivedStyle(name);
+}
 const isBot = (wallet: string): boolean => wallet.startsWith("bot:");
+
+/**
+ * Plates held back from the bots for people.
+ *
+ * A flat reservation rather than a percentage: what a late human needs is a
+ * seat, and that need does not grow with the size of the room. Taking a third
+ * of a 400-plate lattice to guarantee twelve seats would just be a smaller
+ * game. Bots fill everything else.
+ */
+const HUMAN_RESERVE = 12;
+const botPlateCeiling = (fieldMax: number): number => Math.max(4, fieldMax - HUMAN_RESERVE);
+
 
 /*
  * The clamp in config.ts and this roster have to agree, and nothing structural
@@ -94,17 +174,8 @@ const isBot = (wallet: string): boolean => wallet.startsWith("bot:");
  * runs short of the configured crowd forever — a silent shortfall is the worst
  * possible failure here, because it looks exactly like everything working.
  */
-if (BOT_NAMES.length !== new Set(BOT_NAMES).size) {
-  throw new Error("BOT_NAMES contains duplicates: each bot is one wallet, keyed by name");
-}
-if (CONFIG.bots > BOT_NAMES.length) {
-  throw new Error(
-    `BOTS=${CONFIG.bots} exceeds the ${BOT_NAMES.length} named bots available. ` +
-      "Add names and temperaments to BOT_NAMES/BOT_STYLE, or lower BOTS.",
-  );
-}
-for (const name of BOT_NAMES) {
-  if (!BOT_STYLE[name]) throw new Error(`bot "${name}" has no temperament in BOT_STYLE`);
+if (BOT_ROOTS.length !== new Set(BOT_ROOTS).size) {
+  throw new Error("BOT_ROOTS contains duplicates: each bot is one wallet, keyed by name");
 }
 
 
@@ -268,8 +339,8 @@ export class GameServer {
     // time than any other, and a face repeats only after all twelve are out.
     const taken = new Set<string>();
     const needFace: string[] = [];
-    for (const name of BOT_NAMES) {
-      const wallet = `bot:${name}`;
+    for (let i = 0; i < CONFIG.bots; i++) {
+      const wallet = `bot:${botNameAt(i)}`;
       const current = this.db.player(wallet).charId;
       if (CHARS.includes(current) && !taken.has(current)) {
         taken.add(current);
@@ -483,7 +554,12 @@ export class GameServer {
    */
   private fillBots(now: number): void {
     if (this.botTarget <= 0 || now < this.nextBotAt) return;
-    if (this.seats.size >= this.config.field.max) return;
+    // Bots may not take the whole lattice. They seat on a timer during the
+    // lobby and a human clicks whenever they arrive, so without a reserved
+    // slice the room fills with practice traffic and a real player is told
+    // "the lattice is full" by a room containing nobody real. Observed live:
+    // sixteen bots buying richer stacks reach the cap on their own.
+    if (this.seats.size >= botPlateCeiling(this.config.field.max)) return;
     let seated = 0;
     for (const w of this.seatsOf.keys()) if (isBot(w)) seated++;
     if (seated >= this.botTarget) return;
@@ -495,17 +571,21 @@ export class GameServer {
     // the lobby so the last bot still lands well before the ice does, and
     // keep the jitter so arrivals trickle rather than march.
     const budget = this.config.timing.lobbyMs * 0.75;
-    const gap = Math.max(140, Math.min(1200, budget / Math.max(1, this.botTarget)));
+    const gap = Math.max(35, Math.min(1200, budget / Math.max(1, this.botTarget)));
     this.nextBotAt = now + gap * (0.6 + this.rng.next() * 0.8);
 
-    const name = BOT_NAMES[seated % BOT_NAMES.length]!;
+    const name = botNameAt(seated);
     const wallet = `bot:${name}`;
     if (this.seatsOf.has(wallet)) return;
-    // A couple of stacks per room, never a bot whale: mostly singles, about
-    // one in five buys a second plate, one in fourteen a third. Puts owner
-    // clusters and cash-out-all behaviour on the ice even with no humans.
+    // Stacks run deeper than they did: a bit over half still buy a single
+    // plate, but the tail now reaches the per-wallet cap, so clusters of four
+    // and five show up on the ice and cash-out-all has something to act on.
+    // Averages about 1.75 plates a bot — deliberately short of the point
+    // where sixteen bots would need more of the lattice than they are
+    // allowed, since the headroom above would then simply seat fewer of them.
     const roll = this.rng.next();
-    const plates = roll < 0.72 ? 1 : roll < 0.93 ? 2 : 3;
+    const plates =
+      roll < 0.55 ? 1 : roll < 0.8 ? 2 : roll < 0.92 ? 3 : roll < 0.98 ? 4 : 5;
     const stake = toLamports(this.config.entry);
     const row = this.db.player(wallet);
     // Play money is minted for a broke bot: its losses flow to real players
@@ -534,7 +614,7 @@ export class GameServer {
     const brain = this.makeBotBrain(name);
     const ids: number[] = [];
     for (let i = 0; i < plates; i++) {
-      if (this.seats.size >= this.config.field.max) break;
+      if (this.seats.size >= botPlateCeiling(this.config.field.max)) break;
       const id = this.nextSeatId++;
       if (!this.db.takeEntry(this.roundId, wallet, stake, id)) break;
       this.seats.set(id, { id, wallet, name: `bot·${name}`, charId: fresh.charId, lifetime });
@@ -554,7 +634,10 @@ export class GameServer {
    * break every player's replay verification.
    */
   private makeBotBrain(name: string): Strategy {
-    const s = BOT_STYLE[name] ?? BOT_STYLE["nilas"]!;
+    // styleFor, not a fallback to one hand-tuned entry: falling back to a
+    // single style gave every generated bot nilas's exact temperament, which
+    // is a four-hundred-plate room with one personality in it.
+    const s = styleFor(name);
     const target = s.t0 + this.rng.next() * (s.t1 - s.t0);
     const panicAt = s.panic + this.rng.next() * 0.015;
     const breakEven = 1 / (1 - totalRake(this.config));
