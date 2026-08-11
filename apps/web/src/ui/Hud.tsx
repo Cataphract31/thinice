@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from "react";
-import { DEFAULT_CONFIG } from "@zinc/engine";
+import { DEFAULT_CONFIG, totalRake } from "@zinc/engine";
 import type { AutoSettings, Snapshot } from "@/game/client";
 import { setWalletOptIn, walletOptedIn } from "@/game/net";
 import { shortAddress } from "@/game/names";
@@ -582,6 +582,23 @@ export function AutoPanel({
   onChange: (patch: Partial<AutoSettings>) => void;
 }): JSX.Element {
   const on = snap.auto.enabled;
+
+  /*
+   * The highest multiple this room can actually produce.
+   *
+   * The number only climbs when somebody DIES and their stake is released to
+   * whoever is left; a voluntary exit takes its money out of the game. So the
+   * ceiling is whatever is still in the pot, and in a quiet lobby it can sit
+   * below the exit target — the shipped default of 2.00x is unreachable in a
+   * four plate room, which does not fail loudly. Auto simply waits forever for
+   * a number the round cannot reach, and rides every one of them into the ice.
+   * Say so rather than let a player discover it a stake at a time.
+   */
+  const ceiling =
+    snap.potInPlay > 0
+      ? snap.potInPlay / snap.entry
+      : snap.totalCount * (1 - totalRake(DEFAULT_CONFIG));
+  const unreachable = ceiling > 0 && snap.auto.target > ceiling;
   // Typed text is held locally and only committed on blur or Enter. Feeding
   // every keystroke through a clamped round trip fought the keyboard: typing
   // "1.5" clamped "1" to 1.05 mid-entry and produced "1.055", and clearing the
@@ -595,6 +612,7 @@ export function AutoPanel({
   };
 
   return (
+    <>
     <div className="flex items-center gap-2 px-2.5 py-2">
       <button
         onClick={() => onChange({ enabled: !on })}
@@ -637,6 +655,12 @@ export function AutoPanel({
         ))}
       </select>
     </div>
+      {unreachable && (
+        <div className="label px-2.5 pb-1.5 text-[var(--color-warn)]">
+          this room tops out at {ceiling.toFixed(2)}×. auto will not fire.
+        </div>
+      )}
+    </>
   );
 }
 
