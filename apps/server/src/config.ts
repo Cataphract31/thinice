@@ -56,7 +56,17 @@ export const CONFIG = {
    * surface, and the server REFUSES TO BOOT with bots and banking both on —
    * a bot may never share a table with real money.
    */
-  bots: num("BOTS", 0, 0, 8),
+  /*
+   * Ceiling of 16, and it is two limits agreeing rather than one round
+   * number. The roster in game.ts holds sixteen named temperaments and the
+   * seating loop indexes it by position, so seventeen would seat nobody new.
+   * And the lobby caps at field.max plates while a bot buys 1.35 of them on
+   * average, so sixteen bots occupy roughly two thirds of a full room and
+   * leave the rest for humans — push it much past this and the bots fill the
+   * lattice during the lobby window, and a real player gets told the room is
+   * full by a room containing nobody real.
+   */
+  bots: num("BOTS", 0, 0, 16),
   /**
    * Auto play lapses after this long away from the table, in minutes.
    *

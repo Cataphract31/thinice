@@ -47,6 +47,7 @@ export function shortAddress(addr: string): string {
  */
 const BOT_NAMES = [
   "rime", "nilas", "hoar", "graupel", "brash", "sleet", "frazil", "calving",
+  "verglas", "firn", "floe", "shuga", "growler", "hummock", "serac", "moulin",
 ];
 
 /**
@@ -72,8 +73,40 @@ const BOT_STYLE: Record<
   sleet: { t0: 1.3, t1: 1.85, panic: 0.036, nerve: 0.8, guts: 0.2 },
   frazil: { t0: 1.9, t1: 3.4, panic: 0.068, nerve: 0.25, guts: 0.8 },
   calving: { t0: 1.45, t1: 2.5, panic: 0.048, nerve: 0.5, guts: 0.45 },
+  // The second eight widen the spread rather than crowding the middle: the
+  // room only reads as a crowd if the tail has both the wallet that bolts at
+  // the first crack and the one that will not leave at any price.
+  verglas: { t0: 1.15, t1: 1.45, panic: 0.028, nerve: 0.95, guts: 0.05 },
+  firn: { t0: 1.22, t1: 1.7, panic: 0.034, nerve: 0.85, guts: 0.15 },
+  floe: { t0: 1.5, t1: 2.2, panic: 0.045, nerve: 0.52, guts: 0.4 },
+  shuga: { t0: 1.28, t1: 3.2, panic: 0.052, nerve: 0.58, guts: 0.55 },
+  growler: { t0: 1.6, t1: 2.6, panic: 0.05, nerve: 0.45, guts: 0.65 },
+  hummock: { t0: 1.8, t1: 2.8, panic: 0.06, nerve: 0.3, guts: 0.72 },
+  serac: { t0: 2.1, t1: 4.2, panic: 0.075, nerve: 0.2, guts: 0.88 },
+  moulin: { t0: 2.8, t1: 6.0, panic: 0.095, nerve: 0.12, guts: 0.98 },
 };
 const isBot = (wallet: string): boolean => wallet.startsWith("bot:");
+
+/*
+ * The clamp in config.ts and this roster have to agree, and nothing structural
+ * forces them to. If the ceiling is ever raised past the names available, the
+ * seating loop indexes a name it already seated, returns, and the room quietly
+ * runs short of the configured crowd forever — a silent shortfall is the worst
+ * possible failure here, because it looks exactly like everything working.
+ */
+if (BOT_NAMES.length !== new Set(BOT_NAMES).size) {
+  throw new Error("BOT_NAMES contains duplicates: each bot is one wallet, keyed by name");
+}
+if (CONFIG.bots > BOT_NAMES.length) {
+  throw new Error(
+    `BOTS=${CONFIG.bots} exceeds the ${BOT_NAMES.length} named bots available. ` +
+      "Add names and temperaments to BOT_NAMES/BOT_STYLE, or lower BOTS.",
+  );
+}
+for (const name of BOT_NAMES) {
+  if (!BOT_STYLE[name]) throw new Error(`bot "${name}" has no temperament in BOT_STYLE`);
+}
+
 
 function sha256Hex(s: string): string {
   return createHash("sha256").update(s).digest("hex");
@@ -224,10 +257,17 @@ export class GameServer {
    * at boot, before anyone is seated, and is a no-op once the cast is unique.
    */
   private dealBotFaces(): void {
-    // More bots than characters makes duplicates unavoidable; leave the
-    // random deal alone rather than pretending to fix it.
-    if (BOT_NAMES.length > CHARS.length) return;
+    // With more bots than characters, duplicates are unavoidable — but they
+    // must be SPREAD, not defaulted. Returning early here (the old behaviour,
+    // once the roster outgrew the twelve faces) left every bot beyond the
+    // first twelve on the schema's default charId: a lattice with eight
+    // identical chads standing on it.
+    //
+    // So: keep any face a bot already holds that nothing else has claimed,
+    // and deal the rest round-robin. Each character is used at most one more
+    // time than any other, and a face repeats only after all twelve are out.
     const taken = new Set<string>();
+    const needFace: string[] = [];
     for (const name of BOT_NAMES) {
       const wallet = `bot:${name}`;
       const current = this.db.player(wallet).charId;
@@ -235,10 +275,19 @@ export class GameServer {
         taken.add(current);
         continue;
       }
+      needFace.push(wallet);
+    }
+    let next = 0;
+    for (const wallet of needFace) {
       const free = CHARS.find((c) => !taken.has(c));
-      if (!free) return;
-      taken.add(free);
-      this.db.setChar(wallet, free);
+      if (free) {
+        taken.add(free);
+        this.db.setChar(wallet, free);
+        continue;
+      }
+      // Every face is out; start a second lap in a stable order.
+      this.db.setChar(wallet, CHARS[next % CHARS.length]!);
+      next++;
     }
   }
 
@@ -438,10 +487,16 @@ export class GameServer {
     let seated = 0;
     for (const w of this.seatsOf.keys()) if (isBot(w)) seated++;
     if (seated >= this.botTarget) return;
-    // Quick enough that the FULL target seats inside one lobby window: at
-    // the old 1-3.2s spacing a 7s lobby only ever seated two or three of
-    // five, and the room never looked as populated as it was configured to.
-    this.nextBotAt = now + 450 + this.rng.next() * 750;
+    // Spacing is DERIVED from the window and the target, never a fixed pair
+    // of magic numbers. A flat 450-1200ms filled a room of eight with time to
+    // spare and then, at sixteen, silently seated ten and sealed — the room
+    // simply looked thinner than its own configuration, with nothing anywhere
+    // reporting the shortfall. Aim the whole target inside three quarters of
+    // the lobby so the last bot still lands well before the ice does, and
+    // keep the jitter so arrivals trickle rather than march.
+    const budget = this.config.timing.lobbyMs * 0.75;
+    const gap = Math.max(140, Math.min(1200, budget / Math.max(1, this.botTarget)));
+    this.nextBotAt = now + gap * (0.6 + this.rng.next() * 0.8);
 
     const name = BOT_NAMES[seated % BOT_NAMES.length]!;
     const wallet = `bot:${name}`;
