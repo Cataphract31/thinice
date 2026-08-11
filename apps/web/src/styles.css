@@ -1,6 +1,65 @@
 @import "tailwindcss";
 
 /**
+ * The two faces are served from this origin, not from fonts.googleapis.com.
+ *
+ * The Google-hosted path cost two preconnects to domains we do not control, a
+ * blocking stylesheet round-trip before any of our own type could paint, and
+ * every visitor's IP address handed to a third party — which a German court
+ * held to be a GDPR violation in 2022, and this product takes European money.
+ * Self-hosting is 74 KB of woff2 in the repo and removes all three.
+ *
+ * Latin subset only: the interface is English and the numerals are the point.
+ * Oxanium ships as a single variable file covering 400-700, so the display
+ * face is one request rather than four. IBM Plex Mono is static, one file per
+ * weight, and only the four weights the product actually sets are here — 400
+ * (ledger rows), 500 (every .label caption), 600 (lattice cell numerals), 700
+ * (the multiplier). Adding a weight to a rule means adding a file here too.
+ *
+ * These live in public/ under fixed names and are cached immutably at the
+ * edge; a font revision must ship under a new filename.
+ */
+@font-face {
+  font-family: "Oxanium";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/oxanium-var.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-600.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-700.woff2") format("woff2");
+}
+
+/**
  * Palette taken from the subject, not from convention.
  *
  * The lattice is ice — a frozen lake the whole field is standing on — so the
