@@ -156,15 +156,14 @@ function styleFor(name: string): { t0: number; t1: number; panic: number; nerve:
 const isBot = (wallet: string): boolean => wallet.startsWith("bot:");
 
 /**
- * Plates held back from the bots for people.
+ * Bots fill the lattice and stop there. Nothing is held back.
  *
- * A flat reservation rather than a percentage: what a late human needs is a
- * seat, and that need does not grow with the size of the room. Taking a third
- * of a 400-plate lattice to guarantee twelve seats would just be a smaller
- * game. Bots fill everything else.
+ * A reserve existed to stop practice traffic locking real players out of a
+ * small room. It buys nothing at launch, where there are no bots at all to
+ * crowd anyone — every plate belongs to somebody real, and the only thing a
+ * reservation could do there is make the room smaller than it is.
  */
-const HUMAN_RESERVE = 12;
-const botPlateCeiling = (fieldMax: number): number => Math.max(4, fieldMax - HUMAN_RESERVE);
+const botPlateCeiling = (fieldMax: number): number => fieldMax;
 
 
 /*

@@ -179,7 +179,15 @@ export const DEFAULT_CONFIG: GameConfig = {
   // sequence (extended slow-mo, the stage clearing, the coronation) spends
   // ~3s before the winner card, and the card still deserves its read time.
   timing: { lobbyMs: 10000, tickMs: 500, resultMs: 6500, bonanzaMs: 7000 },
-  field: { min: 24, max: 160 },
+  /*
+   * Lobby size. Not a safety rail: the hazard curve reads crowding as a
+   * fraction so it is scale-free, and the renderer was built for a thousand
+   * cells. What bounds it in practice is the box, since state is serialised
+   * per client on every broadcast — measure egress before raising it on a
+   * machine that matters. Both sides hash this into the fairness commitment,
+   * so server and client must ship together when it moves.
+   */
+  field: { min: 24, max: 250 },
 };
 
 /** Draws a field size from the configured lobby range. */

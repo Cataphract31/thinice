@@ -63,7 +63,7 @@ export const CONFIG = {
    * box: state is serialised per client five times a second, so cost grows as
    * clients x plates. Measure before raising it on a machine that matters.
    */
-  bots: num("BOTS", 0, 0, 500),
+  bots: num("BOTS", 0, 0, 2000),
   /**
    * Auto play lapses after this long away from the table, in minutes.
    *
