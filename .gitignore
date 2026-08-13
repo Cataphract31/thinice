@@ -19,12 +19,12 @@ house-keypair.json
 *-house.json
 *-keypair.json
 
-# Raw art masters. ~36 MB of green-screen generator output that was already
-# chroma-keyed and packed into apps/web/public — nothing here ships, and none
-# of it will ever change. The RECIPE is committed (art-drop/README.md has the
-# exact prompts), so the art is reproducible without carrying the originals in
-# every clone. Keep the folder itself backed up somewhere: it is the only copy
-# of the masters if anyone ever wants to re-crop or add a character.
+# Raw art masters: green-screen generator output, chroma-keyed and packed into
+# apps/web/public, where the only shipping copy lives. Nothing here ever ships
+# directly. The masters were deleted on 2026-08-13 — the RECIPE is committed
+# (art-drop/README.md has the exact prompts), so re-cropping or adding a
+# character means regenerating from those prompts, not reaching for an
+# original. The pattern stays so the next drop cannot be committed by accident.
 art-drop/**/*.jpg
 art-drop/**/*.png
 

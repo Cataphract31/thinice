@@ -119,8 +119,8 @@ of work, not a config change.
 
 **A process supervisor.** systemd, pm2, Docker restart policy, whatever you use.
 The server is crash-safe by design: any round interrupted by a restart is
-refunded in full at startup, and that path is covered by `npm run test:crash`.
-It should still not be dying regularly.
+refunded in full at startup, and that path was exercised during the beta by
+killing the server mid-round. It should still not be dying regularly.
 
 **Outbound HTTPS to a Solana RPC**, if you keep the built-in banking.
 
@@ -247,16 +247,18 @@ deployment:
 
 ```bash
 curl https://your-host/health          # {"ok":true}
-npm run test:server wss://your-host/ws # 30 end-to-end checks against it
 ```
 
-`test:server` seats three real clients, plays a full round, and asserts the
-money moved exactly once, the fairness commitment covers the seed and the rules,
-a client cannot set fields the server owns, and chat is relayed, truncated and
-rate-limited. Run it against a server with `BOTS=0` — practice bots joining
-mid-probe change round timing and fail the sole-owner check. It is safe to run
-against a live server — it plays as ordinary
-guests — but its chat checks leave test lines in the room's 50-line backlog,
-where every later visitor will read them. **Restart the service after probing
-production** (chat is memory-only, so a restart clears it), or probe before
-you announce.
+Past the health check, verify by playing: point a client at the deployed
+address, seat two wallets, run a round to completion, and confirm the fairness
+panel marks it verified. That exercises the same path the scripted probe used
+to — money moving exactly once, the commitment covering the seed and the rules,
+a client unable to set fields the server owns.
+
+The scripted end-to-end probe was retired in August 2026 with the rest of the
+harnesses. If you rebuild one, two constraints always applied to it. Run it
+against `BOTS=0`: practice bots joining mid-probe change round timing and break
+the sole-owner check. And its chat traffic lands in the room's 50-line backlog
+where every later visitor reads it, so **restart the service after probing
+production** (chat is memory-only, so a restart clears it), or probe before you
+announce.

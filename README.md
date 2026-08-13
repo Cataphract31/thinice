@@ -54,16 +54,12 @@ apps/server        The authoritative game server. Node 22 + node:sqlite + ws.
                    and the house wallet. Money is integer LAMPORTS here.
 
 apps/web           React 19 + Vite. A pure screen for the server's state.
-                   NetClient (talks to the server) and GameClient (a local
-                   single-player demo used when no server is configured).
-                   Every component upstream is identical in both modes.
+                   One client only, NetClient. Without a server address it
+                   refuses to start; there is no offline mode to fall into.
 
-tools              End-to-end tests that run against a real server process.
-
-
-art-drop           Raw art masters (gitignored). The README in it has the
-                   exact generation prompts; the packed output ships in
-                   apps/web/public.
+art-drop           The art recipe — the exact generation prompts for every
+                   character and tile. The packed output ships in
+                   apps/web/public; the raw masters are not kept in-tree.
 ```
 
 ## Running it
@@ -97,16 +93,20 @@ npm run typecheck       # all three projects
 ```
 
 The economics simulators and the adversarial test harnesses (crash recovery,
-withdrawal holds, devnet banking round trips) live in the private dev
-repository, where they run against this code unchanged. The fairness claims a
-player can check are the ones that matter publicly, and those verify in the
-client itself: every finished round replays in the browser from its revealed
-seed, against the commitment published before it sealed.
+withdrawal holds, devnet banking round trips) were retired in August 2026 with
+the play-money beta they were built to certify. What they measured is quoted in
+[The economics](#the-economics) below. Treat those as findings about the code as
+it stood, not as a suite you can re-run: anything you need for mainnet should be
+rebuilt against the code as it ships.
 
-> `test:bank` **skips** if devnet's faucet is rate-limited. It has not yet
-> completed a full green run for that reason — the deposit/withdraw path is the
-> least-exercised code in the repo. Fund the house address the server prints at
-> boot and re-run before trusting it.
+The fairness claim a player can check needs no harness at all, and it is the one
+that matters publicly. It verifies in the client itself: every finished round
+replays in the browser from its revealed seed, against the commitment published
+before it sealed.
+
+> **The deposit/withdraw path has never completed a full live round trip** and
+> is the least-exercised code in the repo. Proving it out is the first item of
+> real work before banking faces anyone — see [MAINNET.md](MAINNET.md).
 
 ---
 
@@ -124,15 +124,15 @@ the honest published figure. Only 1% is house revenue.
 
 **The in-game return is identical for every cash-out strategy.** Balance is
 conserved and every live player holds the same balance, so no exit timing beats
-any other — strategy buys variance, never expected value. This is asserted, not
-assumed: `sim:invariants` fails the build if the spread across strategies drifts
-or if conservation leaves 100.000%.
+any other — strategy buys variance, never expected value. This was measured, not
+assumed: the invariants sweep ran every exit rule against this engine and found
+no spread between them, with conservation landing on 100.000%.
 
 **Multi-betting.** One wallet may hold up to five plates in a round — press
 bond again to buy another; one cash-out extracts every live plate together at
 the shared multiple. This changes no odds: EV per plate is identical however
 many one wallet holds (ownership does not exist in the engine — deaths roll
-and redistribute per plate), and `npm run sim:multi` measures it. What it buys
+and redistribute per plate), and the multi-plate sweep measured it. What it buys
 is breadth: k plates in one round is actually *lower* variance than the same k
 entries across k rounds, because when one of your plates breaks, your own
 surviving plates recover their pro-rata share of it. A round still needs two
@@ -200,7 +200,9 @@ Some non-obvious things that are load-bearing. Do not "simplify" them:
   two fields; if they are allowed to differ, an operator can commit to one seed,
   play on another, and still show three green ticks.
 
-`packages/sim/src/fairness.ts` certifies all of this and fails loudly.
+All three are enforced by `verifyEntry` in `apps/web/src/game/client.ts` — the
+same code path a player's own browser runs, not a separate certifier that could
+drift from it.
 
 ---
 
@@ -228,8 +230,8 @@ credit is keyed on the transaction signature, so replaying one credits nothing.
       signed wallet.
 - [ ] **Set `STARTING_BALANCE=0`.** New wallets are currently granted 5 SOL of
       play money on first sight.
-- [ ] **Get `npm run test:bank` to a full green run.** The money loop has never
-      completed a live round trip.
+- [ ] **Prove the deposit/withdraw round trip on devnet.** The money loop has
+      never completed a live round trip, under a harness or otherwise.
 - [ ] **Bind the login challenge to a domain** (SIWS-style) and enforce an
       Origin allowlist on the websocket upgrade. Today the signed text is just
       `THIN ICE login\nnonce: …`, so a signature is not tied to this site.

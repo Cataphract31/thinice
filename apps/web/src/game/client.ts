@@ -259,13 +259,14 @@ export function commitPreimage(roundId: number, seedHex: string, rulesHash: stri
  * ledger. It reached production once, wearing the live game's face, because
  * a deploy that lost its server URL fell back to it silently. It is deleted
  * rather than hidden: this repository builds exactly one thing, the client of
- * a real server. The sandbox lives on in the private dev overlay.
+ * a real server.
  */
 
 /**
- * The verification both clients run. One implementation on purpose: the local
- * demo and the networked build must reach a verdict the same way, or the demo
- * proves nothing about the thing players will actually be paid by.
+ * The verification the client runs, and the whole of it — there is no second
+ * implementation anywhere for it to disagree with. What a player's browser
+ * checks here is what the fairness claim in the README means; if this file is
+ * wrong, the claim is wrong, and nothing else in the repo would say otherwise.
  *
  * Mutates the entry in place with its three receipts.
  */

@@ -1,12 +1,19 @@
 # Art drop
 
-Raw Gemini output goes here. Any size, any filename, green backgrounds and all.
-Claude fetches, chroma-keys, crops and packs from this folder — nothing in here
-ships directly.
+The recipe for the art the game ships, kept so any of it can be remade. The raw
+masters are **not** stored here any more — they were deleted on 2026-08-13, and
+the packed output in `apps/web/public` is now the only copy. To re-crop a
+character or add one, regenerate from the prompts below.
+
+Working drops go in this folder: any size, any filename, green backgrounds and
+all. They get chroma-keyed, cropped and packed into `apps/web/public`; nothing
+here ships directly and the raws are gitignored.
 
 ## Characters
 
-One folder per team: `chad cuck wojak ansem saylor pepe wif bogdanoff`
+One folder per character. The twelve that ship today:
+
+`ansem bobo bogdanoff chad chud milady mumu pepe saylor sbf soyjak wojak`
 
 Three images each, generated in the SAME Gemini chat so the face stays
 consistent (portrait first, then "same character, now ..."):

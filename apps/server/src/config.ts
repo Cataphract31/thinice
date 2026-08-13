@@ -34,7 +34,8 @@ export const CONFIG = {
   /**
    * Plates one wallet may hold in a single round. The ceiling is a fairness
    * ceiling on the LOBBY, not the odds — EV per plate is identical no matter
-   * who holds what (see packages/sim/src/multi-study.ts) — but the field is
+   * who holds what, because the engine rolls and redistributes per plate and
+   * has no concept of ownership at all — but the field is
    * capped, and without a per-wallet limit one whale can fill the lattice and
    * lock everyone else out of the round.
    */
