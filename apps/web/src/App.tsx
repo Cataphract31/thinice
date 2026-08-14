@@ -139,12 +139,20 @@ export default function App(): JSX.Element {
               Its darker pit background is the only separation it needs. The
               tube filter warms the picture only while CRT mode is on. */}
           <div
-            className={`bleed relative min-h-0 flex-1 overflow-hidden ${crt ? "crt-tube" : ""} ${
+            className={`relative min-h-0 flex-1 overflow-hidden ${crt ? "crt-tube" : ""} ${
               tv === "off" ? "tv-off" : tv === "on" ? "tv-on" : ""
             }`}
           >
-            <Shaft snap={snap} onSelectCell={select} />
-            {crt && <CrtLayer snap={snap} />}
+            {/* `bleed` fades the BOARD into the pit, and only the board. It is
+                a mask, so it applies to the whole subtree it sits on — with
+                the overlays inside it, the first 64px from every side of a
+                card were multiplied down toward transparent, which is why a
+                card parked at left-2 had no visible left edge no matter what
+                colour it was drawn in. The atmosphere belongs to the ice. */}
+            <div className="bleed absolute inset-0">
+              <Shaft snap={snap} onSelectCell={select} />
+              {crt && <CrtLayer snap={snap} />}
+            </div>
 
             {chosen && (
               <PlayerCard
