@@ -96,15 +96,6 @@ export function InfoOverlay({
             </p>
           </Section>
 
-          <Section title="no tickets, no jackpot">
-            <p>
-              There is nothing to farm and nothing to claim. {pc(RTP)} of every
-              entry goes into the pot of the round you paid for, and it is paid
-              out that round. You do not have to keep playing to collect it, and
-              nobody wins it instead of you.
-            </p>
-          </Section>
-
           <Section title="provably fair">
             <p>
               Before every round starts, its dice are locked: a sha256 hash of the

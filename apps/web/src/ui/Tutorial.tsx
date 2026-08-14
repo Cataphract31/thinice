@@ -75,7 +75,7 @@ const STEPS: Step[] = [
     title: "Leave with the money",
     body: [
       "Extract any moment, keep what you hold. Get caught, keep nothing.",
-      `${((1 - totalRake(DEFAULT_CONFIG)) * 100).toFixed(0)}% of every entry goes straight into the pot and is paid out that round. No tickets, no jackpot, nothing to claim. Fair, provably.`,
+      `${((1 - totalRake(DEFAULT_CONFIG)) * 100).toFixed(0)}% of every entry goes into the pot and is paid out that round. Fair, provably.`,
     ],
     visual: "payout",
   },

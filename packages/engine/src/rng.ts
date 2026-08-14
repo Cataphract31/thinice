@@ -61,32 +61,6 @@ export function rngFromSeedHex(seedHex: string): Rng {
   return sfc32(w(0), w(1), w(2), w(3));
 }
 
-/**
- * A second, independent stream from the same committed seed.
- *
- * The jackpot draw must not come off the round's own stream — that stream's
- * draw count is what replay verification depends on — but it also must not
- * come from an uncommitted source, or the single largest payout in the game
- * is the one thing nobody can check. Tagging the seed words gives a stream
- * that is disjoint from the round's, unpredictable without the seed, and
- * recomputable by any player once the seed is revealed.
- *
- * Purely integer arithmetic and no hashing, so the browser can reproduce it
- * synchronously and exactly.
- */
-export function deriveRng(seedHex: string, tag: string): Rng {
-  if (!/^[0-9a-fA-F]{32,}$/.test(seedHex)) {
-    throw new Error(`seed must be at least 128 bits of hex, got "${seedHex}"`);
-  }
-  const t = seedFromString(tag);
-  const w = (i: number): number => parseInt(seedHex.slice(i * 8, i * 8 + 8), 16) >>> 0;
-  return sfc32(
-    (w(0) ^ t) >>> 0,
-    (w(1) ^ Math.imul(t, 0x9e3779b1)) >>> 0,
-    (w(2) ^ Math.imul(t, 0x85ebca6b)) >>> 0,
-    (w(3) ^ Math.imul(t, 0xc2b2ae35)) >>> 0,
-  );
-}
 
 /** Fast non-cryptographic PRNG. Used for bulk simulation, never for live rounds. */
 export function mulberry32(seed: number): Rng {

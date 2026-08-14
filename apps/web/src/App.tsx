@@ -398,7 +398,7 @@ function PlayerCard({
   );
 
   return (
-    <div className="absolute bottom-2 left-2 z-20 max-h-[calc(100%-16px)] w-[208px] overflow-y-auto rounded-sm bg-[var(--color-pit)]/95 p-2.5 shadow-[0_6px_28px_rgba(0,0,0,0.55)] backdrop-blur">
+    <div className="absolute bottom-2 left-2 z-20 max-h-[calc(100%-16px)] w-[208px] overflow-y-auto rounded-sm bg-[var(--color-pit)]/95 p-2.5 shadow-[0_0_0_1px_var(--color-line),0_6px_28px_rgba(0,0,0,0.65)] backdrop-blur">
       <button
         onClick={onClose}
         aria-label="Close"

@@ -50,10 +50,10 @@ export const CONFIG = {
   /**
    * Up to this many PRACTICE bots keep the play-money room alive. 0 — the
    * default — means bots do not exist. Where enabled, they play CONTINUOUSLY
-   * (humans present or not, so the ticket economies never stop paying) as
-   * full participants: same rake, same rakeback and jackpot tickets, same
-   * odds per entry. The README's "no hidden bots" promise is enforced by two
-   * structural rules: every practice bot is labelled `bot·name` on every
+   * (humans present or not, so a visitor always walks into a live game) as
+   * full participants: same rake, same pot, same odds per entry. The README's
+   * "no hidden bots" promise is enforced by two structural
+   * rules: every practice bot is labelled `bot·name` on every
    * surface, and the server REFUSES TO BOOT with bots and banking both on —
    * a bot may never share a table with real money.
    */
