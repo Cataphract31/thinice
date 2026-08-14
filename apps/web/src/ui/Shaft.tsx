@@ -116,7 +116,6 @@ export function Shaft({
       hazard: snap.hazard,
       grace: snap.grace,
       phase: snap.phase,
-      bonanzaAt: snap.bonanza?.at ?? null,
       youOutcome: snap.you.joined ? snap.you.outcome : "out",
       youCharId: snap.charId,
       chat: snap.chat,

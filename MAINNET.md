@@ -14,9 +14,9 @@ rest need building.
 - [ ] **Seed entropy.** Round seeds are server-chosen; a malicious operator
       could grind seeds before committing and no player could detect it.
       Mix public or client entropy into the commit preimage so the house
-      provably cannot pick its own draw. The 2026-08-08 bonanza audit
-      confirmed the ceremony is honest end to end, but honesty today is not
-      proof against a hostile operator tomorrow.
+      provably cannot pick its own draw. The ceremony has been audited
+      honest end to end, but honesty today is not proof against a hostile
+      operator tomorrow.
 - [ ] **House float monitoring.** Alert when the house wallet drifts from
       the ledger's expectation; a discrepancy is an incident, not a log line.
 
@@ -33,9 +33,9 @@ rest need building.
       landed, the player keeps both. Write an intent row before
       broadcasting and re-query the signature's status before re-crediting.
 - [ ] **Hold covers ALL reversible money.** The withdrawal hold guards
-      unsettled rakeback but not mid-round cash-out profit, which the
-      crash sweep can claw back after the lamports left. Extend the hold,
-      and make shutdown close the open round instead of just stopping the
+      mid-round cash-out profit, which is the only money the crash sweep
+      can claw back now that nothing is streamed at seal (built). Still
+      make shutdown close the open round instead of just stopping the
       timer.
 - [ ] **Flip the banking default to off.** BANKING defaults to ON in
       config.ts and .env.example; play money is one forgotten env var away

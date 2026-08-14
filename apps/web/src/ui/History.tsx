@@ -181,16 +181,6 @@ function Row({ h, onVerify }: { h: HistoryEntry; onVerify: () => void }): JSX.El
               you were credited
             </div>
           )}
-          {/* The jackpot draw runs on a stream derived from the same committed
-              seed, so a fire is as checkable as an elimination. */}
-          {h.bonanzaOk !== null && (
-            <div
-              style={{ color: h.bonanzaOk ? "var(--color-profit)" : "var(--color-danger)" }}
-            >
-              {h.bonanzaOk ? "✓" : "✗"} the bonanza draw came off the committed
-              seed, not a number the house picked
-            </div>
-          )}
         </div>
       )}
     </div>

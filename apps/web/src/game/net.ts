@@ -8,7 +8,6 @@ import {
   type Snapshot,
 } from "./client";
 import {
-  sfxBonanza,
   sfxExtract,
   sfxJoin,
   sfxSeal,
@@ -36,8 +35,6 @@ interface NetStats {
   wagered: number;
   returned: number;
   bestMultiple: number;
-  revEarned: number;
-  bonanzaWon: number;
 }
 
 /** Extra fields the local demo client has no equivalent for. */
@@ -47,8 +44,6 @@ export interface NetExtras {
   guest: boolean;
   address: string;
   stats: NetStats;
-  /** Rakeback streamed in while the tab was closed. One-shot per return. */
-  away: { ms: number; sol: number } | null;
 }
 
 const EMPTY_STATS: NetStats = {
@@ -57,8 +52,6 @@ const EMPTY_STATS: NetStats = {
   wagered: 0,
   returned: 0,
   bestMultiple: 0,
-  revEarned: 0,
-  bonanzaWon: 0,
 };
 
 /**
@@ -197,15 +190,9 @@ const IDLE: Snapshot = {
   },
   wallet: 0,
   session: 0,
-  bonanzaPool: 0,
-  bonanzaDrought: 0,
-  bonanzaTickets: 0,
-  revShareTickets: 0,
-  bonanza: null,
   charId: "chad",
   winner: null,
   teamWins: {},
-  tickets: { bonYours: 0, bonTotal: 0, bonShare: 0, revShare: 0, revStreamed: 0 },
   chat: [],
   history: [],
   nextCommit: "",
@@ -226,7 +213,6 @@ export class NetClient {
     guest: true,
     address: "",
     stats: EMPTY_STATS,
-    away: null,
   };
   private retry = 0;
   private reconnectTimer: number | null = null;
@@ -356,11 +342,6 @@ export class NetClient {
           connected: true,
           guest: Boolean(m.guest),
           address: String(m.wallet),
-          // The server only sends this after a real absence with a non-zero
-          // drip; a reconnect without it keeps whatever was already shown.
-          ...(typeof m.awayRakeback === "number" && m.awayRakeback > 0
-            ? { away: { ms: Number(m.awayMs ?? 0), sol: Number(m.awayRakeback) } }
-            : {}),
         };
         // A fresh signature minted a session token: store it, and every
         // later connection resumes silently instead of prompting Phantom.
@@ -402,7 +383,6 @@ export class NetClient {
           seat: this.extras.connected
             ? { guest: this.extras.guest, address: this.extras.address }
             : undefined,
-          away: this.extras.away,
         };
         this.cue(prev, this.snap);
         this.emit();
@@ -558,10 +538,6 @@ export class NetClient {
 
     if (a.you.outcome === "in" && b.you.outcome === "dead") sfxYouDied();
     if (a.you.outcome === "in" && b.you.outcome === "cashed") sfxExtract();
-
-    // `at` is the server's fire timestamp, so it identifies the event even
-    // when two fires land in consecutive rounds.
-    if (b.bonanza && b.bonanza.at !== a.bonanza?.at) sfxBonanza();
   }
 
   private toHistory(r: Record<string, unknown>): HistoryEntry {
@@ -597,7 +573,6 @@ export class NetClient {
       seedOk: null,
       replayOk: null,
       rulesOk: null,
-      bonanzaOk: null,
       payoutOk: null,
       unavailable: unavailable || undefined,
       record,
@@ -773,7 +748,6 @@ export class NetClient {
       seedOk: h.seedOk,
       replayOk: h.replayOk,
       rulesOk: h.rulesOk,
-      bonanzaOk: h.bonanzaOk,
       payoutOk: h.payoutOk,
       unavailable: h.unavailable,
     };

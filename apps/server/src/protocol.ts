@@ -20,8 +20,8 @@ export interface NetPlayer {
   lastStanding?: boolean;
   /**
    * The wallet's lifetime record as of joining this round, for the plate
-   * profile card. Net includes rakeback and jackpot winnings — the honest
-   * "versus the house" number, not just round settlements.
+   * profile card. Net is returned minus wagered — the honest "versus the
+   * house" number.
    *
    * No plate count: entry is fixed, so it is `wagered / entry` — the same
    * fact in different units, and the card is small. The style tells are what
@@ -34,16 +34,6 @@ export interface NetPlayer {
     hitRate: number;
     /** Best multiple ever banked. */
     best: number;
-    /** Lifetime jackpot winnings, shown only when they have taken one. */
-    jackpots: number;
-    /**
-     * The wallet's actual holdings — bonanza tickets in the current
-     * circulation, lifetime rev-share tickets — matching the owner's own
-     * tickets stat. The card used to print the flat per-entry award here,
-     * which read as "this whale holds 200 tickets". Zero for bots: they
-     * fund the pools and hold nothing, and the card should say so.
-     */
-    tickets?: { bon: number; rev: number };
   };
 }
 
@@ -56,9 +46,6 @@ export interface NetStats {
   /** Total paid back out across every round ever entered. */
   returned: number;
   bestMultiple: number;
-  revEarned: number;
-  /** Lifetime jackpot winnings, which never pass through a round settlement. */
-  bonanzaWon: number;
 }
 
 /**
@@ -128,14 +115,6 @@ export interface NetState {
   };
   wallet: number;
   session: number;
-  bonanzaPool: number;
-  /** Rounds finished since the jackpot last fired, for the drought counter. */
-  bonanzaDrought: number;
-  bonanzaTickets: number;
-  revShareTickets: number;
-  bonanza: { amount: number; winner: string; youWon: boolean; at: number } | null;
-  /** Recent jackpot hits, newest first, for the hit-history popover. */
-  bonanzaFires: { round: number; name: string; charId: string; sol: number; at: number }[];
   charId: string;
   winner: {
     name: string;
@@ -148,13 +127,6 @@ export interface NetState {
     tied?: number;
   } | null;
   teamWins: Record<string, number>;
-  tickets: {
-    bonYours: number;
-    bonTotal: number;
-    bonShare: number;
-    revShare: number;
-    revStreamed: number;
-  };
   nextCommit: string;
   auto: { enabled: boolean; target: number; plates: number };
   stats: NetStats;
@@ -190,16 +162,12 @@ export type ServerMessage =
   /** `house` is where deposits go. Absent for guests, who have no chain identity.
       `token` arrives once, after a fresh signature: the client stores it and
       resumes with it instead of asking Phantom to sign every connection. */
-  /** `awayMs`/`awayRakeback` (SOL): rakeback streamed in since the wallet was
-      last seen. Present only after a real absence with a non-zero drip. */
   | {
       t: "ready";
       wallet: string;
       guest: boolean;
       house?: string;
       token?: string;
-      awayMs?: number;
-      awayRakeback?: number;
     }
   | { t: "state"; state: NetState }
   | { t: "history"; history: NetHistory[] }

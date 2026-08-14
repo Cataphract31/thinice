@@ -1,12 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
-  BONANZA_TAG,
-  BonanzaPool,
   DEFAULT_CONFIG,
-  RevShareLedger,
   Round,
   canonicalConfig,
-  deriveRng,
   hazardAt,
   mulberry32,
   outcomeDigest,
@@ -35,15 +31,10 @@ export function shortAddress(addr: string): string {
  * numbers. The display name is the label: every surface — roster, lattice
  * profile, winner scene — says `bot·rime`, never a wallet-shaped string.
  *
- * This is the SECOND fleet. The first — frosty, glacier, tundra, drift, floe,
- * shiver, hail, slush — was retired once its records stopped being meaningful:
- * one of them caught a 35 SOL jackpot and the rest carried thousands of rounds
- * of history. Retiring is just dropping the name from this list, because a
- * wallet that is never seated again can neither play nor earn. Their rounds
- * stay in the history and still replay. Their ticket holdings were zeroed at
- * the same time, which is what takes them out of the jackpot draw and the
- * rev-share split for good: the ledgers only ever hydrate wallets that still
- * hold something.
+ * The fleet was reset with the move to the flat 2% rake: the database it had
+ * accumulated its record in was dropped, so every bot below starts from an
+ * empty ledger. Retiring one is just dropping its name from the roster, since
+ * a wallet that is never seated again can neither play nor earn.
  */
 /*
  * The roster is generated, not hand-maintained.
@@ -241,13 +232,6 @@ export class GameServer {
   private settled = new Set<number>();
   private nextSeatId = 1;
 
-  /** Wallet -> stable numeric key for the engine's ledgers. */
-  private ledgerIds = new Map<string, number>();
-  private nextLedgerId = 1;
-
-  private jackpot: BonanzaPool;
-  private revShare: RevShareLedger;
-
   private sessions = new Set<Session>();
   /**
    * Presentation randomness only — nothing that decides money may touch this.
@@ -263,8 +247,6 @@ export class GameServer {
   private winner: NetState["winner"] = null;
   /** Full wallet of the winner — identity is never matched by display name. */
   private winnerWallet: string | null = null;
-  /** Round the jackpot last fired in, for the drought counter. Persisted. */
-  private lastFireRound = 0;
   /** Set when the round ended because one wallet owned every live plate. */
   private soleOwnerWallet: string | null = null;
   /** Wallet that banked on the very tick every other standing player died.
@@ -275,10 +257,6 @@ export class GameServer {
   private botTarget = 0;
   private nextBotAt = 0;
   private botStrategies = new Map<number, Strategy>();
-  private bonanza: NetState["bonanza"] = null;
-  private bonanzaWallet: string | null = null;
-  /** Recent jackpot hits, newest first. Loaded at boot, appended per fire. */
-  private fireLog: NetState["bonanzaFires"] = [];
   private lastBroadcast = 0;
   private teamWins: Record<string, number>;
 
@@ -295,20 +273,6 @@ export class GameServer {
     this.rulesHash = sha256Hex(canonicalConfig(this.config));
     this.roundId = db.lastRoundId();
     this.teamWins = db.teamWins();
-    this.lastFireRound = Number(db.getMeta("lastFireRound") ?? 0);
-    this.jackpot = new BonanzaPool(
-      this.config.bonanza,
-      toSol(Number(db.getMeta("bonanzaPool") ?? 0)),
-    );
-    this.revShare = new RevShareLedger(this.config.revShare);
-    this.fireLog = this.db.bonanzaFires(15).map((f) => ({
-      round: f.roundId,
-      name: f.name,
-      charId: f.charId,
-      sol: toSol(f.lamports),
-      at: f.at,
-    }));
-    this.restoreLedgers();
     this.dealBotFaces();
   }
 
@@ -359,55 +323,6 @@ export class GameServer {
       this.db.setChar(wallet, CHARS[next % CHARS.length]!);
       next++;
     }
-  }
-
-  /**
-   * Ticket state lives in the database, so a restart does not wipe everyone's
-   * standing in the two economies. Weights are restored as their decayed
-   * value, which is exact: decay only depends on time since the grant.
-   */
-  private restoreLedgers(): void {
-    const now = Date.now();
-    for (const row of this.db.allPlayersWithTickets()) {
-      const id = this.ledgerId(row.wallet);
-      if (row.bonanzaTickets > 0) this.jackpot.credit(id, row.bonanzaTickets);
-      if (row.revTickets > 0 || row.revWeight > 0 || row.revClaimed > 0) {
-        // revClaimed is what this server has actually paid this wallet. The
-        // ledger needs it or its lifetime total restarts at zero and the
-        // rakeback stream stops paying everyone who was owed anything.
-        this.revShare.restore(
-          id,
-          row.revTickets,
-          row.revWeight,
-          now,
-          toSol(row.revClaimed),
-        );
-      }
-    }
-  }
-
-  /**
-   * Stable ledger key for a wallet, minted on first use.
-   *
-   * Only ever called for wallets that actually take part in an economy —
-   * entering a round, or restored as an existing ticket holder. It used to be
-   * called from `stateFor`, i.e. on every broadcast for every connected
-   * socket, which permanently enrolled anyone who merely opened the page: and
-   * both `finish` and the close-time ticket rows walk this map doing one synchronous
-   * SELECT and one UPDATE per entry, every round, forever. Guest ids are free.
-   */
-  private ledgerId(wallet: string): number {
-    let id = this.ledgerIds.get(wallet);
-    if (id === undefined) {
-      id = this.nextLedgerId++;
-      this.ledgerIds.set(wallet, id);
-    }
-    return id;
-  }
-
-  /** Read-only lookup for display: never enrols a wallet in the ledgers. */
-  private ledgerIdIfAny(wallet: string): number | undefined {
-    return this.ledgerIds.get(wallet);
   }
 
   start(): void {
@@ -518,8 +433,6 @@ export class GameServer {
     this.winnerWallet = null;
     this.soleOwnerWallet = null;
     this.outlastedWallet = null;
-    this.bonanza = null;
-    this.bonanzaWallet = null;
     this.phaseEnd = Date.now() + this.config.timing.lobbyMs;
 
     // Commit-reveal, run server side: the seed is drawn from the OS CSPRNG and
@@ -546,10 +459,8 @@ export class GameServer {
 
   /**
    * Trickles practice bots into the lobby, one every second or two — with or
-   * without an audience. The room runs around the clock: every bot round
-   * feeds the rakeback stream and the bonanza pool, so ticket holders keep
-   * earning while they sleep, and a visitor always walks into a live game
-   * instead of an empty lobby waiting for strangers.
+   * without an audience. The room runs around the clock, so a visitor always
+   * walks into a live game instead of an empty lobby waiting for strangers.
    */
   private fillBots(now: number): void {
     if (this.botTarget <= 0 || now < this.nextBotAt) return;
@@ -593,19 +504,11 @@ export class GameServer {
       this.db.adjustBalance(wallet, toLamports(1));
     }
     const fresh = this.db.player(wallet);
-    const botLid = this.ledgerIds.get(wallet);
     const lifetime = {
       wagered: toSol(fresh.wagered),
-      net: toSol(fresh.returned + fresh.revEarned + (fresh.bonanzaWon ?? 0) - fresh.wagered),
+      net: toSol(fresh.returned - fresh.wagered),
       hitRate: fresh.roundsPlayed > 0 ? fresh.roundsWon / fresh.roundsPlayed : 0,
       best: fresh.bestMultiple,
-      jackpots: toSol(fresh.bonanzaWon ?? 0),
-      // Bots are full participants in the play-money economies, so their
-      // cards show real holdings from the same ledgers as everyone else's.
-      tickets: {
-        bon: botLid === undefined ? 0 : this.jackpot.ticketsOf(botLid),
-        rev: botLid === undefined ? 0 : this.revShare.lifetimeOf(botLid),
-      },
     };
     // ONE brain across the whole stack: a multi-plate owner decides once per
     // tick and every plate follows, exactly like the human cash-out-all
@@ -725,9 +628,6 @@ export class GameServer {
     // Read BEFORE the debit, so the lifetime snapshot on the profile card is
     // "as of stepping on" rather than dipping by one unsettled stake.
     const row = this.db.player(s.wallet);
-    // Same source the owner's own tickets stat reads, so the two can never
-    // disagree about the same wallet.
-    const lid = this.ledgerIds.get(s.wallet);
     // Debit and entry row commit together, or the seat does not exist.
     if (!this.db.takeEntry(this.roundId, s.wallet, stake, id)) return "not enough balance";
 
@@ -739,16 +639,11 @@ export class GameServer {
       charId: row.charId,
       lifetime: {
         wagered: toSol(row.wagered),
-        // Round settlements plus rakeback plus jackpot, minus stakes: the
-        // wallet's true lifetime result against this house.
-        net: toSol(row.returned + row.revEarned + (row.bonanzaWon ?? 0) - row.wagered),
+        // Everything paid back minus everything staked: the wallet's true
+        // lifetime result against this house.
+        net: toSol(row.returned - row.wagered),
         hitRate: row.roundsPlayed > 0 ? row.roundsWon / row.roundsPlayed : 0,
         best: row.bestMultiple,
-        jackpots: toSol(row.bonanzaWon ?? 0),
-        tickets: {
-          bon: lid === undefined ? 0 : this.jackpot.ticketsOf(lid),
-          rev: lid === undefined ? 0 : this.revShare.lifetimeOf(lid),
-        },
       },
     });
     this.seatsOf.set(s.wallet, [...mine, id]);
@@ -883,41 +778,6 @@ export class GameServer {
     this.phase = "live";
     this.nextTickAt = Date.now() + this.config.timing.tickMs;
 
-    // Rakeback pays THE MOMENT the round seals, not at its end. The rake is
-    // already collected — every stake was debited at join — so the stream's
-    // amount is a settled fact the instant the field locks, and paying it
-    // here separates the two money moments a player experiences: guaranteed
-    // drip now, round result later. Ticket credit precedes the distribution
-    // (this round's entrants share in this round's stream, as certified by
-    // the sim), and every payout is recorded per round so a crash mid-round
-    // claws the whole thing back. Weights are NOT persisted here: if the
-    // round dies, its credits must die with it.
-    //
-    // Bots earn tickets like anyone else. This is the play-money room's
-    // honesty rule: bots play the same economy they sit in — same rake, same
-    // rakeback, same jackpot odds per entry — so nothing about the numbers a
-    // visitor watches is staged. Their earnings recycle into their own play.
-    const sealMs = Date.now();
-    for (const seat of this.seats.values()) {
-      this.revShare.credit(this.ledgerId(seat.wallet), sealMs);
-    }
-    this.revShare.distribute(
-      this.seats.size * this.config.entry * this.config.rake.revShare,
-      sealMs,
-    );
-    for (const [wallet, id] of this.ledgerIds) {
-      const owed = this.revShare.earningsOf(id);
-      const claimed = toSol(this.db.revClaimed(wallet));
-      const delta = owed - claimed;
-      if (delta > 1e-12) {
-        const lamports = toLamports(delta);
-        if (lamports > 0) {
-          this.db.payRakeback(this.roundId, wallet, lamports, toLamports(owed));
-          for (const s of this.sessions) if (s.wallet === wallet) s.session += delta;
-        }
-      }
-    }
-
     this.broadcast(true);
   }
 
@@ -1023,13 +883,6 @@ export class GameServer {
     for (const p of res.players) {
       const seat = this.seats.get(p.id);
       if (!seat) continue;
-      // Bots accrue bonanza tickets too — full participants, same odds per
-      // entry as anyone. A bot CAN win the jackpot: it is play money, the
-      // fire is drawn from the committed seed either way, and a rigged-away
-      // bot would quietly inflate every human's apparent odds — the exact
-      // kind of staging this room refuses. (Rev-share tickets were credited
-      // at the seal, alongside the stream they share in.)
-      this.jackpot.credit(this.ledgerId(seat.wallet), p.bonanzaTickets);
       if (!this.settled.has(p.id)) {
         this.settled.add(p.id);
         this.settleExit(
@@ -1041,8 +894,6 @@ export class GameServer {
         );
       }
     }
-
-    this.jackpot.fund(res.toBonanza + res.wipeLeak);
 
     let best = 0;
     for (const p of res.players) best = Math.max(best, p.cashedOut / this.config.entry);
@@ -1136,25 +987,6 @@ export class GameServer {
       this.teamWins[champSeat.charId] = (this.teamWins[champSeat.charId] ?? 0) + 1;
     }
 
-    // Rolled BEFORE the round is written, so the draw goes into the record
-    // and a player can recompute it from the revealed seed. A jackpot decided
-    // after the record is sealed is a jackpot nobody can check.
-    const bon = this.rollBonanza();
-
-    // Ticket state as of AFTER the roll: on a fire the ledgers were just
-    // wiped, so these rows persist the wipe; on a held round they persist
-    // this round's accruals. Either way they commit WITH the close.
-    const now2 = Date.now();
-    const ticketRows: { wallet: string; bonanza: number; revLifetime: number; revWeight: number }[] = [];
-    for (const [wallet, id] of this.ledgerIds) {
-      ticketRows.push({
-        wallet,
-        bonanza: this.jackpot.ticketsOf(id),
-        revLifetime: this.revShare.lifetimeOf(id),
-        revWeight: this.revShare.weightOf(id, now2),
-      });
-    }
-
     this.db.closeRound(
       this.roundId,
       this.seedHex,
@@ -1169,108 +1001,14 @@ export class GameServer {
         config: this.config,
         entrantIds: res.players.map((p) => p.id),
         cashOuts: res.cashOuts,
-        ...(bon.trace ? { bonanza: bon.trace } : {}),
       }),
       outcomeDigest(res),
-      {
-        bonanza: bon.settle,
-        tickets: ticketRows,
-        bonanzaPool: String(toLamports(this.jackpot.pool)),
-        ...(bon.settle ? { lastFireRound: String(this.roundId) } : {}),
-        // (hit-history row rides this same transaction; see closeRound)
-      },
     );
 
-    // The in-memory hit list appends only after the close committed, so it
-    // can never show a fire whose transaction rolled back.
-    if (bon.settle?.winner) {
-      this.fireLog.unshift({
-        round: this.roundId,
-        name: bon.settle.name ?? "?",
-        charId: bon.settle.charId ?? "",
-        sol: toSol(bon.settle.lamports),
-        at: Date.now(),
-      });
-      if (this.fireLog.length > 15) this.fireLog.pop();
-    }
-
     this.phase = "result";
-    // A fire earns the longer result phase the celebration was written for.
-    // bonanzaMs was configured, documented, and read by nobody on the server.
-    this.phaseEnd =
-      now + (this.bonanza ? this.config.timing.bonanzaMs : this.config.timing.resultMs);
+    this.phaseEnd = now + this.config.timing.resultMs;
     for (const s of this.sessions) this.pushHistory(s);
     this.broadcast(true);
-  }
-
-  /**
-   * The jackpot draw.
-   *
-   * On a stream derived from the round's already-committed seed, never on the
-   * presentation RNG. The bonanza is the single largest payout in the game and
-   * it was being decided by a 32-bit wall-clock-seeded generator sitting
-   * entirely outside the fairness ceremony — unverifiable by any player and
-   * predictable to anyone who knew when the process booted. Now the draws are
-   * fixed by the same hash published before the round sealed, and they are
-   * written into the round record so a player can recompute them.
-   */
-  private rollBonanza(): {
-    trace:
-      | {
-          fire: number;
-          winner: number;
-          totalTickets: number;
-          holders: [number, number][];
-          winnerId: number | null;
-        }
-      | null;
-    /** Fire payout for the close transaction. Null: the jackpot held. */
-    settle: { winner: string | null; lamports: number; name: string; charId: string } | null;
-  } {
-    const fire = this.jackpot.roll(deriveRng(this.seedHex, BONANZA_TAG));
-    const draws = this.jackpot.lastDraws;
-    // The trace carries the ORDERED ticket snapshot, so the walk that picked
-    // the winner can be replayed from the record — without it a player could
-    // verify the two draws and still have to take the winner on faith.
-    const trace = draws ? { ...draws, winnerId: fire?.winnerId ?? null } : null;
-    if (!fire) return { trace, settle: null };
-
-    let winnerWallet = "";
-    for (const [wallet, id] of this.ledgerIds) {
-      if (id === fire.winnerId) winnerWallet = wallet;
-    }
-    // No database writes here: the payout, ticket wipe, pool value and
-    // drought marker all ride the closeRound transaction, so a crash can
-    // never leave a paid jackpot on a round that was then refunded — or a
-    // fire with no verifiable record.
-    if (winnerWallet) {
-      for (const s of this.sessions) {
-        if (s.wallet === winnerWallet) s.session += fire.amount;
-      }
-    }
-    this.lastFireRound = this.roundId;
-    this.bonanzaWallet = winnerWallet || null;
-    // A bot winner is announced by its table name, not a wallet-shaped
-    // truncation of "bot:rime" — the label rule holds everywhere.
-    const label = isBot(winnerWallet)
-      ? `bot·${winnerWallet.slice(4)}`
-      : shortAddress(winnerWallet || "?");
-    this.bonanza = {
-      amount: fire.amount,
-      winner: label,
-      youWon: false,
-      at: Date.now(),
-    };
-    return {
-      trace,
-      settle: {
-        winner: winnerWallet || null,
-        lamports: winnerWallet ? toLamports(fire.amount) : 0,
-        // Display identity frozen at fire time, for the hit-history row.
-        name: label,
-        charId: winnerWallet ? this.db.player(winnerWallet).charId : "",
-      },
-    };
   }
 
   // ------------------------------------------------------------------ output
@@ -1388,13 +1126,6 @@ export class GameServer {
       }
     }
 
-    // Read-only: a spectator who never entered a round must not be enrolled
-    // in the ledgers just for having the page open.
-    const id = this.ledgerIdIfAny(s.wallet);
-    const bonTotal = this.jackpot.totalTickets;
-    const revTotal = this.revShare.totalWeight(Date.now());
-    const bonYours = id === undefined ? 0 : this.jackpot.ticketsOf(id);
-
     return {
       phase: this.phase,
       roundId: this.roundId,
@@ -1428,30 +1159,12 @@ export class GameServer {
       },
       wallet: toSol(row.balance),
       session: s.session,
-      bonanzaPool: this.jackpot.pool,
-      bonanzaDrought: Math.max(0, this.roundId - this.lastFireRound),
-      bonanzaFires: this.fireLog,
-      bonanzaTickets: bonYours,
-      revShareTickets: id === undefined ? 0 : this.revShare.lifetimeOf(id),
-      // Both of these are compared on the full wallet, never the display name:
-      // shortAddress collapses to 4+4 characters, and two players sharing an
-      // abbreviation would each be told they had won.
-      bonanza: this.bonanza
-        ? { ...this.bonanza, youWon: this.bonanzaWallet === s.wallet }
-        : null,
       charId: row.charId,
+      // Compared on the full wallet, never the display name: shortAddress
+      // collapses to 4+4 characters, and two players sharing an abbreviation
+      // would each be told they had won.
       winner: this.winner ? { ...this.winner, you: this.winnerWallet === s.wallet } : null,
       teamWins: this.teamWins,
-      tickets: {
-        bonYours,
-        bonTotal,
-        bonShare: bonTotal > 0 ? bonYours / bonTotal : 0,
-        revShare:
-          id !== undefined && revTotal > 0
-            ? this.revShare.weightOf(id, Date.now()) / revTotal
-            : 0,
-        revStreamed: toSol(row.revEarned),
-      },
       nextCommit: this.commit,
       auto: {
         enabled: row.autoEnabled === 1,
@@ -1464,8 +1177,6 @@ export class GameServer {
         wagered: toSol(row.wagered),
         returned: toSol(row.returned),
         bestMultiple: row.bestMultiple,
-        revEarned: toSol(row.revEarned),
-        bonanzaWon: toSol(row.bonanzaWon ?? 0),
       },
       online: this.onlineWallets(),
     };

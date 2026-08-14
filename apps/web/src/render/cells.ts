@@ -31,7 +31,7 @@ interface Tones {
   glow: string | null;
 }
 
-/** Glacial ice, with the one warm accent reserved for the jackpot elsewhere. */
+/** Glacial ice. */
 const TONES: Record<CellState, Tones> = {
   live: {
     face: "#1f3a4d",

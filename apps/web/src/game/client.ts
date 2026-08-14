@@ -2,7 +2,6 @@ import {
   canonicalConfig,
   outcomeDigest,
   replayRound,
-  verifyBonanzaDraw,
   type GameConfig,
   type RoundRecord,
 } from "@zinc/engine";
@@ -34,9 +33,9 @@ export interface PlayerView {
    */
   lastStanding?: boolean;
   /**
-   * Lifetime record as of joining this round, for the profile card. Net
-   * includes rakeback and jackpot winnings — the wallet's true result
-   * against the house, not just round settlements.
+   * Lifetime record as of joining this round, for the profile card. Net is
+   * everything paid back minus everything staked — the wallet's true result
+   * against the house.
    *
    * No plate count: entry is fixed, so it is `wagered / entry` — the same
    * fact in different units. `hitRate` and `best` are the style tells that
@@ -48,13 +47,6 @@ export interface PlayerView {
     /** Share of plates that came back at or above the entry, 0-1. */
     hitRate: number;
     best: number;
-    jackpots: number;
-    /**
-     * Actual holdings — bonanza tickets in circulation / lifetime rev-share
-     * tickets — the same pair the owner's tickets stat shows. Not the flat
-     * per-entry award, which is the same number for everyone.
-     */
-    tickets?: { bon: number; rev: number };
   };
 }
 
@@ -74,14 +66,6 @@ export interface WinnerInfo {
    * 1 the scene says "dead heat" instead.
    */
   tied?: number;
-}
-
-export interface BonanzaEvent {
-  amount: number;
-  winner: string;
-  youWon: boolean;
-  /** When it fired, so the overlay knows how far through the sequence it is. */
-  at: number;
 }
 
 /** One line of table talk. */
@@ -145,31 +129,12 @@ export interface Snapshot {
   };
   wallet: number;
   session: number;
-  bonanzaPool: number;
-  /** Rounds finished since the jackpot last fired: the drought counter. */
-  bonanzaDrought: number;
-  bonanzaTickets: number;
-  revShareTickets: number;
-  /** Set for a few seconds after the jackpot fires, then cleared. */
-  bonanza: BonanzaEvent | null;
   /** Your chosen character. */
   charId: string;
   /** Set through the result phase, null once the next lobby opens. */
   winner: WinnerInfo | null;
   /** All-time wins per character, the team dominance record. */
   teamWins: Record<string, number>;
-  /** Your standing in both ticket economies, ready to display. */
-  tickets: {
-    /** Bonanza: your tickets over everything circulating since the last fire. */
-    bonYours: number;
-    bonTotal: number;
-    /** Your odds of taking the next fire, 0-1. */
-    bonShare: number;
-    /** Rev share: your slice of the stream as it stands right now, 0-1. */
-    revShare: number;
-    /** Everything the stream has ever paid you. */
-    revStreamed: number;
-  };
   /**
    * The room's talk, oldest first. Server-relayed in networked play; in the
    * demo it is only your own echo, and the panel says so.
@@ -198,11 +163,6 @@ export interface Snapshot {
    * address), and the seat is the identity money moves under.
    */
   seat?: { guest: boolean; address: string };
-  /** Rakeback that streamed in while the tab was closed. One-shot recap,
-      shown as a welcome-back card; null or absent when there is nothing. */
-  away?: { ms: number; sol: number } | null;
-  /** Recent jackpot hits, newest first, for the bonanza history popover. */
-  bonanzaFires?: { round: number; name: string; charId: string; sol: number; at: number }[];
 }
 
 export interface BankState {
@@ -225,14 +185,6 @@ export interface PlayerStats {
   /** Everything ever paid back. */
   returned: number;
   bestMultiple: number;
-  /** Lifetime rakeback received. */
-  revEarned: number;
-  /**
-   * Lifetime jackpot winnings. Paid straight to the balance rather than
-   * through a round settlement, so it is not part of `returned` and has to be
-   * carried separately or the record understates by the whole pool.
-   */
-  bonanzaWon?: number;
 }
 
 /**
@@ -332,32 +284,15 @@ export async function verifyEntry(h: HistoryEntry, expected: GameConfig): Promis
       return;
     }
 
-    if (h.record.seedHex === undefined) {
-      // A round from before the rules were folded into the commitment. Check
-      // it against the ceremony it was actually played under rather than
-      // calling it a mismatch: the old commitment covered the seed alone, so
-      // that is exactly — and only — what can honestly be verified about it.
-      h.seedOk =
-        commitPinned &&
-        h.commit !== "" &&
-        (await sha256Hex(`thinice:${h.roundId}:${h.seedHex}`)) === h.commit;
-      h.rulesOk = null;
-      h.bonanzaOk = null;
-      h.verified = h.replayOk === true && h.seedOk === true;
-      return;
-    }
-
     const hash = await sha256Hex(commitPreimage(h.roundId, h.seedHex, rulesHash));
     h.seedOk = seedsAgree && commitPinned && h.commit !== "" && hash === h.commit;
     h.rulesOk = canonical === canonicalConfig(expected);
-    h.bonanzaOk = verifyBonanzaDraw(h.record);
     // Null receipts are "nothing to check here", not failures — only an
     // outright false may condemn a round.
     h.verified =
       h.replayOk === true &&
       h.seedOk === true &&
       h.rulesOk === true &&
-      h.bonanzaOk !== false &&
       h.payoutOk !== false;
   } catch {
     h.verified = false;
@@ -399,11 +334,6 @@ export interface HistoryEntry {
    * this check the other two prove only internal consistency.
    */
   rulesOk: boolean | null;
-  /**
-   * Receipt: did the jackpot draw come off the committed seed? Null for
-   * rounds recorded before the draw was folded into the record.
-   */
-  bonanzaOk: boolean | null;
   /**
    * Receipt: does the replayed round pay YOUR seat exactly what this row says
    * you were paid? Null when the round did not report a seat. Without it the

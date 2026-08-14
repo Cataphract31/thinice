@@ -214,8 +214,8 @@ RPC, and never offers clients the bank panel (the client renders banking only
 when the server names a house account, so nothing needs changing in the web
 build). Every new wallet or guest is granted `STARTING_BALANCE` (default 5) of
 play money on first sight, and everything else is exactly the real game: one
-shared lobby, the full fairness ceremony, rakeback, jackpot, persistent
-balances per guest id or signed wallet.
+shared lobby, the full fairness ceremony, persistent balances per guest id or
+signed wallet.
 
 **The one trap, and it is a serious one: play-money balances must not survive
 into the real-money era.** The ledger stores balances as plain lamports — it

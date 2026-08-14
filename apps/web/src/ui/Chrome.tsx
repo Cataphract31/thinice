@@ -1,13 +1,7 @@
-import { useState, type JSX } from "react";
+import { type JSX } from "react";
 import type { Snapshot } from "@/game/client";
 import { CharArt } from "@/ui/Chars";
-import {
-  BonanzaOverlay,
-  Stats,
-  VolumePopover,
-  WalletButton,
-  poolDigits,
-} from "@/ui/Hud";
+import { Stats, VolumePopover, WalletButton } from "@/ui/Hud";
 
 /**
  * The house family, with the accent each arena wears on the lobby.
@@ -120,16 +114,13 @@ export function TopNav({
 /**
  * Row two: the state display, as one instrument instead of four scattered
  * readouts. Everything the house owes you at this moment, the round you are
- * in, what you hold, what the session has done, what the jackpot has grown
- * to, reads left to right on a single baseline, scored by hairlines the way
- * the lobby scores its arena cards. The old layout printed the same facts in
- * three different bands, in three different alignments, at the same type size
- * as the footer's legal links.
+ * in, what you hold, what the session has done, reads left to right on a
+ * single baseline, scored by hairlines the way the lobby scores its arena
+ * cards. The old layout printed the same facts in three different bands, in
+ * three different alignments, at the same type size as the footer's legal
+ * links.
  */
 export function StateBar({ snap }: { snap: Snapshot }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const pool = snap.bonanzaPool;
-
   return (
     <div className="shrink-0 border-b border-[var(--color-line)] max-sm:hidden">
       <div className="flex items-stretch">
@@ -140,38 +131,12 @@ export function StateBar({ snap }: { snap: Snapshot }): JSX.Element {
           </div>
         </div>
 
-        {/* Wallet, session and tickets keep their own component: the wallet
-            float animation and the ticket popover both live inside it. */}
-        <div className="flex items-center gap-5 border-l border-[var(--color-line-soft)] px-4 py-1.5">
+        {/* Wallet and session keep their own component: the wallet float
+            animation lives inside it. */}
+        <div className="ml-auto flex items-center gap-5 border-l border-[var(--color-line-soft)] px-4 py-1.5">
           <Stats snap={snap} />
         </div>
-
-        {/* The jackpot ends the band rather than owning a gradient strip of
-            its own. It is one number among the house's numbers until it is
-            not, and when it fires the overlay is the whole screen anyway. */}
-        <button
-          onClick={() => setOpen(true)}
-          title="Bonanza history"
-          className="ml-auto flex items-center gap-5 border-l border-[var(--color-line-soft)] px-4 py-1.5 hover:bg-[var(--color-panel2)]"
-        >
-          <span className="text-right">
-            <span className="label block text-[var(--color-gold)]">bonanza</span>
-            <span className="breathe tnum mt-0.5 block text-[17px] font-bold text-[var(--color-gold)]">
-              {pool.toFixed(poolDigits(pool))} ◎
-            </span>
-          </span>
-          <span className="text-right">
-            {/* Counted in rounds, and the unit is left implicit: the figure
-                beside it is a jackpot, so "last hit 20" can only mean rounds.
-                The window this opens spells it out for anyone who wonders. */}
-            <span className="label block">last hit</span>
-            <span className="tnum mt-0.5 block text-[13px] font-semibold text-[var(--color-zinc-hi)]">
-              {snap.bonanzaDrought.toLocaleString()}
-            </span>
-          </span>
-        </button>
       </div>
-      {open && <BonanzaOverlay snap={snap} onClose={() => setOpen(false)} />}
     </div>
   );
 }

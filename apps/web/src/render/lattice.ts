@@ -62,8 +62,6 @@ export interface LatticeSnapshot {
   hazard: number;
   grace: boolean;
   phase: "lobby" | "live" | "result";
-  /** Timestamp the jackpot fired, or null. Drives the gold flood. */
-  bonanzaAt: number | null;
   /** Your own standing. Drives the personal hit when your round ends. */
   youOutcome: "out" | "in" | "cashed" | "dead";
   /** Your character. Your plates alone wear its head on the board. */
@@ -103,7 +101,7 @@ interface Shard {
   size: number;
   life: number;
   maxLife: number;
-  kind: "ore" | "value" | "gold";
+  kind: "ore" | "value";
 }
 
 const COLD = [115, 180, 220] as const;
@@ -156,7 +154,6 @@ export class LatticeRenderer {
     hazard: 0,
     grace: false,
     phase: "lobby",
-    bonanzaAt: null,
     youOutcome: "out",
     youCharId: "",
     chat: [],
@@ -209,7 +206,6 @@ export class LatticeRenderer {
   /** 1 to 0 over the beat after your own round ends. */
   private hit = 0;
   private hitKind: "dead" | "cashed" = "dead";
-  private goldWave = 0;
   private layoutKey = "";
   private radius = 20;
   private bounds = { x: 0, y: 0, w: 0, h: 0 };
@@ -283,33 +279,25 @@ export class LatticeRenderer {
    * One pre-baked radial glow per shard kind.
    *
    * These were built with createRadialGradient inside the per-shard draw loop,
-   * i.e. once per glowing shard per frame. A jackpot on a full lattice throws
-   * three shards from every plate — on a 400-plate field that is over a
-   * thousand live shards allocating a thousand gradients sixty times a second,
-   * so the one moment the game most needs to land is the one that stutters.
-   * Baked once, then blitted.
+   * i.e. once per glowing shard per frame. A packed lattice shedding value on
+   * every tick is hundreds of live shards allocating hundreds of gradients
+   * sixty times a second. Baked once, then blitted.
    */
-  private glow = new Map<string, HTMLCanvasElement>();
+  private glow: HTMLCanvasElement | null = null;
 
-  private glowSprite(kind: "value" | "gold"): HTMLCanvasElement {
-    const cached = this.glow.get(kind);
-    if (cached) return cached;
+  private glowSprite(): HTMLCanvasElement {
+    if (this.glow) return this.glow;
     const size = 64;
     const c = document.createElement("canvas");
     c.width = size;
     c.height = size;
     const g = c.getContext("2d")!;
     const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    if (kind === "value") {
-      grad.addColorStop(0, "rgba(255,120,170,1)");
-      grad.addColorStop(1, "rgba(255,45,111,0)");
-    } else {
-      grad.addColorStop(0, "rgba(255,214,120,1)");
-      grad.addColorStop(1, "rgba(255,150,40,0)");
-    }
+    grad.addColorStop(0, "rgba(255,120,170,1)");
+    grad.addColorStop(1, "rgba(255,45,111,0)");
     g.fillStyle = grad;
     g.fillRect(0, 0, size, size);
-    this.glow.set(kind, c);
+    this.glow = c;
     return c;
   }
 
@@ -349,13 +337,8 @@ export class LatticeRenderer {
   }
 
   update(snap: LatticeSnapshot): void {
-    const wasBonanza = this.snap.bonanzaAt;
     const wasPhase = this.snap.phase;
     this.snap = snap;
-    if (snap.bonanzaAt && snap.bonanzaAt !== wasBonanza) {
-      this.goldWave = 1;
-      this.eruptGold();
-    }
     // Both on the perceptual scale, so backdrop and material answer the same
     // curve the ring and the audio do.
     this.heatTarget =
@@ -926,36 +909,6 @@ export class LatticeRenderer {
     }
   }
 
-  /**
-   * The jackpot. Every plate in the lattice throws gold at once — the one
-   * moment the scene is allowed to be warm.
-   */
-  private eruptGold(): void {
-    const r = this.radius;
-    // Thinned out on a packed lattice: three shards from each of 400 plates is
-    // 1200 additive glows a frame for nearly three seconds. The celebration
-    // reads the same at a few hundred and actually holds its frame rate.
-    const per = this.cells.size > 120 ? 1 : 3;
-    for (const c of this.cells.values()) {
-      for (let i = 0; i < per; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const sp = 90 + Math.random() * 260;
-        this.shards.push({
-          x: c.x,
-          y: c.y,
-          vx: Math.cos(a) * sp,
-          vy: Math.sin(a) * sp - 120,
-          rot: Math.random() * Math.PI,
-          vrot: (Math.random() - 0.5) * 14,
-          size: r * (0.2 + Math.random() * 0.35),
-          life: 0,
-          maxLife: 1.6 + Math.random() * 1.2,
-          kind: "gold",
-        });
-      }
-    }
-  }
-
   /** A plate lifted out cleanly. Drifts up, no value released. */
   private release(cell: Cell): void {
     const r = this.radius;
@@ -1018,7 +971,6 @@ export class LatticeRenderer {
     const frostTarget = this.snap.phase === "live" && this.snap.grace ? 1 : 0;
     this.frost += (frostTarget - this.frost) * Math.min(1, sdt * (frostTarget > this.frost ? 3.2 : 1.6));
     this.shake *= Math.pow(0.002, sdt);
-    if (this.goldWave > 0) this.goldWave = Math.max(0, this.goldWave - sdt / 6);
     if (this.hit > 0) this.hit = Math.max(0, this.hit - sdt / 1.1);
 
     // The signal's own clock runs on the WALL, not on slow-mo time: a
@@ -1066,7 +1018,6 @@ export class LatticeRenderer {
     this.drawSeams();
     this.drawCells(sdt);
     this.drawShards(sdt);
-    if (this.goldWave > 0) this.drawGoldFlood();
     this.drawAtmosphere();
     if (this.pops.length > 0) this.drawChatPops();
     if (this.finaleT >= 0 && this.crownBearer !== null) this.drawCrown();
@@ -1292,40 +1243,6 @@ export class LatticeRenderer {
     ctx.globalAlpha = 0.5;
     ctx.fillStyle = this.grainPattern;
     ctx.fillRect(0, 0, w, h);
-    ctx.restore();
-  }
-
-  /** Jackpot wash. Warm light floods the cold lattice, then drains away. */
-  private drawGoldFlood(): void {
-    const { ctx, w, h } = this;
-    const k = this.goldWave;
-    const burst = Math.min(1, (1 - k) * 5);
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    const g = ctx.createRadialGradient(
-      w / 2,
-      h / 2,
-      0,
-      w / 2,
-      h / 2,
-      Math.max(w, h) * (0.35 + burst * 0.5),
-    );
-    const a = k * 0.7;
-    g.addColorStop(0, `rgba(255,206,110,${a})`);
-    g.addColorStop(0.5, `rgba(255,160,50,${a * 0.5})`);
-    g.addColorStop(1, "rgba(255,120,20,0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-
-    // Expanding shock ring on the initial hit.
-    if (burst < 1) {
-      ctx.globalAlpha = (1 - burst) * 0.8;
-      ctx.strokeStyle = "#ffe6a8";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(w / 2, h / 2, burst * Math.max(w, h) * 0.7, 0, Math.PI * 2);
-      ctx.stroke();
-    }
     ctx.restore();
   }
 
@@ -1591,7 +1508,7 @@ export class LatticeRenderer {
       // The endgame clears the stage: every plate not wearing the crown
       // fades out during the finale, so the board the curtain finds holds
       // exactly the winner's cluster — or nothing at all after a wipe or a
-      // banked-out ending. Gold ghosts included; their story is over too.
+      // banked-out ending. Cashed-out ghosts included; their story is over too.
       if (this.finaleT >= 0 && !this.keepIds.has(c.id)) {
         const fs = this.finaleQuiet ? 0.15 : 1.0;
         const fe = this.finaleQuiet ? 0.75 : 2.2;
@@ -1799,9 +1716,6 @@ export class LatticeRenderer {
         const pull = 420 * Math.pow(k, 1.6);
         s.vx += (dx / d) * pull * dt;
         s.vy += (dy / d) * pull * dt;
-      } else if (s.kind === "gold") {
-        s.vy += 220 * dt;
-        s.vx *= 1 - 0.6 * dt;
       } else {
         s.vy += 180 * dt;
       }
@@ -1813,11 +1727,11 @@ export class LatticeRenderer {
       ctx.save();
       ctx.translate(s.x, s.y);
       ctx.rotate(s.rot);
-      if (s.kind === "value" || s.kind === "gold") {
+      if (s.kind === "value") {
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = a;
-        const r = s.size * (s.kind === "value" ? 3.2 : 4);
-        ctx.drawImage(this.glowSprite(s.kind), -r, -r, r * 2, r * 2);
+        const r = s.size * 3.2;
+        ctx.drawImage(this.glowSprite(), -r, -r, r * 2, r * 2);
       }
       ctx.globalAlpha = a;
       ctx.beginPath();
@@ -1825,8 +1739,7 @@ export class LatticeRenderer {
       ctx.lineTo(s.size * 0.9, s.size * 0.7);
       ctx.lineTo(-s.size * 0.8, s.size * 0.6);
       ctx.closePath();
-      ctx.fillStyle =
-        s.kind === "value" ? "#ff9dbe" : s.kind === "gold" ? "#ffd36b" : "#a9d2e6";
+      ctx.fillStyle = s.kind === "value" ? "#ff9dbe" : "#a9d2e6";
       ctx.fill();
       ctx.restore();
     }

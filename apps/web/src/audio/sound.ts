@@ -5,7 +5,7 @@
  *
  * 1. NO TONES. Bells, chimes and pitched "blings" are what made the last pass
  *    feel like a toy. Nothing in this file plays a melody or a chord you could
- *    hum, with the single exception of the jackpot, which earns it. Everything
+ *    hum. Everything
  *    else is material: noise driven through resonant filters, plus sub. That
  *    is how real impact design works — you are meant to hear an object, not a
  *    synthesiser.
@@ -26,7 +26,7 @@
  * synthesised voice, no code change:
  *
  *     tick.mp3  shatter.mp3  shatter_many.mp3  extract.mp3
- *     died.mp3  seal.mp3     join.mp3          bonanza.mp3
+ *     died.mp3  seal.mp3     join.mp3
  *
  * (.mp3, .wav or .ogg — the loader tries each.) Anything missing keeps its
  * synthesised version, so the pack can be filled in one sound at a time.
@@ -67,7 +67,6 @@ const SAMPLE_NAMES = [
   "died",
   "seal",
   "join",
-  "bonanza",
 ] as const;
 type SampleName = (typeof SAMPLE_NAMES)[number];
 
@@ -756,66 +755,3 @@ export function sfxTvOn(): void {
   texture({ dur: 0.05, gain: 0.028, freq: 3600, q: 0.9, attack: 0.001, wet: 0.06, delay: 0.1 });
 }
 
-/**
- * The jackpot — the one moment allowed to be musical.
- *
- * Structure is the standard three-part celebration cue: a riser that builds
- * anticipation, an impact that lands it, then a warm sustained pad that hangs
- * in the reverb while the overlay plays. The pad is a filtered saw stack, not
- * bells: an open fifth with the octave above it, lowpassed so it stays warm
- * and never turns into a sparkle.
- */
-export function sfxBonanza(): void {
-  if (sample("bonanza", 1, 0.5)) return;
-  if (!ctx || !master || muted) return;
-  const t0 = ctx.currentTime;
-
-  // Riser: 1.1s of noise sweeping up into the hit.
-  texture({
-    dur: 1.1,
-    gain: 0.09,
-    freq: 260,
-    sweepTo: 5200,
-    q: 1.4,
-    attack: 0.5,
-    wet: 0.5,
-  });
-
-  // Impact.
-  const hit = 1.1;
-  sub({ freq: 78, glideTo: 40, dur: 1.5, gain: 0.32, attack: 0.006, wet: 0.35, delay: hit });
-  texture({ dur: 0.5, gain: 0.13, freq: 1500, sweepTo: 200, q: 0.9, wet: 0.6, delay: hit });
-
-  // The pad: C2 / G2 / C3 / G3. Slow attack, long release, well behind the hit.
-  for (const [freq, level] of [
-    [65.4, 0.075],
-    [98.0, 0.06],
-    [130.8, 0.05],
-    [196.0, 0.032],
-  ] as const) {
-    const osc = ctx.createOscillator();
-    osc.type = "sawtooth";
-    osc.frequency.value = freq;
-    osc.detune.value = (Math.random() - 0.5) * 9;
-
-    // Filter opens as the chord blooms, which is what makes a pad breathe.
-    const lp = ctx.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.Q.value = 0.7;
-    lp.frequency.setValueAtTime(240, t0 + hit);
-    lp.frequency.linearRampToValueAtTime(1500, t0 + hit + 1.2);
-    lp.frequency.linearRampToValueAtTime(500, t0 + hit + 3.4);
-
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t0 + hit);
-    g.gain.linearRampToValueAtTime(level, t0 + hit + 0.35);
-    g.gain.setValueAtTime(level, t0 + hit + 1.6);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + hit + 3.6);
-
-    osc.connect(lp);
-    lp.connect(g);
-    connectVoice(g, 0.55);
-    osc.start(t0 + hit);
-    osc.stop(t0 + hit + 3.7);
-  }
-}

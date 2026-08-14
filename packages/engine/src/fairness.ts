@@ -1,5 +1,5 @@
 import type { GameConfig } from "./config.js";
-import { deriveRng, mulberry32, rngFromSeedHex } from "./rng.js";
+import { rngFromSeedHex } from "./rng.js";
 import { Round, type CashOutRecord, type Entrant, type RoundResult } from "./round.js";
 
 /**
@@ -32,8 +32,6 @@ export interface RoundRecord {
    * seed is not merely weaker but actively broken under commit-reveal.
    */
   seedHex?: string;
-  /** Legacy 32-bit seed. Only for replaying rounds recorded before the fix. */
-  seed?: number;
   /**
    * The exact rules the round ran under. Present so a replay uses the numbers
    * that were live at the time rather than whatever the verifier's build
@@ -44,26 +42,6 @@ export interface RoundRecord {
   /** Entrants in seal order. Order matters: it fixes RNG draw order. */
   entrantIds: number[];
   cashOuts: CashOutRecord[];
-  /**
-   * The jackpot draw this round made, on the seed-derived "bonanza" stream.
-   * Recorded so the single largest payout in the game is checkable too: with
-   * the seed revealed, anyone recomputes these two numbers and sees whether
-   * the fire — and the point in the ticket ordering the winner was taken
-   * from — was the one the pre-published commitment already fixed.
-   */
-  bonanza?: {
-    fire: number;
-    winner: number;
-    totalTickets: number;
-    /** Seat/ledger id paid, or null when the roll held. */
-    winnerId: number | null;
-    /**
-     * The ordered ticket table the winner walk ran over. Rounds recorded
-     * before this field existed verify draws only; with it, the verifier
-     * replays the walk and the recorded winner is pinned too.
-     */
-    holders?: [number, number][];
-  };
 }
 
 /**
@@ -111,18 +89,12 @@ export function replayRound(config: GameConfig, rec: RoundRecord): RoundResult {
 
   // The round's own rules win over the verifier's: see RoundRecord.config.
   const rules = rec.config ?? config;
-  // Rounds recorded before the seed was widened still have to stay verifiable,
-  // so the legacy 32-bit path survives here — and only here. Nothing live may
-  // produce one: `rngFromSeedHex` refuses a short seed at the source.
-  // A record with no seed of any kind cannot be replayed, and silently
-  // substituting seed 0 would produce a confident, entirely fictional round.
-  if (rec.seedHex === undefined && rec.seed === undefined) {
+  // A record with no seed cannot be replayed, and silently substituting seed 0
+  // would produce a confident, entirely fictional round.
+  if (rec.seedHex === undefined) {
     throw new Error("round record carries no seed: nothing to replay");
   }
-  const rng =
-    rec.seedHex !== undefined
-      ? rngFromSeedHex(rec.seedHex)
-      : mulberry32(rec.seed ?? 0);
+  const rng = rngFromSeedHex(rec.seedHex);
   const round = new Round(rules, rng, entrants);
   for (const id of manualByTick.get(0) ?? []) round.cashOut(id);
   while (!round.finished) {
@@ -130,49 +102,6 @@ export function replayRound(config: GameConfig, rec: RoundRecord): RoundResult {
     for (const id of manualByTick.get(round.currentTick) ?? []) round.cashOut(id);
   }
   return round.result();
-}
-
-/**
- * The stream tag the jackpot draw runs on. One name, exported, because the
- * server and the verifier deriving it from different literals would fail
- * every honest round.
- */
-export const BONANZA_TAG = "bonanza";
-
-/**
- * Recomputes the jackpot draws for a round from its revealed seed and checks
- * them against what was recorded. Returns null when the round predates the
- * recorded jackpot draw — there is nothing to check, and claiming otherwise
- * would be the lie the whole panel exists to prevent.
- */
-export function verifyBonanzaDraw(rec: RoundRecord): boolean | null {
-  if (!rec.bonanza || rec.seedHex === undefined) return null;
-  const rng = deriveRng(rec.seedHex, BONANZA_TAG);
-  const fire = rng.next();
-  const winner = rng.next();
-  // Exact equality: both sides run the identical integer-only generator, so
-  // any difference at all means the recorded draw is not the committed one.
-  if (fire !== rec.bonanza.fire || winner !== rec.bonanza.winner) return false;
-  // When the record carries the ordered ticket table, replay the walk that
-  // picked the winner — the exact loop from BonanzaPool.roll, including the
-  // last-holder fallback for float dust. Checking only the draws left the
-  // WINNER on faith: an operator could pay a confederate and both floats
-  // would still verify. Older records without the table verify draws only.
-  const holders = rec.bonanza.holders;
-  if (holders && rec.bonanza.winnerId !== null) {
-    let target = rec.bonanza.winner * rec.bonanza.totalTickets;
-    let walked = -1;
-    for (const [id, count] of holders) {
-      target -= count;
-      if (target <= 0) {
-        walked = id;
-        break;
-      }
-      walked = id;
-    }
-    if (walked !== rec.bonanza.winnerId) return false;
-  }
-  return true;
 }
 
 /**

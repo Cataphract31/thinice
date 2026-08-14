@@ -7,9 +7,8 @@ import { Roster } from "@/ui/Ledger";
 import { HistoryPanel } from "@/ui/History";
 import { StatsPanel } from "@/ui/Stats";
 import { TickRing } from "@/ui/TickRing";
-import { BonanzaOverlay } from "@/ui/Bonanza";
 import { BankPanel } from "@/ui/Bank";
-import { ActionBar, AutoPanel, AwayRecap } from "@/ui/Hud";
+import { ActionBar, AutoPanel } from "@/ui/Hud";
 import { OfflineBar, SlimFooter, StateBar, TopNav } from "@/ui/Chrome";
 import { InfoOverlay } from "@/ui/Info";
 import { Tutorial, tutorialSeen } from "@/ui/Tutorial";
@@ -157,7 +156,6 @@ export default function App(): JSX.Element {
 
             <ShatterCard snap={snap} />
             <WinnerOverlay snap={snap} />
-            <BonanzaOverlay event={snap.bonanza} />
           </div>
         </div>
 
@@ -256,7 +254,6 @@ export default function App(): JSX.Element {
       {/* Root level, NOT inside the lattice frame: the tube's filter turns any
           ancestor into the containing block for fixed children, which caged
           this "fullscreen" card inside the TV and clipped it on phones. */}
-      <AwayRecap snap={snap} />
 
       {/* Mobile keeps the thumb-reach bottom bar, with auto play just above. */}
       <div className="lg:hidden">
@@ -370,10 +367,7 @@ function CrtLayer({ snap }: { snap: Snapshot }): JSX.Element {
 /**
  * Everything about one player on one plate.
  *
- * The tickets row is the wallet's ACTUAL holdings — the same bonanza / rev
- * pair the owner sees in their own tickets stat. It used to print the flat
- * per-entry award, which told a player checking their alt from another phone
- * that their five-figure stack was "200". Fixed width with a pinned close
+ * Fixed width with a pinned close
  * button, so the geometry never depends on the length of a name; capped to
  * the lattice frame and scrollable inside, because on a phone the frame is
  * shorter than the card and the overflow was silently clipped.
@@ -470,23 +464,6 @@ function PlayerCard({
             "wagered",
             <span className="tnum text-[11px]">{p.lifetime.wagered.toFixed(1)} ◎</span>,
           )}
-          {/* This wallet's holdings, not the per-entry award: bots and fresh
-              wallets hold nothing, and printing 0 / 0 would only invite the
-              question this row exists to answer. */}
-          {p.lifetime.tickets &&
-            (p.lifetime.tickets.bon > 0 || p.lifetime.tickets.rev > 0) &&
-            line(
-              "tickets",
-              <span className="tnum text-[11px] font-semibold">
-                <span className="text-[var(--color-gold)]">
-                  {p.lifetime.tickets.bon.toLocaleString()}
-                </span>
-                <span className="text-[var(--color-dim)]"> / </span>
-                <span className="text-[var(--color-cyan)]">
-                  {p.lifetime.tickets.rev.toLocaleString()}
-                </span>
-              </span>,
-            )}
           {line(
             "banked ahead",
             <span className="tnum text-[11px] font-semibold">
@@ -504,7 +481,7 @@ function PlayerCard({
           )}
           {/* RTP, not net SOL. A 24/7 grinder's card would otherwise read
               like a casualty report ("-20 ◎ lifetime") when the honest
-              summary of the same volume is "96% returned" — the number the
+              summary of the same volume is "98% returned" — the number the
               game actually promises. Green only at or above break-even;
               below it stays neutral, because under 100% IS the expected
               case, not damage. Hidden until a wallet has wagered anything. */}
@@ -516,15 +493,6 @@ function PlayerCard({
                 style={p.lifetime.net >= 0 ? { color: "var(--color-profit)" } : undefined}
               >
                 {(((p.lifetime.wagered + p.lifetime.net) / p.lifetime.wagered) * 100).toFixed(1)}%
-              </span>,
-            )}
-          {/* Only for the few who have actually taken one — a row of zeroes
-              on every other card would say nothing and cost a line. */}
-          {p.lifetime.jackpots > 0 &&
-            line(
-              "bonanza won",
-              <span className="tnum text-[11px] font-semibold text-[var(--color-gold)]">
-                +{p.lifetime.jackpots.toFixed(2)} ◎
               </span>,
             )}
         </div>

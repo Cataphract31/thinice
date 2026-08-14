@@ -148,12 +148,8 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   const seat = (wallet: string, guest: boolean, token?: string): void => {
     if (session) return;
     const before = db.player(wallet);
-    // The away recap: rakeback that streamed into this wallet since its last
-    // presence stamp (stamped at connect, join and disconnect). Gated on a
-    // real absence so a refresh stays silent, and read BEFORE touch below
-    // moves the stamp to now.
+    // Read BEFORE touch below moves the presence stamp to now.
     const awayMs = Date.now() - before.seenAt;
-    const awayRakeback = awayMs > 90_000 ? db.rakebackSince(wallet, before.seenAt) : 0;
     // Auto play lapses over a long absence, and it must lapse HERE: the seat
     // is attached to the game below, and from that moment the next lobby tick
     // buys this wallet in. Clearing it after attach would be a race the
@@ -182,8 +178,6 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       // Minted only on a fresh signature. The client stores it and resumes
       // with it, so one Phantom prompt covers every future connection.
       ...(token ? { token } : {}),
-      // "While you were away": the stream kept paying. Sent only when it did.
-      ...(awayRakeback > 0 ? { awayMs, awayRakeback: toSol(awayRakeback) } : {}),
     });
     game.attach(session);
   };

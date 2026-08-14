@@ -5,7 +5,7 @@ import { useEffect } from "react";
  *
  * Every dismissible overlay in the product should answer the same key, and
  * they did not: the info page listened, while the character picker, the bank
- * and the jackpot history could only be dismissed by finding their ✕ or
+ * and the round history could only be dismissed by finding their ✕ or
  * clicking the backdrop. A modal that ignores Escape reads as stuck to anyone
  * driving by keyboard.
  */

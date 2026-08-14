@@ -161,7 +161,7 @@ export function CharSelect({
  * and watching. One card for you alone, never a row of everyone's casualties.
  */
 export function ShatterCard({ snap }: { snap: Snapshot }): JSX.Element | null {
-  if (!snap.you.joined || snap.you.outcome !== "dead" || snap.bonanza) return null;
+  if (!snap.you.joined || snap.you.outcome !== "dead") return null;
   return (
     <div
       key={snap.roundId}
@@ -206,7 +206,7 @@ export function WinnerOverlay({ snap }: { snap: Snapshot }): JSX.Element | null 
     return () => clearTimeout(t);
   }, [isResult, snap.roundId, holdMs]);
 
-  if (!isResult || snap.bonanza || !curtain) return null;
+  if (!isResult || !curtain) return null;
   // The bottom strip is the record, not the wreckage: recent round winners,
   // newest first, the running "which team is dominant" ticker.
   const champs = snap.history.filter((h) => h.winnerChar).slice(0, 8);

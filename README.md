@@ -16,11 +16,9 @@ exception: in play-money mode the server may seat a few PRACTICE bots
 that honest: every practice bot is labelled `bot·name` on every surface, and
 the server refuses to boot with bots and banking enabled together — a bot may
 never share a table with real money. Within the play-money room the bots are
-FULL participants in the same economy they sit in: same rake, same rakeback
-tickets, same bonanza odds per entry (a bot can win the jackpot — excluding
-them would quietly stage every human's apparent odds). They play continuously,
-humans present or not, so the ticket economies pay around the clock and a
-visitor always walks into a running game.
+FULL participants in the same economy they sit in: same rake, same odds, same
+pot. They play continuously, humans present or not, so a visitor always walks
+into a running game.
 
 ---
 
@@ -115,18 +113,30 @@ before it sealed.
 | | |
 |---|---|
 | Entry | 0.1 SOL, fixed for everyone |
-| Rake | 5% — 2% jackpot, 2% rakeback, 1% platform fee |
-| In-game RTP | **95.00%** |
-| Headline RTP | **99.00%** — only the platform 1% is a true edge |
+| Rake | 2% — 0.5% platform fee, 1.5% token buyback and burn |
+| RTP | **98.00%**, and that is the whole figure |
 
-The jackpot and the rakeback stream are both player money, which is why 99% is
-the honest published figure. Only 1% is house revenue.
+There is no second number to add. Nothing is pooled, streamed, decayed or
+claimed: 98% of every entry goes into the pot of the round that entry paid for,
+and every lamport of that pot leaves via a player before the round closes.
+
+This replaced a 5% rake that returned four of its five points through a jackpot
+and a rakeback ledger — 99% on paper. Measured over a 135,000-round population,
+it was not: 97.5% of wallets never won the jackpot, and the two points funding
+it simply left them. Paying those points inside the round moved the **median
+wallet up 1.21 points**, took 81.8% of wallets with it, and cut the variance a
+player is exposed to by 79% — four fifths of it had been a 1-in-1300 event
+almost nobody was ever in.
 
 **The in-game return is identical for every cash-out strategy.** Balance is
 conserved and every live player holds the same balance, so no exit timing beats
 any other — strategy buys variance, never expected value. This was measured, not
 assumed: the invariants sweep ran every exit rule against this engine and found
-no spread between them, with conservation landing on 100.000%.
+no spread between them, with conservation landing on 100.000%. Re-measured at
+2% over 400,000 paired rounds: a bolter, a rider and a 2x target all return the
+same expected multiple, and the paired difference is indistinguishable from
+zero. What a policy buys is shape — standard deviation 0.28 bolting against
+1.87 riding — never edge.
 
 **Multi-betting.** One wallet may hold up to five plates in a round — press
 bond again to buy another; one cash-out extracts every live plate together at
@@ -141,20 +151,6 @@ and the moment every live plate belongs to one wallet the round ends itself,
 banking that owner on the spot: their deaths would only pass money between
 their own hands, so nothing is left to play for. The ending is implemented as
 genuine engine cash-outs, so the fairness record replays unchanged.
-
-Two ticket economies, both flat at 200 tickets per entry:
-
-- **Bonanza** — a winner-take-all jackpot, ~1/1500 chance per round. Tickets
-  wipe for everyone when it fires, so each cycle is a fresh raffle.
-- **Rakeback** — 2% of every entry streams continuously to ticket holders,
-  including on rounds they sat out. Weight decays with a 45-day half-life
-  (continuously, per ticket, from the moment it was earned — there is no decay
-  job and no interval), so the stream tracks recent volume instead of lifetime
-  volume. Paid automatically into the balance the moment each round SEALS —
-  the rake is collected by then, so the stream is a settled fact — and nobody
-  claims anything. A crashed round claws its seal-time payouts back as part
-  of the startup refund (`rakeback_payouts` is the per-round record that
-  makes those fractional reversals possible).
 
 Design notes and the measurements behind them are in the config comments —
 `packages/engine/src/config.ts` is worth reading in full before changing a
@@ -177,9 +173,8 @@ and the browser then replays the entire round locally and shows five receipts:
 2. the round replays tick-for-tick to the same outcome
 3. it ran under the rules this build advertises (the rules are in the hash)
 4. your own plate in the replay paid exactly what you were credited
-5. the jackpot draw came off the committed seed, not a number the house picked
 
-All five are computed in the player's browser from the record. The server is
+All four are computed in the player's browser from the record. The server is
 never asked to confirm anything — that is the entire point.
 
 Some non-obvious things that are load-bearing. Do not "simplify" them:
@@ -190,8 +185,7 @@ Some non-obvious things that are load-bearing. Do not "simplify" them:
   prove fairness becomes the thing that breaks it. `rngFromSeedHex` refuses a
   short seed at the source.
 - **Player strategies must never draw from the round's RNG.** The draw count is
-  what makes replay work. Bots (in the demo) and the jackpot both run on
-  separate streams for this reason.
+  what makes replay work. Bots run on a separate stream for this reason.
 - **The client pins the commitment it saw during the lobby** and refuses a
   finished round whose commitment differs. Checking a server-supplied seed
   against a server-supplied hash that arrived in the same message proves only

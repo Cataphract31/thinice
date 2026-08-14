@@ -18,7 +18,6 @@ bother normalising before dropping them in.
 | `died`          | your own plate shatters                |
 | `seal`          | the lattice seals, round starts        |
 | `join`          | you bond in                            |
-| `bonanza`       | the jackpot fires                      |
 
 `.mp3`, `.wav` or `.ogg` — the loader tries each in that order. Anything
 missing keeps its synthesised version, so the pack can be filled in one sound
@@ -34,9 +33,9 @@ as danger. Dropping in `tick.mp3` still works, and it is still modulated by
 level, filtering and rate, but it will always be a blunter instrument than the
 synthesised one. Leave it out unless you have a specific reason.
 
-Keep files short: `tick` under ~80ms, the shatters under ~600ms,
-`bonanza` up to ~5s (the overlay runs 7s). Mono is fine; the game adds its own
-reverb and stereo width on top, so use dry source material.
+Keep files short: `tick` under ~80ms, the shatters under ~600ms. Mono is fine;
+the game adds its own reverb and stereo width on top, so use dry source
+material.
 
 **Licensing:** only ship sounds cleared for commercial use.
 [freesound.org](https://freesound.org) filtered to CC0 is free and safe;

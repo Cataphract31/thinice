@@ -1,10 +1,8 @@
 export interface RakeConfig {
-  /** Fraction of each entry diverted to the bonanza jackpot pool. Player money. */
-  bonanza: number;
-  /** Fraction retained by the house. The only true edge. */
-  house: number;
-  /** Fraction streamed back to holders of permanent revenue-share tickets. Player money. */
-  revShare: number;
+  /** Fraction retained by the platform to run the game. */
+  platform: number;
+  /** Fraction routed to token buybacks and burns. Leaves the player economy. */
+  buyback: number;
 }
 
 export interface HazardConfig {
@@ -41,9 +39,8 @@ export interface HazardConfig {
   qMax: number;
   /**
    * Opening ticks during which nobody can be eliminated. Players still see the
-   * hazard rate they are about to face and still accrue bonanza tickets, so the
-   * grace period costs nothing but gives everyone a chance to read the field
-   * before the shaft turns on them.
+   * hazard rate they are about to face, so the grace period costs nothing but
+   * gives everyone a chance to read the field before the shaft turns on them.
    */
   graceTicks: number;
   /**
@@ -55,30 +52,10 @@ export interface HazardConfig {
   guaranteeSurvivor: boolean;
 }
 
-export interface BonanzaConfig {
-  /** Per-round chance the jackpot fires, independent of pool size. */
-  fireProb: number;
-  /** Tickets granted on entry, before any tick survival. */
-  ticketBase: number;
-  /** Tickets per tick, scaled by the live hazard rate. */
-  ticketPerRisk: number;
-  /** If true, being eliminated forfeits the tickets earned this round. */
-  forfeitOnDeath: boolean;
-}
-
-export interface RevShareConfig {
-  /** Permanent tickets granted per entry. Entry is fixed, so this is per round played. */
-  ticketsPerEntry: number;
-  /** Half-life of ticket weight in days. Zero or below disables decay. */
-  halfLifeDays: number;
-}
-
 export interface TimingConfig {
   lobbyMs: number;
   tickMs: number;
   resultMs: number;
-  /** Extended result phase after a jackpot fires, so the celebration can play out. */
-  bonanzaMs: number;
 }
 
 export interface FieldConfig {
@@ -92,8 +69,6 @@ export interface GameConfig {
   entry: number;
   rake: RakeConfig;
   hazard: HazardConfig;
-  bonanza: BonanzaConfig;
-  revShare: RevShareConfig;
   timing: TimingConfig;
   /**
    * Lobby capacity. This is a live game rule, not a simulation detail: the
@@ -105,22 +80,25 @@ export interface GameConfig {
 }
 
 /**
- * 5% total rake — 2% bonanza, 2% rakeback, 1% platform fee — of which only
- * the platform 1% is genuine house edge. Headline RTP is 99%: 95% returned
- * inside the game, 2% via the bonanza, 2% via the revenue-share stream.
+ * 2% total rake — 0.5% platform fee, 1.5% to token buybacks and burns.
+ * Headline RTP is 98%, and that is the WHOLE story: the pot is 98% of handle
+ * and every lamport of it leaves via a player, so there is no second number
+ * to add and no schedule anyone has to hit to collect it.
  *
- * The platform fee was 2%. Halving it moves a point straight back into the
- * in-game pot — the strongest possible use of a point, since it pays on
- * every round rather than through the rare jackpot — and makes the headline
- * a 99% figure almost nothing on the market can print.
+ * This replaced a 5% rake that returned four of its five points through a
+ * jackpot and a rakeback ledger. On paper that was 99%. Measured over a
+ * 135,000-round population it was not: 97.5% of wallets never won the jackpot,
+ * and the two points funding it simply left them. Paying those points inside
+ * the round instead moved the MEDIAN wallet up 1.21 points, took 81.8% of
+ * wallets with it, and cut the variance a player is exposed to by 79% — four
+ * fifths of it had been a 1-in-1300 event almost nobody was ever in.
  *
- * (Earlier move, same logic: the bonanza was 3%; a jackpot point is paid
- * roughly once per 39,000 entries, so shifting it in-game raised the chance
- * of finishing a round ahead and cut total variance per stake by 52%.)
+ * The rake is now the only thing between handle and players. Nothing is held
+ * in a pool, nothing decays, nothing has to be claimed.
  */
 export const DEFAULT_CONFIG: GameConfig = {
   entry: 0.1,
-  rake: { bonanza: 0.02, house: 0.01, revShare: 0.02 },
+  rake: { platform: 0.005, buyback: 0.015 },
   hazard: {
     q0: 0.075,
     // Crowding stays steep: this is the "fewer people, more oxygen" signal the
@@ -143,34 +121,6 @@ export const DEFAULT_CONFIG: GameConfig = {
     graceTicks: 2,
     guaranteeSurvivor: true,
   },
-  bonanza: {
-    fireProb: 1 / 1500,
-    // Flat: one ticket per entry, matching the revenue-share tickets. Risk-
-    // weighted accrual was measured to hand late-stayers ~1.5pts of RTP over
-    // cautious players, and it rewarded never leaving — the opposite of a
-    // lively round. The climbing multiplier is already all the incentive
-    // anyone needs to stay, so this makes every strategy land on exactly 99%.
-    // The demo granted a few hundred per round and the number felt like it
-    // meant something. Flat tickets are scale-free — every share is
-    // tickets/total — so the denomination is a pure presentation choice, and a
-    // bigger one reads better. 200 a round, same for everyone.
-    ticketBase: 200,
-    ticketPerRisk: 0,
-    forfeitOnDeath: false,
-  },
-  revShare: {
-    // Matched to the bonanza denomination for the same reason. Shares are
-    // ratios, so this changes nobody's payout by a lamport.
-    ticketsPerEntry: 200,
-    // Was 75, then 60. Shortened again so early-cohort weight fades faster:
-    // the measured tail for a quitter at 75d was ~1.6x their active-period
-    // rakeback, which made early players too dominant over later cohorts.
-    // At 45d a quitter's slice is a quarter at three months and ~6% at six —
-    // "about three months of tail" without a hard cliff, which the O(1)
-    // decay-normalised ledger cannot express anyway (a cliff needs per-ticket
-    // sweeps, and hands a player the day their stream visibly dies).
-    halfLifeDays: 45,
-  },
   // tickMs is a pure clock knob: it changes wall-clock pacing without touching
   // a single probability, so game feel can be tuned independently of economics.
   // Lobby 10s, not 7: first live feedback was "by the time I decided, already
@@ -178,7 +128,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   // costs ~6% round throughput, nothing else. Result 6.5s: the endgame
   // sequence (extended slow-mo, the stage clearing, the coronation) spends
   // ~3s before the winner card, and the card still deserves its read time.
-  timing: { lobbyMs: 10000, tickMs: 500, resultMs: 6500, bonanzaMs: 7000 },
+  timing: { lobbyMs: 10000, tickMs: 500, resultMs: 6500 },
   /*
    * Lobby size. Not a safety rail: the hazard curve reads crowding as a
    * fraction so it is scale-free, and the renderer was built for a thousand
@@ -200,13 +150,11 @@ export function drawFieldSize(c: GameConfig, unit: number): number {
   return c.field.min + Math.floor(unit * (c.field.max - c.field.min + 1));
 }
 
-/** The original demo's split: 4% house, 3% bonanza, no revenue share. 96% RTP. */
-export const LEGACY_CONFIG: GameConfig = {
-  ...DEFAULT_CONFIG,
-  rake: { bonanza: 0.03, house: 0.04, revShare: 0 },
-  revShare: { ticketsPerEntry: 0, halfLifeDays: 0 },
-};
-
+/**
+ * The cost of playing, as a fraction of the stake. Both components leave the
+ * player economy, so this is the whole edge: in-game RTP is exactly 1 - this,
+ * for every player and every exit policy.
+ */
 export function totalRake(c: GameConfig): number {
-  return c.rake.bonanza + c.rake.house + c.rake.revShare;
+  return c.rake.platform + c.rake.buyback;
 }

@@ -12,8 +12,12 @@ import { DEFAULT_CONFIG, totalRake } from "@zinc/engine";
 
 const C = DEFAULT_CONFIG;
 const RAKE = totalRake(C);
-const IN_GAME = 1 - RAKE;
-const RTP = IN_GAME + C.rake.bonanza + C.rake.revShare;
+/**
+ * Every lamport of the pot leaves via a player, so the return IS the pot.
+ * Nothing is pooled, streamed or held back, which is why this page has one
+ * number on it instead of three that have to be added up.
+ */
+const RTP = 1 - RAKE;
 const pc = (x: number, dp = 0): string => `${(x * 100).toFixed(dp)}%`;
 
 export function InfoOverlay({
@@ -74,12 +78,11 @@ export function InfoOverlay({
           <Section title="where the money goes">
             <Table
               rows={[
-                [pc(IN_GAME), "the pot", "paid out every round"],
-                [pc(C.rake.bonanza), "the bonanza", "jackpot, one winner takes all"],
-                [pc(C.rake.revShare), "rakeback", "streamed to players forever"],
-                [pc(C.rake.house), "platform fee", "the only real edge"],
+                [pc(RTP), "the pot", "paid out every round"],
+                [pc(C.rake.platform, 1), "platform fee", "running the game"],
+                [pc(C.rake.buyback, 1), "buyback & burn", "bought back, burned"],
               ]}
-              foot={[pc(RTP), "returned to players", `${pc(C.rake.house)} platform fee`]}
+              foot={[pc(RTP), "returned to players", `${pc(RAKE)} rake, nothing held back`]}
             />
           </Section>
 
@@ -93,23 +96,12 @@ export function InfoOverlay({
             </p>
           </Section>
 
-          <Section title="the bonanza">
+          <Section title="no tickets, no jackpot">
             <p>
-              Every entry earns the same {C.bonanza.ticketBase.toLocaleString()}{" "}
-              bonanza tickets. About 1 round in{" "}
-              {Math.round(1 / C.bonanza.fireProb).toLocaleString()}, the jackpot
-              fires: one ticket holder takes the whole pool, and every ticket
-              resets. More entries, better odds. No other way to farm it.
-            </p>
-          </Section>
-
-          <Section title="rakeback">
-            <p>
-              {pc(C.rake.revShare)} of everything everyone bets is streamed to
-              rakeback ticket holders. That includes rounds you skip, and it keeps
-              paying after you stop playing. Your share slowly fades (
-              {C.revShare.halfLifeDays}-day half-life), so active players always
-              earn the most.
+              There is nothing to farm and nothing to claim. {pc(RTP)} of every
+              entry goes into the pot of the round you paid for, and it is paid
+              out that round. You do not have to keep playing to collect it, and
+              nobody wins it instead of you.
             </p>
           </Section>
 

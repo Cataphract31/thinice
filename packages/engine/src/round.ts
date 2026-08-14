@@ -12,7 +12,6 @@ export interface Player {
   balance: number;
   /** Amount banked on walking out, or the whole balance if last standing. */
   cashedOut: number;
-  bonanzaTickets: number;
   ticksSurvived: number;
   /**
    * True only for a sole survivor auto-banked by the engine. A voluntary
@@ -92,10 +91,15 @@ export interface RoundResult {
   entrants: number;
   grossHandle: number;
   pot: number;
-  toBonanza: number;
-  toHouse: number;
-  toRevShare: number;
-  /** Pot lost when the field was wiped simultaneously. Diverted to the bonanza. */
+  /** Rake taken for running the game. */
+  toPlatform: number;
+  /** Rake routed to token buybacks and burns. */
+  toBuyback: number;
+  /**
+   * Pot stranded by a simultaneous wipe. Unreachable while `guaranteeSurvivor`
+   * is on — the engine always spares one player — and kept only so a config
+   * that turns the guarantee off cannot lose money silently.
+   */
   wipeLeak: number;
   ticks: number;
   ending: RoundEnding;
@@ -159,7 +163,6 @@ export class Round {
       outcome: "in" as PlayerOutcome,
       balance: this.entryBalance,
       cashedOut: 0,
-      bonanzaTickets: config.bonanza.ticketBase,
       ticksSurvived: 0,
       lastStanding: false,
     }));
@@ -213,13 +216,7 @@ export class Round {
     this.q = this.computeHazard(live.length);
     const liveBefore = live.length;
 
-    // Tickets accrue before the roll, so the tick you die on still counts
-    // unless forfeitOnDeath is set.
-    const ticketGain = this.config.bonanza.ticketPerRisk * this.q;
-    for (const p of live) {
-      p.bonanzaTickets += ticketGain;
-      p.ticksSurvived++;
-    }
+    for (const p of live) p.ticksSurvived++;
 
     // Elimination. Independent per player, which is what makes the shared
     // hazard rate legible to everyone in the shaft.
@@ -246,14 +243,13 @@ export class Round {
       p.outcome = "dead";
       released += p.balance;
       p.balance = 0;
-      if (this.config.bonanza.forfeitOnDeath) p.bonanzaTickets = 0;
     }
     const killed = doomed.length;
 
     const survivors = live.filter((p) => p.outcome === "in");
 
     if (survivors.length === 0) {
-      // Total wipe. The pot has nowhere to go but the jackpot pool.
+      // Total wipe. Unreachable with guaranteeSurvivor on; the pot is stranded.
       this.wipeLeak += released;
       this.events.push({
         tick: this.tick,
@@ -342,9 +338,8 @@ export class Round {
       entrants: this.players.length,
       grossHandle: this.grossHandle,
       pot: this.pot,
-      toBonanza: this.grossHandle * c.rake.bonanza,
-      toHouse: this.grossHandle * c.rake.house,
-      toRevShare: this.grossHandle * c.rake.revShare,
+      toPlatform: this.grossHandle * c.rake.platform,
+      toBuyback: this.grossHandle * c.rake.buyback,
       wipeLeak: this.wipeLeak,
       ticks: this.tick,
       ending: this.ending,
