@@ -130,6 +130,24 @@ const SHARED_COOKIE = "zinc_ice";
 /** The family of hosts this arcade lives on. */
 const SHARED_DOMAIN = ".voidsolana.com";
 
+/*
+ * AND THE OPT-IN ITSELF, WHICH IS NOT THE SEAT.
+ *
+ * `zinc_ice` above is a SEAT -- a bearer token this server minted -- and only
+ * this game can use one. `zinc_wallet` is a far smaller thing: the fact that
+ * the player has connected a wallet somewhere on this domain, and which
+ * address it was. Every other world in the arcade reads it (the portal, the
+ * four tables, the desktop, the map) and every one of them writes it, so that
+ * connecting ANYWHERE means being known everywhere. This game was the last one
+ * only reading -- it wrote the seat and not the opt-in, so a player who
+ * connected here first walked out to a portal that had never heard of them.
+ *
+ * Its VALUE is a claim and never a credential. No world seats anybody because
+ * a cookie names them; each one still puts the question to the wallet itself
+ * through onlyIfTrusted, and this only says the question is worth asking.
+ */
+const NAME_COOKIE = "zinc_wallet";
+
 function onArcadeDomain(): boolean {
   const h = location.hostname;
   return h === "voidsolana.com" || h.endsWith(SHARED_DOMAIN);
@@ -169,10 +187,31 @@ function clearShared(): void {
     `${SHARED_COOKIE}=; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=0; SameSite=Lax; Secure`;
 }
 
+/** Leave the opt-in where the rest of the arcade can find it, or take it back. */
+function writeName(address: string | null): void {
+  if (!onArcadeDomain()) return;
+  const v = address ? encodeURIComponent(address) : "";
+  document.cookie =
+    `${NAME_COOKIE}=${v}; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=${address ? 60 * 60 * 24 * 30 : 0}; SameSite=Lax; Secure`;
+}
+
+/** Has the player connected a wallet anywhere on this domain? */
+function nameCarried(): boolean {
+  try {
+    const m = document.cookie.match(new RegExp("(?:^|; )" + NAME_COOKIE + "=([^;]*)"));
+    return Boolean(m && m[1]);
+  } catch {
+    return false;
+  }
+}
+
 export function walletOptedIn(): boolean {
   // A session carried in from another world on this domain IS an opt-in:
   // the player connected a wallet deliberately, just not on this page.
   if (readShared()) return true;
+  // So is a bare connection made at a table or on the desktop, which mints no
+  // seat here but is still the player saying yes to a wallet on this domain.
+  if (nameCarried()) return true;
   try {
     return localStorage.getItem(WALLET_OPTIN_KEY) === "1";
   } catch {
@@ -180,7 +219,9 @@ export function walletOptedIn(): boolean {
   }
 }
 
-export function setWalletOptIn(on: boolean): void {
+export function setWalletOptIn(on: boolean, address?: string | null): void {
+  // Both directions, always: the opt-in is the arcade's, not this origin's.
+  writeName(on ? (address ?? null) : null);
   try {
     if (on) localStorage.setItem(WALLET_OPTIN_KEY, "1");
     // Disconnecting drops the stored session with the flag: staying

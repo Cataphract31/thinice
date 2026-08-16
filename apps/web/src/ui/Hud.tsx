@@ -179,6 +179,11 @@ export function WalletButton({
   onChange?: (connected: boolean) => void;
 }): JSX.Element {
   const [addr, setAddr] = useState<string | null>(null);
+  /* The way out is ASKED FOR, not offered. Disconnecting used to be a second
+     press on the chip carrying your own address, which is a thing you have to
+     be told; now that press reveals an explicit exit beside it, and pressing
+     the address again puts it away. */
+  const [showExit, setShowExit] = useState(false);
 
   // Reconnect silently ONLY for players who explicitly connected before.
   // Merely having Phantom installed must never start a wallet conversation:
@@ -205,20 +210,28 @@ export function WalletButton({
       return;
     }
     if (shown) {
-      await p.disconnect().catch(() => {});
-      setWalletOptIn(false);
-      setAddr(null);
-      onChange?.(false);
+      setShowExit((v) => !v);
       return;
     }
     try {
       const r = await p.connect();
-      setWalletOptIn(true);
+      // The address goes with the opt-in: every other world on this domain
+      // reads it and is spared asking who you are all over again.
+      setWalletOptIn(true, r.publicKey.toString());
       setAddr(r.publicKey.toString());
       onChange?.(true);
     } catch {
       // Player closed the Phantom prompt; nothing to do.
     }
+  };
+
+  const exit = async (): Promise<void> => {
+    setShowExit(false);
+    await phantom()?.disconnect().catch(() => {});
+    // Disconnecting here disconnects everywhere: the seat and the opt-in both go.
+    setWalletOptIn(false);
+    setAddr(null);
+    onChange?.(false);
   };
 
   // Connected and re-sign stay dark chips — they are status, not a call to
@@ -227,6 +240,7 @@ export function WalletButton({
   // "CONNECT + SIGN IN" and nothing else on the page competes with it.
   const cta = !shown && !expired;
   return (
+    <>
     <button
       onClick={click}
       className={
@@ -253,6 +267,17 @@ export function WalletButton({
       )}
       {shown ? shortAddress(shown) : expired ? "re-sign" : "connect"}
     </button>
+    {shown && showExit && (
+      <button
+        onClick={exit}
+        className="chip label px-2.5 py-1.5"
+        style={{ color: "var(--color-danger)" }}
+        title="Disconnect this wallet from every ZINC world"
+      >
+        disconnect
+      </button>
+    )}
+    </>
   );
 }
 
