@@ -28,6 +28,17 @@ const DEFAULT_BETA = "wss://34.70.75.204.sslip.io";
 export default defineConfig(({ command }) => {
   const url = process.env.VITE_SERVER_URL ?? (command === "build" ? DEFAULT_BETA : undefined);
   return {
+    /*
+     * RELATIVE, BECAUSE THIS GAME HAS TWO HOMES.
+     *
+     * It is served from its own deploy at the root AND from a folder on the
+     * arcade, voidsolana.com/thin-ice/. The folder is the point: a wallet
+     * extension grants access PER SITE, so a game on its own subdomain costs
+     * the player a second permission dialog, and a game in a folder of the
+     * portal's own site costs nothing -- one approval covers every world. A
+     * root-relative base would 404 every asset in one of the two homes.
+     */
+    base: "./",
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
