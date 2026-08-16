@@ -198,6 +198,23 @@ export function setWalletOptIn(on: boolean): void {
 }
 
 function walletSession(): { wallet: string; token: string } | null {
+  /*
+   * THE SHARED SEAT WINS, AND THAT ORDER IS THE WHOLE FIX.
+   *
+   * Reading our own copy first looks like the polite thing to do and is
+   * exactly wrong: the server keeps ONE token per wallet and replaces it on
+   * every fresh signature, so the moment a player signs somewhere else --
+   * the portal, another tab -- the copy in this origin's localStorage is
+   * dead. Preferring it meant resuming on a token the server had already
+   * rotated, being told the session was expired, and asking the player to
+   * sign again. Which is precisely the "I connected on the site and Thin Ice
+   * still made me re-sign" this was built to stop.
+   *
+   * The cookie is written by whoever minted last, so it is never staler than
+   * the local copy, and this file writes both together at every mint.
+   */
+  const shared = readShared();
+  if (shared) return shared;
   try {
     const raw = localStorage.getItem(WALLET_SESSION_KEY);
     if (raw) {
@@ -207,10 +224,9 @@ function walletSession(): { wallet: string; token: string } | null {
       }
     }
   } catch {
-    /* fall through to the shared one */
+    /* no local copy either; a signature it is */
   }
-  // Nothing of our own: whatever the rest of the arcade is holding.
-  return readShared();
+  return null;
 }
 
 function saveWalletSession(wallet: string, token: string): void {
