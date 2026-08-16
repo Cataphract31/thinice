@@ -105,7 +105,74 @@ const WALLET_OPTIN_KEY = "zinc.walletOptIn";
 /** {wallet, token} minted by the server on a successful signature. */
 const WALLET_SESSION_KEY = "zinc.walletSession";
 
+/*
+ * THE SAME SESSION, SHARED WITH THE REST OF THE ARCADE.
+ *
+ * This game now lives at thinice.voidsolana.com, beside cursors., thinline.
+ * and the portal on www. -- and that is the whole point of those hosts:
+ * localStorage is scoped to one origin and can never be handed between them,
+ * but a cookie may be scoped to the registrable domain they share. So the
+ * resume credential is mirrored into one.
+ *
+ * The effect is that a player who connected on the portal -- which does this
+ * exact ceremony there, signs this exact challenge, and is handed this exact
+ * token by this server -- walks in already seated. No second wallet picker,
+ * no second signature. It is `resume` doing what `resume` was written for,
+ * with the token arriving by a road that crosses hosts.
+ *
+ * SAME TRUST LEVEL AS BEFORE, DELIBERATELY. This token is already a bearer
+ * credential kept in web storage; a Lax, Secure, domain-scoped cookie is not
+ * a weaker place to keep it, and the wallets it seats hold play money (see
+ * the note beside `resume` in the server's protocol). It is not the
+ * signature and it cannot produce one.
+ */
+const SHARED_COOKIE = "zinc_ice";
+/** The family of hosts this arcade lives on. */
+const SHARED_DOMAIN = ".voidsolana.com";
+
+function onArcadeDomain(): boolean {
+  const h = location.hostname;
+  return h === "voidsolana.com" || h.endsWith(SHARED_DOMAIN);
+}
+
+function readShared(): { wallet: string; token: string } | null {
+  try {
+    const m = document.cookie.match(new RegExp("(?:^|; )" + SHARED_COOKIE + "=([^;]*)"));
+    if (!m) return null;
+    // `<wallet>.<token>`: base58 and hex, so the separator can never occur
+    // inside either half.
+    const raw = m[1] ?? "";
+    const cut = decodeURIComponent(raw).indexOf(".");
+    if (cut <= 0) return null;
+    const wallet = decodeURIComponent(raw).slice(0, cut);
+    const token = decodeURIComponent(raw).slice(cut + 1);
+    if (!wallet || !token) return null;
+    return { wallet, token };
+  } catch {
+    return null;
+  }
+}
+
+function writeShared(wallet: string, token: string): void {
+  // Off the arcade's own domain a Domain attribute naming it is silently
+  // discarded, so there is nothing to write and pretending otherwise would
+  // make a dev build behave differently from production for no reason.
+  if (!onArcadeDomain()) return;
+  const v = encodeURIComponent(`${wallet}.${token}`);
+  document.cookie =
+    `${SHARED_COOKIE}=${v}; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax; Secure`;
+}
+
+function clearShared(): void {
+  if (!onArcadeDomain()) return;
+  document.cookie =
+    `${SHARED_COOKIE}=; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=0; SameSite=Lax; Secure`;
+}
+
 export function walletOptedIn(): boolean {
+  // A session carried in from another world on this domain IS an opt-in:
+  // the player connected a wallet deliberately, just not on this page.
+  if (readShared()) return true;
   try {
     return localStorage.getItem(WALLET_OPTIN_KEY) === "1";
   } catch {
@@ -121,6 +188,9 @@ export function setWalletOptIn(on: boolean): void {
     else {
       localStorage.removeItem(WALLET_OPTIN_KEY);
       localStorage.removeItem(WALLET_SESSION_KEY);
+      // Disconnecting here disconnects everywhere; a session that survived in
+      // a shared cookie would seat this wallet again on the next page.
+      clearShared();
     }
   } catch {
     /* session-only opt-in still works via the fresh handshake */
@@ -130,16 +200,24 @@ export function setWalletOptIn(on: boolean): void {
 function walletSession(): { wallet: string; token: string } | null {
   try {
     const raw = localStorage.getItem(WALLET_SESSION_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw) as { wallet?: unknown; token?: unknown };
-    if (typeof s.wallet !== "string" || typeof s.token !== "string") return null;
-    return { wallet: s.wallet, token: s.token };
+    if (raw) {
+      const s = JSON.parse(raw) as { wallet?: unknown; token?: unknown };
+      if (typeof s.wallet === "string" && typeof s.token === "string") {
+        return { wallet: s.wallet, token: s.token };
+      }
+    }
   } catch {
-    return null;
+    /* fall through to the shared one */
   }
+  // Nothing of our own: whatever the rest of the arcade is holding.
+  return readShared();
 }
 
 function saveWalletSession(wallet: string, token: string): void {
+  // Both, always: the cookie is what carries this seat to the other worlds,
+  // and rotating the token without updating it would leave them resuming on
+  // a token this server has already replaced.
+  writeShared(wallet, token);
   try {
     localStorage.setItem(WALLET_SESSION_KEY, JSON.stringify({ wallet, token }));
   } catch {
@@ -148,6 +226,7 @@ function saveWalletSession(wallet: string, token: string): void {
 }
 
 function clearWalletSession(): void {
+  clearShared();
   try {
     localStorage.removeItem(WALLET_SESSION_KEY);
   } catch {
