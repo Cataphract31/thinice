@@ -148,6 +148,34 @@ const SHARED_DOMAIN = ".voidsolana.com";
  */
 const NAME_COOKIE = "zinc_wallet";
 
+/**
+ * THE ARCADE'S SESSION, which is the one that ends the second signature.
+ *
+ * `zinc_ice` is a seat this server minted and only this game can use.
+ * `zinc_session` is a seat the ARCADE minted, and every game on this domain
+ * verifies it against the one issuer that made it. A player who signed in
+ * anywhere walks in here already proven, with no Phantom prompt at all -- see
+ * the `arcade` message in the server's protocol.
+ */
+const ARCADE_COOKIE = "zinc_session";
+
+/** Forget a rejected arcade session, everywhere it is read. */
+function clearArcade(): void {
+  if (!onArcadeDomain()) return;
+  document.cookie =
+    `${ARCADE_COOKIE}=; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=0; SameSite=Lax; Secure`;
+}
+
+function arcadeToken(): string | null {
+  try {
+    const m = document.cookie.match(new RegExp("(?:^|; )" + ARCADE_COOKIE + "=([^;]*)"));
+    const raw = m && m[1] ? decodeURIComponent(m[1]) : "";
+    return /^[0-9a-f]{64}$/.test(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 function onArcadeDomain(): boolean {
   const h = location.hostname;
   return h === "voidsolana.com" || h.endsWith(SHARED_DOMAIN);
@@ -212,6 +240,9 @@ export function walletOptedIn(): boolean {
   // So is a bare connection made at a table or on the desktop, which mints no
   // seat here but is still the player saying yes to a wallet on this domain.
   if (nameCarried()) return true;
+  // And an arcade sign-in is the strongest of the three: a signature was
+  // actually given, just not on this page.
+  if (arcadeToken()) return true;
   try {
     return localStorage.getItem(WALLET_OPTIN_KEY) === "1";
   } catch {
@@ -238,6 +269,9 @@ export function walletOptedIn(): boolean {
  */
 export function walletSeated(): boolean {
   if (readShared()) return true;
+  // An arcade session IS a seat -- it was bought with a signature, and this
+  // server accepts it. A player holding one has not "expired" anything.
+  if (arcadeToken()) return true;
   try {
     return Boolean(localStorage.getItem(WALLET_SESSION_KEY));
   } catch {
@@ -612,6 +646,12 @@ export class NetClient {
       case "error": {
         const message = String(m.message ?? "");
         console.warn("server:", message);
+        // A refused arcade session is a DEAD arcade session, and keeping the
+        // cookie would make every reconnection offer the same dead token
+        // forever, silently, while the player sits as a guest wondering why
+        // signing in did nothing. Drop it and the next socket falls through to
+        // this game's own ceremony.
+        if (message === "arcade session rejected") clearArcade();
         // Chat rejections belong in the chat feed, where the person who
         // triggered one is actually looking — not in a console nobody reads.
         if (message.startsWith("chat:")) {
@@ -663,6 +703,17 @@ export class NetClient {
     const stored = walletSession();
     if (stored && !this.signatureWanted) {
       this.send({ t: "resume", wallet: stored.wallet, token: stored.token });
+      return;
+    }
+
+    // Then the arcade's own session, which is the whole point of there being
+    // one issuer: the player signed once, somewhere in the building, and this
+    // table takes that as proof rather than asking them to sign again. The
+    // server checks it with the issuer before seating anybody -- a cookie is
+    // a claim, and this one is no exception.
+    const carried = this.signatureWanted ? null : arcadeToken();
+    if (carried) {
+      this.send({ t: "arcade", token: carried });
       return;
     }
 

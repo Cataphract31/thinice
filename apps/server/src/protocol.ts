@@ -137,6 +137,15 @@ export interface NetState {
 export type ClientMessage =
   | { t: "auth"; wallet: string; sig: string }
   /**
+   * Seat a wallet on a session the ARCADE minted, with no signature here at
+   * all. The whole arcade signs once, at one issuer, and every game verifies
+   * what comes out of it -- six games each issuing their own challenge would
+   * be six signatures to walk around one building, which is exactly what
+   * putting every world on one origin was for. The token is checked against
+   * that issuer over the loopback, never trusted on its face.
+   */
+  | { t: "arcade"; token: string }
+  /**
    * Resumes a wallet session with the bearer token minted at the last
    * signature. Same trust model as guest ids (which are bearer tokens for
    * their balances already): fine for play money, revisit for mainnet.

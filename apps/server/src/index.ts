@@ -45,6 +45,45 @@ function challengeText(nonce: string): string {
  */
 const NONCE_TTL_MS = 120_000;
 
+/**
+ * THE ARCADE'S SIGN-IN, TRUSTED OVER THE LOOPBACK AND NOWHERE ELSE.
+ *
+ * One issuer signs the player in once and every game verifies the token that
+ * comes out of it; the alternative is six games issuing six challenges and a
+ * player signing six times to walk around one building. This asks that issuer
+ * who a token belongs to.
+ *
+ * IT MUST STAY A LOCAL ADDRESS. This function converts "holds a token" into
+ * "is this wallet", so whoever answers it can seat anybody. Pointed at a host
+ * someone else controls, that is the whole ledger handed over. It defaults to
+ * the loopback for that reason, and an override belongs in the unit file next
+ * to the database path, not in a client.
+ */
+const ARCADE_AUTH =
+  process.env.ARCADE_AUTH_URL ?? "http://127.0.0.1:8080/api/auth/me";
+
+async function arcadeWallet(token: string): Promise<string | null> {
+  // Shape-checked before it leaves this process: a token is 64 hex characters
+  // and anything else is not worth a round trip, let alone a header.
+  if (!/^[0-9a-f]{64}$/.test(token)) return null;
+  try {
+    const res = await fetch(ARCADE_AUTH, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { wallet?: unknown };
+    const wallet = String(body.wallet ?? "");
+    // Base58, 32-44 characters: an address and never a namespaced id. Guests
+    // and bots live behind a colon here, and nothing may seat one by token.
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet) ? wallet : null;
+  } catch {
+    // Issuer unreachable or slow. The client still has its own signature
+    // ceremony to fall back on, so silence is the right answer.
+    return null;
+  }
+}
+
 function verify(wallet: string, nonce: string, sigBase64: string): boolean {
   try {
     const pubkey = bs58.decode(wallet);
@@ -349,6 +388,30 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         const token = randomBytes(24).toString("hex");
         db.setAuthToken(wallet, token);
         seat(wallet, false, token);
+        return;
+      }
+
+      case "arcade": {
+        // Same guard as auth: a late arrival must not rotate a token out from
+        // under sessions already resuming on it.
+        if (session) return;
+        const offered = String(msg.token ?? "");
+        void (async () => {
+          const wallet = await arcadeWallet(offered);
+          if (!wallet) {
+            send({ t: "error", message: "arcade session rejected" });
+            return;
+          }
+          // Re-checked after the await: seating twice on one socket is the
+          // same bug the auth case above is commented for.
+          if (session) return;
+          // The arcade proved who this is; the seat is still ours to mint, so
+          // every later connection resumes down the ordinary path and nothing
+          // else in this file has to know the arcade exists.
+          const token = randomBytes(24).toString("hex");
+          db.setAuthToken(wallet, token);
+          seat(wallet, false, token);
+        })();
         return;
       }
 
