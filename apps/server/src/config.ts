@@ -22,8 +22,18 @@ export const CONFIG = {
   port: num("PORT", 8787, 1, 65535),
   /** Where the SQLite file lives. One file, portable, backed up by copying. */
   dbPath: process.env.DB_PATH ?? "zinc.db",
-  /** Devnet demo credit granted to a wallet the first time it is seen. */
-  startingBalanceSol: num("STARTING_BALANCE", 5, 0, 1000),
+  /**
+   * FREE MONEY, AND THERE IS NONE. Every wallet used to be granted a demo
+   * credit the first time it was seen. That is gone: a balance you did not
+   * deposit spends exactly like one you did, so an arcade about to hold real
+   * custody cannot mint one at the door. A new wallet starts at nothing.
+   *
+   * Fixed at 0 rather than defaulted to it, because the box HAD
+   * STARTING_BALANCE=5 in its environment -- a default would have been
+   * silently overridden by the very deployment it was meant to protect. See
+   * the refusal below.
+   */
+  startingBalanceSol: 0,
   /**
    * A round needs this many DISTINCT wallets to seal; below it the lobby rolls
    * over. Distinct, not seats: with multi-plate entries one wallet can fill
@@ -64,7 +74,17 @@ export const CONFIG = {
    * box: state is serialised per client five times a second, so cost grows as
    * clients x plates. Measure before raising it on a machine that matters.
    */
-  bots: num("BOTS", 0, 0, 2000),
+  /*
+   * PRACTICE BOTS, AND THERE ARE NONE. They minted play money for themselves
+   * when broke -- adjustBalance(+1 SOL) -- which is a money printer wearing a
+   * costume, and it may not exist within reach of a real ledger.
+   *
+   * Fixed at 0 for the same reason as the starting balance: the box HAD
+   * BOTS=10, so anything short of a hard zero would have kept them running.
+   * The bot code below this line is now unreachable by construction and is
+   * scheduled for deletion; leaving it wired to a setting was not an option.
+   */
+  bots: 0,
   /**
    * Auto play lapses after this long away from the table, in minutes.
    *
@@ -83,10 +103,27 @@ export const CONFIG = {
   autoLapseMs: num("AUTO_LAPSE_MIN", 10, 0, 1440) * 60_000,
 } as const;
 
-if (CONFIG.bots > 0 && CONFIG.banking) {
+/*
+ * THE PLAY-MONEY SETTINGS ARE REFUSED, NOT IGNORED.
+ *
+ * Both of these were set on the live box. Had they merely been defaulted to
+ * zero, that deployment would have carried on minting exactly as before and
+ * nothing would have said so -- the failure of a silent default is that it
+ * looks identical to success. So an environment still asking for either one
+ * stops the server with the reason, and whoever is deploying finds out at
+ * boot rather than by reconciling custody against a number nobody paid in.
+ */
+if (process.env.BOTS && process.env.BOTS !== "0") {
   throw new Error(
-    "BOTS>0 with banking enabled: practice bots may never share a table with real money. " +
-      "Set BANKING=off (play-money mode) or BOTS=0.",
+    `BOTS=${process.env.BOTS}: practice bots were removed. They minted their own ` +
+      "play money, which may not exist near a real ledger. Unset BOTS.",
+  );
+}
+
+if (process.env.STARTING_BALANCE && process.env.STARTING_BALANCE !== "0") {
+  throw new Error(
+    `STARTING_BALANCE=${process.env.STARTING_BALANCE}: free starting credit was removed. ` +
+      "A wallet funds itself by depositing. Unset STARTING_BALANCE.",
   );
 }
 
