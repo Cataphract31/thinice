@@ -219,6 +219,42 @@ export function walletOptedIn(): boolean {
   }
 }
 
+/**
+ * Did this player ever hold a SEAT here, as opposed to merely connecting a
+ * wallet somewhere in the arcade?
+ *
+ * TWO QUESTIONS THAT LOOK LIKE ONE, and answering both with `walletOptedIn`
+ * is a bug the moment that function learns about `zinc_wallet`:
+ *
+ *   "may I reconnect the wallet without a popup?"  -- a wallet connected at
+ *      any table on this domain is a perfectly good yes.
+ *   "did a seat this player HAD just die?"          -- only a seat can answer
+ *      that, and a name cookie knows nothing about seats.
+ *
+ * Conflating them made the button say "re-sign" to anybody who had connected
+ * a wallet anywhere in the arcade and simply never played here -- an alarming
+ * word for a first visit, and a claim that something had expired when nothing
+ * ever existed. `expired` asks this one.
+ */
+export function walletSeated(): boolean {
+  if (readShared()) return true;
+  try {
+    return Boolean(localStorage.getItem(WALLET_SESSION_KEY));
+  } catch {
+    return false;
+  }
+}
+
+/** The address the arcade last carried, if any -- a name, never a credential. */
+export function walletCarried(): string | null {
+  try {
+    const m = document.cookie.match(new RegExp("(?:^|; )" + NAME_COOKIE + "=([^;]*)"));
+    return m && m[1] ? decodeURIComponent(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function setWalletOptIn(on: boolean, address?: string | null): void {
   // Both directions, always: the opt-in is the arcade's, not this origin's.
   writeName(on ? (address ?? null) : null);

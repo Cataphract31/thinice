@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { DEFAULT_CONFIG, totalRake } from "@zinc/engine";
 import type { AutoSettings, Snapshot } from "@/game/client";
-import { setWalletOptIn, walletOptedIn } from "@/game/net";
+import { setWalletOptIn, walletCarried, walletOptedIn, walletSeated } from "@/game/net";
 import { shortAddress } from "@/game/names";
 import { CharArt } from "./Chars";
 import {
@@ -199,9 +199,17 @@ export function WalletButton({
   // The seat is the truth when there is one; the demo falls back to Phantom.
   const seatAddr = seat && !seat.guest ? seat.address : null;
   const shown = seat ? seatAddr : addr;
-  // Opted in, but the server seated a guest: the session token died and the
-  // wallet needs one fresh signature to get its ledger back.
-  const expired = seat !== undefined && seat.guest && walletOptedIn();
+  // Held a seat here, and the server seated a guest anyway: that session's
+  // token died and the wallet needs one fresh signature to get its ledger
+  // back. It asks walletSeated and NOT walletOptedIn, because a wallet
+  // connected at some other table on this domain has never had a seat here to
+  // lose -- telling that player to "re-sign" claims something expired when
+  // nothing ever existed.
+  const expired = seat !== undefined && seat.guest && walletSeated();
+  // Known to the arcade but never seated here: this is a first sign-in, not a
+  // repair, and saying so is the difference between a button that reads as
+  // broken and one that reads as a step.
+  const known = !shown && !expired && Boolean(walletCarried());
 
   const click = async (): Promise<void> => {
     const p = phantom();
@@ -265,7 +273,7 @@ export function WalletButton({
           <path d="M10.5 8.25h4" stroke="currentColor" strokeWidth="1.6" />
         </svg>
       )}
-      {shown ? shortAddress(shown) : expired ? "re-sign" : "connect"}
+      {shown ? shortAddress(shown) : expired ? "re-sign" : known ? "sign in" : "connect"}
     </button>
     {shown && showExit && (
       <button
