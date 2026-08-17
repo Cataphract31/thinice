@@ -128,7 +128,11 @@ export class Database {
   }
 
   /**
-   * Finds a player, creating them with the devnet starting credit if new.
+   * Finds a player, creating them at ZERO if new.
+   *
+   * There is no starting credit. A wallet funds itself by depositing, and
+   * until it does it owns nothing -- which is the only balance an arcade
+   * holding real custody can honestly hand to somebody who has paid nothing.
    * Read-only for existing rows: this runs on every broadcast for every
    * session, and stamping seenAt here was a disk write 20 times a second per
    * player. Presence is stamped by `touch`, at connect and join.
@@ -149,7 +153,7 @@ export class Database {
         `INSERT INTO players (wallet, balance, charId, createdAt, seenAt)
          VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(wallet, toLamports(CONFIG.startingBalanceSol), charId, now, now);
+      .run(wallet, 0, charId, now, now);
     return this.db
       .prepare("SELECT * FROM players WHERE wallet = ?")
       .get(wallet) as unknown as PlayerRow;

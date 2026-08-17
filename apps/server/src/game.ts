@@ -24,149 +24,6 @@ export function shortAddress(addr: string): string {
   return addr.length <= 10 ? addr : `${addr.slice(0, 4)}…${addr.slice(-4)}`;
 }
 
-/**
- * Practice-bot identities. Namespaced like guests so they can never collide
- * with (or impersonate) a real address, and each keeps ONE persistent wallet
- * so its profile card shows a genuine accumulated record rather than invented
- * numbers. The display name is the label: every surface — roster, lattice
- * profile, winner scene — says `bot·rime`, never a wallet-shaped string.
- *
- * The fleet was reset with the move to the flat 2% rake: the database it had
- * accumulated its record in was dropped, so every bot below starts from an
- * empty ledger. Retiring one is just dropping its name from the roster, since
- * a wallet that is never seated again can neither play nor earn.
- */
-/*
- * The roster is generated, not hand-maintained.
- *
- * A fixed list meant the bot ceiling was silently the list's length, and every
- * increase needed a matching block of hand-tuned temperaments — which is how a
- * request for sixteen bots quietly seated ten. These are real glaciology and
- * sea-ice terms so the table still reads as a cast rather than bot001..bot400,
- * and past the end of the list the roster laps with a numeral.
- */
-const BOT_ROOTS = [
-  "rime", "nilas", "hoar", "graupel", "brash", "sleet", "frazil", "calving",
-  "verglas", "firn", "floe", "shuga", "growler", "hummock", "serac", "moulin",
-  "bergy", "grease", "pancake", "candle", "anchor", "fast", "drift", "ridge",
-  "lead", "polynya", "sastrugi", "neve", "crevasse", "icefall", "bergschrund", "till",
-  "erratic", "moraine", "drumlin", "esker", "kettle", "outwash", "varve", "roche",
-  "cirque", "arete", "horn", "tarn", "col", "nunatak", "ogive", "seracfall",
-];
-
-/** Stable per-name index into the roster: `bot:rime`, then `bot:rime2`. */
-function botNameAt(i: number): string {
-  const root = BOT_ROOTS[i % BOT_ROOTS.length]!;
-  const lap = Math.floor(i / BOT_ROOTS.length);
-  return lap === 0 ? root : `${root}${lap + 1}`;
-}
-
-/**
- * A fixed temperament per bot name, so the table reads as characters rather
- * than one policy in eight hats — and so an endgame has texture: scared money
- * scrambles out the moment it is heads-up while the degen sits on a big
- * target, instead of every bot bailing the instant a 1v1 formed and tying
- * the human's exit into yet another dead heat.
- *
- * target: exit multiple range, drawn fresh each round. panic: the hazard
- * level where nerves start. nerve: how hard they act on those nerves.
- * guts: heads-up spine — low folds fast, high holds for the target.
- */
-const BOT_STYLE: Record<
-  string,
-  { t0: number; t1: number; panic: number; nerve: number; guts: number }
-> = {
-  // Rebalanced braver across the whole roster: the old timid end bailed around
-  // 1.15x, which put a wall of exits on the board before the multiplier had
-  // gone anywhere and made every round feel like it ended before it started.
-  // Nobody now leaves below 1.30x, the middle sits near 2x, and the deep end
-  // rides past 5x. The ORDERING is untouched — the point was never that every
-  // bot should be brave, it is that the table needs both the wallet that goes
-  // early and the one that will not leave, or an endgame has no texture.
-
-  // Cautious: still first out, but they take something with them now.
-  verglas: { t0: 1.3, t1: 1.75, panic: 0.04, nerve: 0.8, guts: 0.2 },
-  rime: { t0: 1.35, t1: 1.9, panic: 0.042, nerve: 0.75, guts: 0.25 },
-  firn: { t0: 1.4, t1: 2.0, panic: 0.045, nerve: 0.7, guts: 0.3 },
-  sleet: { t0: 1.45, t1: 2.1, panic: 0.048, nerve: 0.65, guts: 0.35 },
-
-  // The middle of the table.
-  nilas: { t0: 1.55, t1: 2.4, panic: 0.055, nerve: 0.5, guts: 0.45 },
-  floe: { t0: 1.65, t1: 2.6, panic: 0.058, nerve: 0.46, guts: 0.5 },
-  brash: { t0: 1.6, t1: 3.6, panic: 0.06, nerve: 0.45, guts: 0.55 },
-  calving: { t0: 1.75, t1: 2.8, panic: 0.062, nerve: 0.42, guts: 0.55 },
-
-  // Hold well past break-even and mean it heads-up.
-  shuga: { t0: 1.8, t1: 3.4, panic: 0.068, nerve: 0.35, guts: 0.62 },
-  hoar: { t0: 2.0, t1: 3.4, panic: 0.07, nerve: 0.32, guts: 0.68 },
-  growler: { t0: 2.1, t1: 3.2, panic: 0.072, nerve: 0.3, guts: 0.72 },
-  hummock: { t0: 2.2, t1: 3.6, panic: 0.078, nerve: 0.25, guts: 0.78 },
-
-  // The deep end. moulin is the one that dies on the ice rather than leave.
-  frazil: { t0: 2.4, t1: 4.2, panic: 0.085, nerve: 0.2, guts: 0.85 },
-  serac: { t0: 2.6, t1: 5.0, panic: 0.092, nerve: 0.16, guts: 0.9 },
-  graupel: { t0: 2.9, t1: 5.8, panic: 0.1, nerve: 0.12, guts: 0.95 },
-  moulin: { t0: 3.2, t1: 7.0, panic: 0.11, nerve: 0.08, guts: 0.99 },
-};
-
-/**
- * Every other bot's temperament, derived from its name.
- *
- * The sixteen above are hand-tuned and stay that way — they are the characters
- * regulars learn. Past them the roster is generated, so the personality has to
- * be too, or a big room fills with one policy in four hundred hats. A stable
- * hash places each name on the same timid-to-degen spectrum the curated set
- * spans, which means the SPREAD survives at any size: a four-hundred-plate
- * room still has its first-crack bolters and its will-not-leave whales, in
- * roughly the proportions the small room had.
- */
-function derivedStyle(name: string): { t0: number; t1: number; panic: number; nerve: number; guts: number } {
-  // FNV-1a over the name, mapped to 0..1. Deterministic, so a bot's character
-  // survives restarts exactly like the hand-tuned ones.
-  let h = 0x811c9dc5;
-  for (let i = 0; i < name.length; i++) {
-    h ^= name.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  const u = h / 0xffffffff;
-  // Skew toward the middle so the extremes stay rare and keep their meaning.
-  const k = (u + (h >>> 16) / 0x10000) / 2;
-  return {
-    t0: 1.3 + k * 1.9,
-    t1: 1.75 + k * 5.25 + (1 - k) * 0.5,
-    panic: 0.04 + k * 0.07,
-    nerve: 0.8 - k * 0.72,
-    guts: 0.2 + k * 0.79,
-  };
-}
-
-/** Hand-tuned where one exists, derived otherwise. */
-function styleFor(name: string): { t0: number; t1: number; panic: number; nerve: number; guts: number } {
-  return BOT_STYLE[name] ?? derivedStyle(name);
-}
-const isBot = (wallet: string): boolean => wallet.startsWith("bot:");
-
-/**
- * Bots fill the lattice and stop there. Nothing is held back.
- *
- * A reserve existed to stop practice traffic locking real players out of a
- * small room. It buys nothing at launch, where there are no bots at all to
- * crowd anyone — every plate belongs to somebody real, and the only thing a
- * reservation could do there is make the room smaller than it is.
- */
-const botPlateCeiling = (fieldMax: number): number => fieldMax;
-
-
-/*
- * The clamp in config.ts and this roster have to agree, and nothing structural
- * forces them to. If the ceiling is ever raised past the names available, the
- * seating loop indexes a name it already seated, returns, and the room quietly
- * runs short of the configured crowd forever — a silent shortfall is the worst
- * possible failure here, because it looks exactly like everything working.
- */
-if (BOT_ROOTS.length !== new Set(BOT_ROOTS).size) {
-  throw new Error("BOT_ROOTS contains duplicates: each bot is one wallet, keyed by name");
-}
 
 
 function sha256Hex(s: string): string {
@@ -184,7 +41,7 @@ function commitPreimage(roundId: number, seedHex: string, rulesHash: string): st
 
 /**
  * One occupant of the lattice for one round. Every seat is a human with a
- * wallet — this game has no house players, by design and on purpose: a bot in
+ * wallet — this game has no house players, by design and on purpose: a seat in
  * a PvP round is the house playing its own customers.
  */
 interface Seat {
@@ -253,10 +110,6 @@ export class GameServer {
    *  It faced the final roll and survived it — the survivor's claim, even
    *  though the walk-out left the engine with nobody to flag. */
   private outlastedWallet: string | null = null;
-  /** Practice bots this lobby aims for (drawn per round), and their brains. */
-  private botTarget = 0;
-  private nextBotAt = 0;
-  private botStrategies = new Map<number, Strategy>();
   private lastBroadcast = 0;
   private teamWins: Record<string, number>;
 
@@ -273,56 +126,6 @@ export class GameServer {
     this.rulesHash = sha256Hex(canonicalConfig(this.config));
     this.roundId = db.lastRoundId();
     this.teamWins = db.teamWins();
-    this.dealBotFaces();
-  }
-
-  /**
-   * Gives every bot a face no other bot is wearing.
-   *
-   * Characters are dealt at random when a wallet is first seen, which for a
-   * fixed cast of eight drawn from twelve is a birthday problem: a collision
-   * is the common case, not the rare one, and the live table opened with
-   * three identical ansems standing on it. Eight strangers who look like
-   * three people reads as a rendering bug long before it reads as a
-   * coincidence.
-   *
-   * A bot keeps whatever it already wears unless an earlier bot has claimed
-   * it, so faces stay put across restarts and only the duplicates move. Runs
-   * at boot, before anyone is seated, and is a no-op once the cast is unique.
-   */
-  private dealBotFaces(): void {
-    // With more bots than characters, duplicates are unavoidable — but they
-    // must be SPREAD, not defaulted. Returning early here (the old behaviour,
-    // once the roster outgrew the twelve faces) left every bot beyond the
-    // first twelve on the schema's default charId: a lattice with eight
-    // identical chads standing on it.
-    //
-    // So: keep any face a bot already holds that nothing else has claimed,
-    // and deal the rest round-robin. Each character is used at most one more
-    // time than any other, and a face repeats only after all twelve are out.
-    const taken = new Set<string>();
-    const needFace: string[] = [];
-    for (let i = 0; i < CONFIG.bots; i++) {
-      const wallet = `bot:${botNameAt(i)}`;
-      const current = this.db.player(wallet).charId;
-      if (CHARS.includes(current) && !taken.has(current)) {
-        taken.add(current);
-        continue;
-      }
-      needFace.push(wallet);
-    }
-    let next = 0;
-    for (const wallet of needFace) {
-      const free = CHARS.find((c) => !taken.has(c));
-      if (free) {
-        taken.add(free);
-        this.db.setChar(wallet, free);
-        continue;
-      }
-      // Every face is out; start a second lap in a stable order.
-      this.db.setChar(wallet, CHARS[next % CHARS.length]!);
-      next++;
-    }
   }
 
   start(): void {
@@ -445,130 +248,9 @@ export class GameServer {
     this.commit = sha256Hex(commitPreimage(this.roundId, this.seedHex, this.rulesHash));
     this.db.openRound(this.roundId, this.commit, Date.now());
 
-    // Every configured bot, every round. The old "breathing" random draw
-    // could pick 1, and one bot cannot meet the two-wallet minimum: the
-    // lobby then waited forever on a human, which is the exact opposite of
-    // a room that is supposed to run around the clock.
-    this.botTarget = CONFIG.bots;
-    this.nextBotAt = Date.now() + 1500;
-    this.botStrategies.clear();
 
     this.autoJoin();
     this.broadcast(true);
-  }
-
-  /**
-   * Trickles practice bots into the lobby, one every second or two — with or
-   * without an audience. The room runs around the clock, so a visitor always
-   * walks into a live game instead of an empty lobby waiting for strangers.
-   */
-  private fillBots(now: number): void {
-    if (this.botTarget <= 0 || now < this.nextBotAt) return;
-    // Bots may not take the whole lattice. They seat on a timer during the
-    // lobby and a human clicks whenever they arrive, so without a reserved
-    // slice the room fills with practice traffic and a real player is told
-    // "the lattice is full" by a room containing nobody real. Observed live:
-    // sixteen bots buying richer stacks reach the cap on their own.
-    if (this.seats.size >= botPlateCeiling(this.config.field.max)) return;
-    let seated = 0;
-    for (const w of this.seatsOf.keys()) if (isBot(w)) seated++;
-    if (seated >= this.botTarget) return;
-    // Spacing is DERIVED from the window and the target, never a fixed pair
-    // of magic numbers. A flat 450-1200ms filled a room of eight with time to
-    // spare and then, at sixteen, silently seated ten and sealed — the room
-    // simply looked thinner than its own configuration, with nothing anywhere
-    // reporting the shortfall. Aim the whole target inside three quarters of
-    // the lobby so the last bot still lands well before the ice does, and
-    // keep the jitter so arrivals trickle rather than march.
-    const budget = this.config.timing.lobbyMs * 0.75;
-    const gap = Math.max(35, Math.min(1200, budget / Math.max(1, this.botTarget)));
-    this.nextBotAt = now + gap * (0.6 + this.rng.next() * 0.8);
-
-    const name = botNameAt(seated);
-    const wallet = `bot:${name}`;
-    if (this.seatsOf.has(wallet)) return;
-    // Stacks run deeper than they did: a bit over half still buy a single
-    // plate, but the tail now reaches the per-wallet cap, so clusters of four
-    // and five show up on the ice and cash-out-all has something to act on.
-    // Averages about 1.75 plates a bot — deliberately short of the point
-    // where sixteen bots would need more of the lattice than they are
-    // allowed, since the headroom above would then simply seat fewer of them.
-    const roll = this.rng.next();
-    const plates =
-      roll < 0.55 ? 1 : roll < 0.8 ? 2 : roll < 0.92 ? 3 : roll < 0.98 ? 4 : 5;
-    const stake = toLamports(this.config.entry);
-    const row = this.db.player(wallet);
-    // Play money is minted for a broke bot: its losses flow to real players
-    // and its stakes fund the pools, so the float has to come from somewhere.
-    if (row.balance < stake * plates) {
-      this.db.adjustBalance(wallet, toLamports(1));
-    }
-    const fresh = this.db.player(wallet);
-    const lifetime = {
-      wagered: toSol(fresh.wagered),
-      net: toSol(fresh.returned - fresh.wagered),
-      hitRate: fresh.roundsPlayed > 0 ? fresh.roundsWon / fresh.roundsPlayed : 0,
-      best: fresh.bestMultiple,
-    };
-    // ONE brain across the whole stack: a multi-plate owner decides once per
-    // tick and every plate follows, exactly like the human cash-out-all
-    // button. Separate brains would scatter one owner's exits across ticks.
-    const brain = this.makeBotBrain(name);
-    const ids: number[] = [];
-    for (let i = 0; i < plates; i++) {
-      if (this.seats.size >= botPlateCeiling(this.config.field.max)) break;
-      const id = this.nextSeatId++;
-      if (!this.db.takeEntry(this.roundId, wallet, stake, id)) break;
-      this.seats.set(id, { id, wallet, name: `bot·${name}`, charId: fresh.charId, lifetime });
-      this.botStrategies.set(id, brain);
-      ids.push(id);
-    }
-    if (ids.length === 0) return;
-    this.seatsOf.set(wallet, ids);
-    this.broadcast(true);
-  }
-
-  /**
-   * A practice bot's exit policy: its named temperament, a target multiple
-   * drawn from that temperament's range, and nerves that fray as the hazard
-   * climbs. Draws ONLY from the presentation RNG — a strategy that touched
-   * the round's committed stream would shift the elimination sequence and
-   * break every player's replay verification.
-   */
-  private makeBotBrain(name: string): Strategy {
-    // styleFor, not a fallback to one hand-tuned entry: falling back to a
-    // single style gave every generated bot nilas's exact temperament, which
-    // is a four-hundred-plate room with one personality in it.
-    const s = styleFor(name);
-    const target = s.t0 + this.rng.next() * (s.t1 - s.t0);
-    const panicAt = s.panic + this.rng.next() * 0.015;
-    const breakEven = 1 / (1 - totalRake(this.config));
-    // Memoised per tick: a multi-plate stack shares this one closure, and
-    // the random panic path must not roll separately per plate or one
-    // owner's exits scatter across ticks instead of banking together.
-    let decidedTick = -1;
-    let decision = false;
-    return (ctx) => {
-      if (ctx.tick === decidedTick) return decision;
-      decidedTick = ctx.tick;
-      decision = ((): boolean => {
-        if (ctx.tick <= this.config.hazard.graceTicks) return false;
-        if (ctx.multiple < breakEven) return false;
-        if (ctx.multiple >= target) return true;
-        // Heads-up is decided by guts, not by the hazard gauge: the timid
-        // fold within a few ticks, the gutsy sit on their target and make
-        // the human beat them to it.
-        if (ctx.liveCount <= 2) return this.rng.next() < (1 - s.guts) * 0.22;
-        // Nerves need something to protect. The early hazard spike used to
-        // panic the timid straight out at 1.0-something, which read as
-        // broken cowardice from the rail — no real person pays 5% rake to
-        // scalp 4%. Below a modest profit the only exits are the target and
-        // the heads-up fold. Costs nothing: every strategy has the same EV.
-        if (ctx.multiple < breakEven * 1.07) return false;
-        return ctx.q > panicAt && this.rng.next() < s.nerve * 0.12;
-      })();
-      return decision;
-    };
   }
 
   /**
@@ -763,14 +445,13 @@ export class GameServer {
     // eliminations, which is exactly what the replay a player verifies re-runs.
     const entrants: Entrant[] = [];
     for (const seat of this.seats.values()) {
-      // Humans' exits arrive over the wire, so their engine strategy never
-      // fires; practice bots decide in-tick through their brain, and those
-      // exits land in the cash-out log exactly like a button press — the
-      // replay a player verifies re-runs them from the record.
+      // Every exit arrives over the wire, so the engine-side strategy never
+      // fires. It is kept as a no-op because the engine's Entrant shape wants
+      // one; nothing in this game decides in-tick any more.
       entrants.push({
         id: seat.id,
-        strategyId: isBot(seat.wallet) ? "bot" : "human",
-        strategy: this.botStrategies.get(seat.id) ?? (() => false),
+        strategyId: "human",
+        strategy: () => false,
       });
     }
     this.settled.clear();
@@ -785,15 +466,16 @@ export class GameServer {
     const now = Date.now();
     if (this.phase === "lobby") {
       this.autoEnter();
-      this.fillBots(now);
       if (now >= this.phaseEnd) {
         // Distinct WALLETS, not seats: with multi-betting one wallet can hold
         // several plates, and a round whose every plate is one person is not
         // PvP — it is one player paying rake to shuffle money between their
-        // own hands. Too thin to be a game: roll the lobby instead. Practice
-        // bots count toward the minimum and may carry a round alone: the
-        // play-money room runs continuously so the ticket economies never
-        // stop paying, humans present or not.
+        // own hands. Too thin to be a game: roll the lobby instead.
+        //
+        // Nothing pads this number any more. The room used to be kept alive
+        // by practice bots that counted toward the minimum and could carry a
+        // round alone; with them gone, an empty lobby simply rolls over until
+        // real players arrive, which is the honest behaviour.
         if (this.seatsOf.size >= CONFIG.minEntrants) this.seal();
         else this.phaseEnd = now + this.config.timing.lobbyMs;
       }

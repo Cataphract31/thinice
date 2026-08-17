@@ -23,18 +23,6 @@ export const CONFIG = {
   /** Where the SQLite file lives. One file, portable, backed up by copying. */
   dbPath: process.env.DB_PATH ?? "zinc.db",
   /**
-   * FREE MONEY, AND THERE IS NONE. Every wallet used to be granted a demo
-   * credit the first time it was seen. That is gone: a balance you did not
-   * deposit spends exactly like one you did, so an arcade about to hold real
-   * custody cannot mint one at the door. A new wallet starts at nothing.
-   *
-   * Fixed at 0 rather than defaulted to it, because the box HAD
-   * STARTING_BALANCE=5 in its environment -- a default would have been
-   * silently overridden by the very deployment it was meant to protect. See
-   * the refusal below.
-   */
-  startingBalanceSol: 0,
-  /**
    * A round needs this many DISTINCT wallets to seal; below it the lobby rolls
    * over. Distinct, not seats: with multi-plate entries one wallet can fill
    * several seats, and a "PvP round" whose every plate is one person is not a
@@ -58,34 +46,6 @@ export const CONFIG = {
    */
   banking: (process.env.BANKING ?? "on").toLowerCase() !== "off",
   /**
-   * Up to this many PRACTICE bots keep the play-money room alive. 0 — the
-   * default — means bots do not exist. Where enabled, they play CONTINUOUSLY
-   * (humans present or not, so a visitor always walks into a live game) as
-   * full participants: same rake, same pot, same odds per entry. The README's
-   * "no hidden bots" promise is enforced by two structural
-   * rules: every practice bot is labelled `bot·name` on every
-   * surface, and the server REFUSES TO BOOT with bots and banking both on —
-   * a bot may never share a table with real money.
-   */
-  /*
-   * No small ceiling. The roster generates names and temperaments, the hazard
-   * curve reads crowding as a FRACTION so it is scale-free, and the lattice
-   * renderer was built for a thousand cells. What actually bounds this is the
-   * box: state is serialised per client five times a second, so cost grows as
-   * clients x plates. Measure before raising it on a machine that matters.
-   */
-  /*
-   * PRACTICE BOTS, AND THERE ARE NONE. They minted play money for themselves
-   * when broke -- adjustBalance(+1 SOL) -- which is a money printer wearing a
-   * costume, and it may not exist within reach of a real ledger.
-   *
-   * Fixed at 0 for the same reason as the starting balance: the box HAD
-   * BOTS=10, so anything short of a hard zero would have kept them running.
-   * The bot code below this line is now unreachable by construction and is
-   * scheduled for deletion; leaving it wired to a setting was not an option.
-   */
-  bots: 0,
-  /**
    * Auto play lapses after this long away from the table, in minutes.
    *
    * Auto is an intent for a sitting, not a standing order. Left permanent, a
@@ -103,40 +63,6 @@ export const CONFIG = {
   autoLapseMs: num("AUTO_LAPSE_MIN", 10, 0, 1440) * 60_000,
 } as const;
 
-/*
- * THE PLAY-MONEY SETTINGS ARE REFUSED, NOT IGNORED.
- *
- * Both of these were set on the live box. Had they merely been defaulted to
- * zero, that deployment would have carried on minting exactly as before and
- * nothing would have said so -- the failure of a silent default is that it
- * looks identical to success. So an environment still asking for either one
- * stops the server with the reason, and whoever is deploying finds out at
- * boot rather than by reconciling custody against a number nobody paid in.
- */
-if (process.env.BOTS && process.env.BOTS !== "0") {
-  throw new Error(
-    `BOTS=${process.env.BOTS}: practice bots were removed. They minted their own ` +
-      "play money, which may not exist near a real ledger. Unset BOTS.",
-  );
-}
-
-if (process.env.STARTING_BALANCE && process.env.STARTING_BALANCE !== "0") {
-  throw new Error(
-    `STARTING_BALANCE=${process.env.STARTING_BALANCE}: free starting credit was removed. ` +
-      "A wallet funds itself by depositing. Unset STARTING_BALANCE.",
-  );
-}
-
-// Bots supply at most CONFIG.bots distinct wallets toward the seal minimum.
-// A minimum the bots cannot reach alone makes the around-the-clock room
-// silently wait for humans forever — worth a loud line at boot, because the
-// failure mode at runtime is just a lobby that never seals, with no log.
-if (CONFIG.bots > 0 && CONFIG.minEntrants > CONFIG.bots) {
-  console.warn(
-    `MIN_ENTRANTS=${CONFIG.minEntrants} exceeds BOTS=${CONFIG.bots}: ` +
-      "the room cannot seal without humans present.",
-  );
-}
 
 /**
  * The character roster. Lives here because both the game (whitelisting what a
