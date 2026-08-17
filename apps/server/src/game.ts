@@ -11,7 +11,7 @@ import {
   type GameConfig,
 } from "@zinc/engine";
 import { CONFIG, toLamports, toSol } from "./config.ts";
-import type { Database } from "./db.ts";
+import { Database } from "./db.ts";
 import { LedgerError, type ArcadeLedger } from "./arcade.ts";
 import type { NetChat, NetHistory, NetPlayer, NetState } from "./protocol.ts";
 
@@ -138,6 +138,23 @@ export class GameServer {
     this.teamWins = db.teamWins();
   }
 
+  /**
+   * The player record behind a session -- REAL FOR A PLAYER, SYNTHETIC FOR A
+   * SPECTATOR.
+   *
+   * `db.player()` inserts when it does not find a row, which is right for a
+   * wallet and wrong for somebody who is only watching. Every path that reached
+   * for a row went through it, so the auto-play sweep alone was enough to mint
+   * a `players` row for a spectator who had done nothing but connect -- which
+   * is exactly what it did until a file-backed database was checked instead of
+   * an in-memory one.
+   *
+   * One accessor, so there is no second place to forget.
+   */
+  private rowFor(s: Session) {
+    return s.guest ? Database.spectatorRow(s.wallet) : this.db.player(s.wallet);
+  }
+
   /** Remember what the books last said about a wallet. Display only. */
   private noteBalance(wallet: string, b: { freeLamports: number; heldLamports: number }): void {
     this.balances.set(wallet, { free: b.freeLamports, held: b.heldLamports });
@@ -221,7 +238,7 @@ export class GameServer {
    * the sender's own copy coming back is the delivery receipt.
    */
   chat(s: Session, text: string): void {
-    const row = this.db.player(s.wallet);
+    const row = this.rowFor(s);
     const msg: NetChat & { wallet: string } = {
       id: this.nextChatId++,
       wallet: s.wallet,
@@ -301,7 +318,8 @@ export class GameServer {
 
   private autoJoin(): void {
     for (const s of this.uniqueSessions()) {
-      const row = this.db.player(s.wallet);
+      if (s.guest) continue;
+      const row = this.rowFor(s);
       // Deliberately not awaited: this runs from the lobby tick, which is
       // synchronous and must stay that way. Each buy settles on its own and a
       // failure is already a normal outcome -- see autoBuy.
@@ -347,7 +365,7 @@ export class GameServer {
     const id = this.nextSeatId++;
     // Read BEFORE the stake moves, so the lifetime snapshot on the profile card
     // is "as of stepping on" rather than dipping by one unsettled stake.
-    const row = this.db.player(s.wallet);
+    const row = this.rowFor(s);
 
     /*
      * THE MONEY MOVES FIRST, AND IN THE ARCADE'S BOOKS.
@@ -446,7 +464,7 @@ export class GameServer {
     }
     void this.refreshBalance(s.wallet);
     this.seatsOf.delete(s.wallet);
-    const row = this.db.player(s.wallet);
+    const row = this.rowFor(s);
     if (row.autoEnabled) {
       this.db.setAuto(s.wallet, false, row.autoTarget, row.autoPlates ?? 1);
     }
@@ -625,8 +643,8 @@ export class GameServer {
     for (const s of this.uniqueSessions()) {
       // Any seat means auto already ran (or the player bought by hand); auto
       // never tops up a position the player chose themselves.
-      if (this.seatsOf.has(s.wallet)) continue;
-      const row = this.db.player(s.wallet);
+      if (this.seatsOf.has(s.wallet) || s.guest) continue;
+      const row = this.rowFor(s);
       if (row.autoEnabled) void this.autoBuy(s, row.autoPlates ?? 1).catch(() => {});
     }
   }
@@ -909,7 +927,7 @@ export class GameServer {
   private stateFor(s: Session): NetState {
     const cfg = this.config;
     const round = this.round;
-    const row = this.db.player(s.wallet);
+    const row = this.rowFor(s);
     const players = [...this.seats.values()].map((seat) => this.viewOf(seat, s.wallet));
     const live = players.filter((p) => p.outcome === "in").length;
     const dead = players.filter((p) => p.outcome === "dead").length;

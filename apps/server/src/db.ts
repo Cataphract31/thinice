@@ -141,6 +141,32 @@ export class Database {
     this.db.exec("ALTER TABLE players DROP COLUMN balance");
   }
 
+  /**
+   * A row for somebody who is only watching, and who therefore gets no row.
+   *
+   * Spectators are not persisted. They cannot stake -- the ledger has no
+   * account for a `guest:` id and refuses -- so a `players` row for one would
+   * accumulate forever, carry stats that can never change, and sit in every
+   * query about who plays this game. The screen needs a face and a set of
+   * zeroes; that is all this is.
+   */
+  static spectatorRow(wallet: string): PlayerRow {
+    return {
+      wallet,
+      charId: CHARS[Math.floor(Math.random() * CHARS.length)]!,
+      autoEnabled: 0,
+      autoTarget: 2,
+      autoPlates: 1,
+      roundsPlayed: 0,
+      roundsWon: 0,
+      wagered: 0,
+      returned: 0,
+      bestMultiple: 0,
+      createdAt: Date.now(),
+      seenAt: Date.now(),
+    };
+  }
+
   player(wallet: string): PlayerRow {
     const found = this.db
       .prepare("SELECT * FROM players WHERE wallet = ?")

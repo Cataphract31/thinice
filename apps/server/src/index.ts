@@ -203,6 +203,28 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
   const seat = (wallet: string, guest: boolean, token?: string): void => {
     if (session) return;
+    /*
+     * A SPECTATOR IS NOT A PLAYER RECORD.
+     *
+     * Watching used to mint a `players` row, auto-play settings and all, for an
+     * id that can never stake -- the ledger has no account for `guest:` and
+     * refuses. Those rows accumulated forever and turned up in every query
+     * about who plays this game. Nothing is written for a spectator now; the
+     * screen gets a face and a set of zeroes from Database.spectatorRow.
+     */
+    if (guest) {
+      session = {
+        wallet,
+        guest,
+        session: 0,
+        send: (state: NetState) => send({ t: "state", state }),
+        sendHistory: (history: NetHistory[]) => send({ t: "history", history }),
+        sendChat: (msgs: NetChat[]) => send({ t: "chat", msgs }),
+      };
+      send({ t: "ready", wallet, guest });
+      game.attach(session);
+      return;
+    }
     const before = db.player(wallet);
     // Read BEFORE touch below moves the presence stamp to now.
     const awayMs = Date.now() - before.seenAt;
@@ -359,8 +381,23 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
 
       case "guest": {
-        // Devnet convenience: play without a wallet under a local id. Namespaced
-        // so a guest can never collide with, or impersonate, a real address.
+        /*
+         * WATCHING, WHICH IS ALL THIS IS NOW.
+         *
+         * It was "play without a wallet under a local id", and it cannot be
+         * that any more: money is keyed by wallet across this whole arcade and
+         * a `guest:` id has no account in the books, so every join is refused
+         * with a message saying exactly that.
+         *
+         * KEPT ANYWAY, because removing it would leave a visitor staring at
+         * nothing until they connected a wallet -- there is no state on this
+         * socket before a session exists, so this is the only way to see the
+         * table at all. Being asked for a wallet before you have seen what the
+         * game IS is the wrong order.
+         *
+         * Namespaced so it can never collide with, or impersonate, a real
+         * address, and now persisted nowhere.
+         */
         const id = String(msg.id ?? "").slice(0, 40).replace(/[^a-zA-Z0-9_-]/g, "");
         if (id.length < 8) {
           send({ t: "error", message: "bad guest id" });
