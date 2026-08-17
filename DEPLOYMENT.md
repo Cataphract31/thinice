@@ -122,7 +122,10 @@ The server is crash-safe by design: any round interrupted by a restart is
 refunded in full at startup, and that path was exercised during the beta by
 killing the server mid-round. It should still not be dying regularly.
 
-**Outbound HTTPS to a Solana RPC**, if you keep the built-in banking.
+**No outbound network access at all.** This server talks to its database and to
+the browsers connected to it, and to nothing else. It holds no keypair and
+opens no RPC connection: money enters and leaves the arcade at one edge that is
+not this process. A firewall that lets nothing out is a correct firewall here.
 
 ### systemd example
 
@@ -137,7 +140,6 @@ User=thinice
 WorkingDirectory=/opt/thinice
 Environment=PORT=8787
 Environment=DB_PATH=/var/lib/thinice/zinc.db
-Environment=STARTING_BALANCE=0
 ExecStart=/usr/bin/npm run server
 Restart=always
 RestartSec=5
@@ -146,8 +148,10 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Note `STARTING_BALANCE=0`. The default of 5 grants every new wallet 5 SOL of
-devnet play money on first sight, which must not survive contact with real money.
+That is the whole environment. There is no starting balance to zero out, no
+bot count to hold at zero and no banking switch to leave off, because none of
+those settings exist any more — the safe value of a setting you deleted cannot
+be typed wrong.
 
 ### nginx
 
@@ -200,46 +204,39 @@ your-host {
 
 ---
 
-## Launching with play money first (no chain at all)
+## There is no play-money mode, and no banking mode either
 
-The intended opening move: real multiplayer, real shared database, fake
-balances — and the chain later. This is one environment variable:
+Both are gone, and they left together for the same reason.
 
-```bash
-BANKING=off PORT=8787 DB_PATH=/var/lib/thinice/zinc.db npm run server
-```
+This server used to have two personalities selected by `BANKING`: off meant
+free balances and no chain, on meant a self-generated hot wallet paying real
+withdrawals. One environment variable stood between them — which is to say one
+forgotten environment variable stood between free money and withdrawable
+money. The migration trap documented here used to read: *flip `BANKING=on`
+against the same database and every point ever granted becomes withdrawable
+SOL, and the house pays out money nobody put in.*
 
-With banking off the server never creates a house keypair, never touches an
-RPC, and never offers clients the bank panel (the client renders banking only
-when the server names a house account, so nothing needs changing in the web
-build). Every new wallet or guest is granted `STARTING_BALANCE` (default 5) of
-play money on first sight, and everything else is exactly the real game: one
-shared lobby, the full fairness ceremony, persistent balances per guest id or
-signed wallet.
+That trap cannot be sprung now, because neither side of it exists. New players
+start at zero, there is no faucet and no starting credit, and this process
+cannot sign a transfer under any configuration. Money is a number in the
+arcade's shared ledger, and it gets there by a deposit at the arcade's custody
+edge or it does not get there.
 
-**The one trap, and it is a serious one: play-money balances must not survive
-into the real-money era.** The ledger stores balances as plain lamports — it
-does not know or care whether they were ever backed by deposits. If you flip
-`BANKING=on` against the same database later, every point ever granted or won
-during the free period becomes withdrawable SOL, and the house pays out money
-nobody ever put in. When real money arrives, start it on a **fresh
-`DB_PATH`**. If you want to reward the play-money era, do it as a deliberate,
-budgeted airdrop — never by letting the old ledger become real.
+Starting real money on a **fresh database** is still the right move — beta
+rounds and beta history are noise in a ledger you intend to reconcile against
+a chain — but it is now hygiene rather than the difference between solvent and
+not.
 
 ---
 
 ## Before real money touches it
 
-The full checklist is in `README.md`. The four that are specifically about
-deployment:
+The full checklist is in `MAINNET.md`. The ones specifically about deployment:
 
 - [ ] **TLS terminated**, client built against `wss://`.
-- [ ] **`STARTING_BALANCE=0`**, or you are giving away free money.
-- [ ] **`RPC_URL` is deliberate.** The server refuses to start against a
-      non-devnet RPC, because the bundled banking layer is a custodial hot
-      wallet — appropriate for devnet play money and not for anything else.
-      Replacing it is `apps/server/src/chain.ts` and nothing else.
-- [ ] **The database is on backed-up persistent storage.** It is the ledger.
+- [ ] **The database is on backed-up persistent storage.**
+- [ ] **Outbound network denied.** Nothing here needs it, and a server that
+      cannot reach the internet cannot be talked into paying anybody.
 
 ---
 
@@ -256,9 +253,8 @@ to — money moving exactly once, the commitment covering the seed and the rules
 a client unable to set fields the server owns.
 
 The scripted end-to-end probe was retired in August 2026 with the rest of the
-harnesses. If you rebuild one, two constraints always applied to it. Run it
-against `BOTS=0`: practice bots joining mid-probe change round timing and break
-the sole-owner check. And its chat traffic lands in the room's 50-line backlog
+harnesses. If you rebuild one, one constraint still applies: its chat traffic
+lands in the room's 50-line backlog
 where every later visitor reads it, so **restart the service after probing
 production** (chat is memory-only, so a restart clears it), or probe before you
 announce.

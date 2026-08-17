@@ -11,7 +11,6 @@ dist/
 *.db
 *.db-wal
 *.db-shm
-house-keypair.json
 # The bank test spins up its own throwaway house wallet and deletes it on every
 # run. One got swept into the first commit: a real secret key, in what is now a
 # public repo. The pattern, not the filename, so the next test harness that

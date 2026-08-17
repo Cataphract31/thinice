@@ -2,7 +2,6 @@ import { DEFAULT_CONFIG, type RoundRecord } from "@zinc/engine";
 import {
   verifyEntry,
   type AutoSettings,
-  type BankState,
   type ChatMsg,
   type HistoryEntry,
   type Snapshot,
@@ -91,8 +90,6 @@ type PhantomProvider = {
   publicKey?: { toString(): string } | null;
   connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey: { toString(): string } }>;
   signMessage(msg: Uint8Array, encoding?: string): Promise<{ signature: Uint8Array }>;
-  /** Signs and submits a legacy Transaction; Phantom returns its signature. */
-  signAndSendTransaction(tx: unknown): Promise<{ signature: string }>;
 };
 
 /**
@@ -429,8 +426,6 @@ export class NetClient {
   /** Local deadline for the current phase, so countdowns run between pushes. */
   private phaseEndAt = 0;
   private clock: number | null = null;
-  /** Set once the server names its house account; enables the bank panel. */
-  private bank: BankState | null = null;
   /**
    * roundId -> the commitment this client saw WHILE that round was forming.
    *
@@ -554,12 +549,8 @@ export class NetClient {
         if (typeof m.token === "string" && m.token) {
           saveWalletSession(String(m.wallet), m.token);
         }
-        this.bank = m.house
-          ? { house: String(m.house), busy: false, note: "", ok: null }
-          : null;
         this.snap = {
           ...this.snap,
-          bank: this.bank ?? undefined,
           // WHO is actually seated, straight from the server. The wallet
           // button renders THIS, not Phantom's connect state — the two can
           // disagree (expired session seats a guest while Phantom still
@@ -585,29 +576,12 @@ export class NetClient {
           chat: this.chat,
           history: this.history,
           connected: true,
-          bank: this.bank ?? undefined,
           seat: this.extras.connected
             ? { guest: this.extras.guest, address: this.extras.address }
             : undefined,
         };
         this.cue(prev, this.snap);
         this.emit();
-        return;
-      }
-
-      case "tx": {
-        if (this.bank) {
-          this.bank = {
-            ...this.bank,
-            busy: false,
-            ok: Boolean(m.ok),
-            note: m.ok
-              ? `${m.kind === "deposit" ? "deposited" : "withdrew"} ${Number(m.sol).toFixed(3)} ◎`
-              : String(m.note ?? "failed"),
-          };
-          this.snap = { ...this.snap, bank: this.bank };
-          this.emit();
-        }
         return;
       }
 
@@ -675,7 +649,6 @@ export class NetClient {
         // fires and nothing ever retries: the player sits on "Reconnecting…"
         // forever while nothing is reconnecting. Force the cycle.
         if (!this.extras.connected && !this.closed) {
-          this.setBankNote(message);
           this.ws?.close();
         }
         return;
@@ -872,67 +845,6 @@ export class NetClient {
     this.signatureWanted = wantSignature;
     this.retry = 0;
     this.ws?.close();
-  }
-
-  /** Surfaces a server error in the bank panel when one is open. */
-  private setBankNote(note: string): void {
-    if (this.bank?.busy) this.setBank({ busy: false, ok: false, note });
-  }
-
-  private setBank(patch: Partial<BankState>): void {
-    if (!this.bank) return;
-    this.bank = { ...this.bank, ...patch };
-    this.snap = { ...this.snap, bank: this.bank };
-    this.emit();
-  }
-
-  /**
-   * Sends SOL from the connected Phantom to the house, then hands the server
-   * the signature to verify against the chain and credit. The heavy Solana
-   * SDK loads on first use only — players who never bank never download it.
-   */
-  async deposit(sol: number): Promise<void> {
-    const bank = this.bank;
-    if (!bank || bank.busy) return;
-    const p = phantom();
-    const from = p?.publicKey;
-    if (!p || !from) {
-      this.setBank({ ok: false, note: "connect Phantom first" });
-      return;
-    }
-    this.setBank({ busy: true, ok: null, note: "waiting for Phantom…" });
-    try {
-      const { Connection, PublicKey, SystemProgram, Transaction } = await import(
-        "@solana/web3.js"
-      );
-      const rpc =
-        (import.meta.env.VITE_RPC_URL as string | undefined) ??
-        "https://api.devnet.solana.com";
-      const conn = new Connection(rpc, "confirmed");
-      const fromKey = new PublicKey(from.toString());
-      const tx = new Transaction().add(
-        SystemProgram.transfer({
-          fromPubkey: fromKey,
-          toPubkey: new PublicKey(bank.house),
-          lamports: Math.round(sol * 1e9),
-        }),
-      );
-      tx.feePayer = fromKey;
-      tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
-      const { signature } = await p.signAndSendTransaction(tx);
-      this.setBank({ note: "confirming on devnet…" });
-      this.send({ t: "deposit", sig: String(signature) });
-    } catch {
-      this.setBank({ busy: false, ok: false, note: "cancelled or failed in Phantom" });
-    }
-  }
-
-  /** Asks the server to pay out ledger balance on-chain. */
-  withdraw(sol: number): void {
-    const bank = this.bank;
-    if (!bank || bank.busy) return;
-    this.setBank({ busy: true, ok: null, note: "paying out…" });
-    this.send({ t: "withdraw", sol });
   }
 
   setAuto(patch: Partial<AutoSettings>): void {

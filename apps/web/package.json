@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.98.4",
     "@tanstack/react-virtual": "^3.14.9",
     "@zinc/engine": "*",
     "react": "^19.2.8",

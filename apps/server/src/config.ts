@@ -4,8 +4,7 @@
  * `Number("two players")` is NaN, and NaN reaches places where it does real
  * damage silently: a NaN `minEntrants` makes every `seats.size >= min` false,
  * so no round ever seals while players keep being debited into lobbies that
- * roll over forever. A NaN starting balance is written into the ledger as
- * every new player's balance. Failing loudly at boot is the only safe reading.
+ * roll over forever. Failing loudly at boot is the only safe reading.
  */
 function num(name: string, fallback: number, min: number, max: number): number {
   const raw = process.env[name];
@@ -38,13 +37,6 @@ export const CONFIG = {
    * lock everyone else out of the round.
    */
   maxPlatesPerWallet: num("MAX_PLATES_PER_WALLET", 5, 1, 50),
-  /**
-   * BANKING=off runs the server as pure play money: no house keypair is ever
-   * created, no RPC is touched, and clients are never offered the bank —
-   * real multiplayer on the real ledger, with balances that are only points.
-   * This is the open-launch mode; the chain comes later or not at all.
-   */
-  banking: (process.env.BANKING ?? "on").toLowerCase() !== "off",
   /**
    * Auto play lapses after this long away from the table, in minutes.
    *

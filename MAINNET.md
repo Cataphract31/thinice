@@ -1,45 +1,45 @@
 # Before real money
 
-The play-money beta cuts corners that are fine for play money and fatal for
-real money. Every box below gets checked before BANKING=on faces the public.
-Items marked (built) exist and only need to be turned on or verified; the
-rest need building.
+The closed beta cut corners that are fine for play money and fatal for real
+money. Every box below gets checked before this faces the public. Items marked
+(built) exist and only need verifying; the rest need building.
+
+**SCOPE, AND IT CHANGED.** This game no longer banks. The house keypair, the
+RPC connection, the deposit verifier and the withdrawal path were **deleted
+from this repo**, not disabled — custody is one edge that belongs to the
+arcade, and every custody item that used to live on this list has moved there
+with the code. What remains below is what a GAME can still get wrong.
+
+That deletion closed four boxes by making them unreachable rather than by
+satisfying them, which is the better way to close a box: *flip the banking
+default*, *withdrawal failure is not proof of failure*, *withdrawal path
+re-verified*, and the bots interlock. None of them can regress, because none
+of the code they guarded still exists.
 
 ## Money and fairness
 
-- [ ] **Wipe the beta DB.** Balances, tickets, rounds, history: all play
-      money. Fresh ledger on day one, no exceptions.
-- [ ] **Bots off.** BOTS=0. The boot guard (built) refuses BOTS>0 with
-      BANKING=on; verify it fires, do not merely trust it.
+- [ ] **Wipe the beta DB.** Rounds, history, profiles — all from a beta where
+      the numbers meant nothing. Fresh state on day one, no exceptions.
+- [x] **Bots.** Deleted rather than switched off. There is no flag left to set
+      wrong because the code a flag would have guarded is gone.
 - [ ] **Seed entropy.** Round seeds are server-chosen; a malicious operator
       could grind seeds before committing and no player could detect it.
       Mix public or client entropy into the commit preimage so the house
       provably cannot pick its own draw. The ceremony has been audited
       honest end to end, but honesty today is not proof against a hostile
       operator tomorrow.
-- [ ] **House float monitoring.** Alert when the house wallet drifts from
-      the ledger's expectation; a discrepancy is an incident, not a log line.
+- [ ] **Custody reconciliation** *(arcade, not here)*. The ledger's `~mint`
+      balance is the negative of every lamport inside the arcade, which is
+      exactly what the custody wallet must hold. Alert when the chain and that
+      number disagree: a discrepancy is an incident, not a log line.
 
 ## Auth and abuse
 
-- [ ] **Session token hardening.** Tokens are 192-bit random, compared with
-      timingSafeEqual, minted only on signature (built). Add expiry,
-      rotation on withdrawal, and a rate limit on `resume` attempts per IP.
-- [ ] **Withdrawal path re-verified.** Withdrawals pay only the
-      authenticated session's own wallet (built). Re-test after any auth
-      change, every time.
-- [ ] **Withdrawal failure is not proof of failure.** A confirmation that
-      throws is currently re-credited blind; if the transfer actually
-      landed, the player keeps both. Write an intent row before
-      broadcasting and re-query the signature's status before re-crediting.
-- [ ] **Hold covers ALL reversible money.** The withdrawal hold guards
-      mid-round cash-out profit, which is the only money the crash sweep
-      can claw back now that nothing is streamed at seal (built). Still
-      make shutdown close the open round instead of just stopping the
-      timer.
-- [ ] **Flip the banking default to off.** BANKING defaults to ON in
-      config.ts and .env.example; play money is one forgotten env var away
-      from being armed. The safe state should be a property of the code.
+- [ ] **Session token hardening.** Tokens are 192-bit random, minted only on
+      signature (built). Add expiry and a rate limit on `resume` per IP.
+- [ ] **Shutdown closes the open round** instead of just stopping the timer.
+      The startup sweep makes a crash survivable either way, but a clean stop
+      should not need the sweep to clean up after it.
 - [ ] **Chat moderation.** Rate limits exist; real money attracts spam,
       phishing links, and impersonation. Minimum: link stripping, a mute
       tool, a report path.

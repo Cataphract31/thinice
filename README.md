@@ -9,16 +9,13 @@ field empties. Cash out whenever you like and keep what you are holding, or get
 caught and keep nothing. Last one standing takes the rest.
 
 It is player-versus-player. The house does not take a position in any round —
-it takes a fixed cut of the entries and nothing else. **There are no hidden
-bots.** A lobby is real people or it is empty — with one loudly-declared
-exception: in play-money mode the server may seat a few PRACTICE bots
-(`BOTS=n`, default 0) so the room is always live. Two structural rules keep
-that honest: every practice bot is labelled `bot·name` on every surface, and
-the server refuses to boot with bots and banking enabled together — a bot may
-never share a table with real money. Within the play-money room the bots are
-FULL participants in the same economy they sit in: same rake, same odds, same
-pot. They play continuously, humans present or not, so a visitor always walks
-into a running game.
+it takes a fixed cut of the entries and nothing else. **There are no bots.**
+A lobby is real people or it is empty, and an empty one simply rolls over
+until somebody arrives. There is no mode, flag or environment variable that
+can seat a non-human: that code was deleted rather than switched off, because
+a setting which fakes a busy room is one deployment mistake away from doing it
+in front of real money. A visitor who finds the room quiet is being told the
+truth about how quiet it is.
 
 ---
 
@@ -102,9 +99,9 @@ that matters publicly. It verifies in the client itself: every finished round
 replays in the browser from its revealed seed, against the commitment published
 before it sealed.
 
-> **The deposit/withdraw path has never completed a full live round trip** and
-> is the least-exercised code in the repo. Proving it out is the first item of
-> real work before banking faces anyone — see [MAINNET.md](MAINNET.md).
+> **This repo no longer contains a deposit/withdraw path at all.** Proving one
+> out is still the first item of real work before real money — but it is now
+> the arcade's edge to prove, not this game's. See [MAINNET.md](MAINNET.md).
 
 ---
 
@@ -202,30 +199,31 @@ drift from it.
 
 ## Taking this to mainnet
 
-The game is ready to build on. The banking layer is **deliberately not**.
+**This game no longer banks.** It holds no keypair, opens no RPC connection,
+and has no deposit or withdrawal path — `chain.ts` and everything that called
+it were deleted, not disabled.
 
-`chain.ts` implements a **custodial hot wallet**: the server holds a keypair,
-players deposit to it, the SQLite ledger tracks balances, and withdrawals are
-paid from it. That is a reasonable devnet play-money design and an unacceptable
-mainnet one. The server **refuses to start against a non-devnet RPC** so this
-cannot ship by accident.
+That was the last structural difference between this game and the others in
+the arcade. It used to generate its own custodial hot wallet on first boot and
+pay withdrawals from it; every other game did not, which meant the arcade had
+one game that could sign a transfer and five that could not. Six games each
+holding a hot wallet is six deposit verifiers, six double-credit defences and
+six chances to get one of them wrong.
 
-Replacing it should not require opening the engine. Deposits are already
-verified against the chain rather than trusted from the client, and every
-credit is keyed on the transaction signature, so replaying one credits nothing.
+So money enters and leaves at **one edge, which belongs to the arcade and not
+to any game**. A game moves numbers in the shared ledger; that is its entire
+relationship with money. The blast radius of a bug in this repo is now a
+mispriced round, never a signed transfer.
 
 ### Hard requirements before real money
 
-- [ ] **Replace the custodial wallet** with an escrow program / PDA, or at
-      minimum move the key to an HSM with withdrawal limits and monitoring.
+- [ ] **Build the arcade's one custody edge** — hot/cold split, withdrawal
+      caps, and monitoring. This is now arcade work, not game work.
 - [ ] **Remove guest accounts.** `{t:"guest", id}` accepts any id as a bearer
-      token: anyone who learns an id can spend that balance. Fine for devnet
-      play money, unacceptable for real money. Delete the branch and require a
-      signed wallet.
-- [ ] **Set `STARTING_BALANCE=0`.** New wallets are currently granted 5 SOL of
-      play money on first sight.
-- [ ] **Prove the deposit/withdraw round trip on devnet.** The money loop has
-      never completed a live round trip, under a harness or otherwise.
+      token: anyone who learns an id can spend against it. Delete the branch
+      and require a signed wallet.
+- [ ] **Prove the deposit/withdraw round trip on devnet** at the arcade edge.
+      The money loop has never completed a live round trip.
 - [ ] **Bind the login challenge to a domain** (SIWS-style) and enforce an
       Origin allowlist on the websocket upgrade. Today the signed text is just
       `THIN ICE login\nnonce: …`, so a signature is not tied to this site.
@@ -259,9 +257,7 @@ credit is keyed on the transaction signature, so replaying one credits nothing.
 infrastructure — static hosting, the Node process, nginx/Caddy websocket
 config, TLS, and the two failure modes that waste a day if nobody warns you
 (the server URL is baked in at build time, and a default reverse-proxy config
-silently breaks websockets). It also covers the intended opening move: an
-open play-money launch (`BANKING=off` — real multiplayer, fake balances, no
-chain) and the one migration trap when real money later arrives.
+silently breaks websockets).
 
 Nothing in the code is platform-specific. The `vercel.json` at the root exists
 only because the current free preview deploy runs there; any host can ignore it.

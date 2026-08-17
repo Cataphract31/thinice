@@ -7,7 +7,6 @@ import { Roster } from "@/ui/Ledger";
 import { HistoryPanel } from "@/ui/History";
 import { StatsPanel } from "@/ui/Stats";
 import { TickRing } from "@/ui/TickRing";
-import { BankPanel } from "@/ui/Bank";
 import { ActionBar, AutoPanel } from "@/ui/Hud";
 import { OfflineBar, SlimFooter, StateBar, TopNav } from "@/ui/Chrome";
 import { InfoOverlay } from "@/ui/Info";
@@ -37,7 +36,6 @@ export default function App(): JSX.Element {
     () => !tutorialSeen() || new URLSearchParams(window.location.search).has("intro"),
   );
   const [showChars, setShowChars] = useState(false);
-  const [showBank, setShowBank] = useState(false);
   const [tab, setTab] = useState<Tab>("roster");
   // Mobile only: the bottom panel folds to its tab row so the lattice gets
   // the height back. Desktop's rail ignores this entirely.
@@ -115,7 +113,6 @@ export default function App(): JSX.Element {
         onShowInfo={() => setShowInfo(true)}
         onShowChars={() => setShowChars(true)}
         onWalletChange={(connected) => client.reauth(connected)}
-        onShowBank={snap.bank ? () => setShowBank(true) : undefined}
       />
       <OfflineBar snap={snap} />
       <StateBar snap={snap} />
@@ -249,14 +246,6 @@ export default function App(): JSX.Element {
           snap={snap}
           onPick={(id) => client.setCharacter(id)}
           onClose={() => setShowChars(false)}
-        />
-      )}
-      {showBank && snap.bank && (
-        <BankPanel
-          snap={snap}
-          bank={snap.bank}
-          client={client}
-          onClose={() => setShowBank(false)}
         />
       )}
       {/* Root level, NOT inside the lattice frame: the tube's filter turns any

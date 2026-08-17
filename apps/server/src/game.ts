@@ -4,16 +4,13 @@ import {
   Round,
   canonicalConfig,
   hazardAt,
-  mulberry32,
   outcomeDigest,
   rngFromSeedHex,
   totalRake,
   type Entrant,
   type GameConfig,
-  type Rng,
-  type Strategy,
 } from "@zinc/engine";
-import { CHARS, CONFIG, toLamports, toSol } from "./config.ts";
+import { CONFIG, toLamports, toSol } from "./config.ts";
 import type { Database } from "./db.ts";
 import type { NetChat, NetHistory, NetPlayer, NetState } from "./protocol.ts";
 
@@ -90,13 +87,6 @@ export class GameServer {
   private nextSeatId = 1;
 
   private sessions = new Set<Session>();
-  /**
-   * Presentation randomness only — nothing that decides money may touch this.
-   * It is a 32-bit stream seeded from a wall clock, which is to say it is
-   * predictable to anyone who knows roughly when the process started.
-   */
-  private rng: Rng = mulberry32((Date.now() & 0xffffffff) >>> 0);
-
   private seedHex = "";
   private commit = "";
   /** Hash of the rules every round is committed under. Fixed for the process. */

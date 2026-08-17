@@ -41,13 +41,11 @@ export function TopNav({
   onShowInfo,
   onShowChars,
   onWalletChange,
-  onShowBank,
 }: {
   snap: Snapshot;
   onShowInfo: () => void;
   onShowChars: () => void;
   onWalletChange?: (connected: boolean) => void;
-  onShowBank?: () => void;
 }): JSX.Element {
   return (
     <div className="shrink-0 border-b border-[var(--color-line)] px-3 py-2">
@@ -77,14 +75,6 @@ export function TopNav({
         >
           <CharArt charId={snap.charId} pose="head" size={22} />
         </button>
-        {onShowBank && (
-          <button
-            onClick={onShowBank}
-            className="chip label px-2.5 py-1.5 text-[var(--color-profit)]"
-          >
-            bank
-          </button>
-        )}
         <WalletButton seat={snap.seat} onChange={onWalletChange} />
         <button
           onClick={onShowInfo}

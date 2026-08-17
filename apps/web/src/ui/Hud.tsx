@@ -373,7 +373,6 @@ export function TopBar({
   onShowInfo,
   onShowChars,
   onWalletChange,
-  onShowBank,
 }: {
   snap: Snapshot;
   onShowInfo: () => void;
@@ -382,8 +381,6 @@ export function TopBar({
       after that needs the handshake re-run or it stays seated as a guest.
       True = the player just connected (run the signature ceremony once). */
   onWalletChange?: (connected: boolean) => void;
-  /** Present only when the server offers banking (real wallet, networked). */
-  onShowBank?: () => void;
 }): JSX.Element {
   return (
     <div className="border-b border-[var(--color-line)] px-3 py-2.5">
@@ -425,14 +422,6 @@ export function TopBar({
           >
             <CharArt charId={snap.charId} pose="head" size={22} />
           </button>
-          {onShowBank && (
-            <button
-              onClick={onShowBank}
-              className="chip label px-2.5 py-1.5 text-[var(--color-profit)]"
-            >
-              bank
-            </button>
-          )}
           <WalletButton seat={snap.seat} onChange={onWalletChange} />
           {/* An outlined RULES chip, the house affordance, instead of a bare
               glyph. A lone ⓘ in a row of six controls is the least-pressed

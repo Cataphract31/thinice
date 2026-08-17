@@ -152,28 +152,12 @@ export interface Snapshot {
   /** False while the socket is down, so the UI can say so instead of freezing. */
   connected: boolean;
   /**
-   * On-chain banking, networked mode with a real wallet only. Absent in the
-   * demo and for guests — there is no chain identity to move money for.
-   */
-  bank?: BankState;
-  /**
    * WHO the server actually seated, networked play only. The wallet button
    * must render this — Phantom's own connect state can disagree with it (an
    * expired session seats a guest while the extension still shows the
    * address), and the seat is the identity money moves under.
    */
   seat?: { guest: boolean; address: string };
-}
-
-export interface BankState {
-  /** Where deposits go: the house account this server pays from and into. */
-  house: string;
-  /** True while a deposit or withdrawal is in flight. */
-  busy: boolean;
-  /** Outcome of the last operation, for the panel to show. */
-  note: string;
-  /** True when the last note is a success, false for a failure, null idle. */
-  ok: boolean | null;
 }
 
 export interface PlayerStats {

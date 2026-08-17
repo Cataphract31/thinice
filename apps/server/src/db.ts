@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { CHARS, CONFIG, toLamports } from "./config.ts";
+import { CHARS, CONFIG } from "./config.ts";
 
 /**
  * Persistence.
@@ -109,20 +109,6 @@ export class Database {
         token  TEXT NOT NULL,
         at     INTEGER NOT NULL
       );
-
-      /* On-chain movements. The PRIMARY KEY on the signature is the entire
-         double-credit defence for deposits: a transaction can be presented a
-         thousand times and only the first insert credits anything. */
-      CREATE TABLE IF NOT EXISTS transfers (
-        sig       TEXT PRIMARY KEY,
-        wallet    TEXT NOT NULL,
-        direction TEXT NOT NULL,
-        lamports  INTEGER NOT NULL,
-        /* 'ok' rows are settled history; 'pending'/'unknown' mark a withdrawal
-           whose on-chain fate was not yet proven when the process last saw it. */
-        status    TEXT NOT NULL DEFAULT 'ok',
-        at        INTEGER NOT NULL
-      );
     `);
 
   }
@@ -189,32 +175,6 @@ export class Database {
       .prepare("UPDATE players SET balance = balance + ? WHERE wallet = ?")
       .run(deltaLamports, wallet);
     return true;
-  }
-
-  /**
-   * Debits a withdrawal, refusing to touch UNSETTLED money.
-   *
-   * The PROFIT portion of a cash-out whose round has not closed is reversible:
-   * it is exactly what the crash sweep claws back, so letting it leave
-   * on-chain and then reversing it would drive the balance negative on an
-   * ordinary restart. The stake portion needs no hold — the sweep returns the
-   * stake either way. The balance check and the hold live in ONE statement,
-   * because a separate check-then-debit would reopen the race it exists to
-   * close (the round crashing between the check and the debit). Returns false
-   * untouched when the settled balance cannot cover it.
-   */
-  debitForWithdrawal(wallet: string, lamports: number): boolean {
-    const changed = this.db
-      .prepare(
-        `UPDATE players SET balance = balance - ?
-          WHERE wallet = ?
-            AND balance - ? >= COALESCE(
-              (SELECT SUM(MAX(e.returned - e.staked, 0))
-                 FROM entries e JOIN rounds r ON r.id = e.roundId
-                WHERE e.wallet = players.wallet AND r.endedAt IS NULL), 0)`,
-      )
-      .run(lamports, wallet, lamports);
-    return changed.changes > 0;
   }
 
   setChar(wallet: string, charId: string): void {
@@ -519,72 +479,6 @@ export class Database {
           ORDER BY r.id DESC LIMIT ?`,
       )
       .all(wallet, limit) as never;
-  }
-
-  /**
-   * Records a deposit and credits it in one transaction. Returns false if the
-   * signature was already claimed — by this wallet or any other — in which
-   * case nothing moves.
-   */
-  creditDeposit(sig: string, wallet: string, lamports: number): boolean {
-    this.db.exec("BEGIN");
-    try {
-      const ins = this.db
-        .prepare(
-          "INSERT OR IGNORE INTO transfers (sig, wallet, direction, lamports, at) VALUES (?, ?, 'deposit', ?, ?)",
-        )
-        .run(sig, wallet, lamports, Date.now());
-      if (ins.changes === 0) {
-        this.db.exec("ROLLBACK");
-        return false;
-      }
-      this.db
-        .prepare("UPDATE players SET balance = balance + ? WHERE wallet = ?")
-        .run(lamports, wallet);
-      this.db.exec("COMMIT");
-      return true;
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-  }
-
-  /**
-   * Books a withdrawal INTENT before the transaction is broadcast. Written
-   * first so that whatever happens next — landed, failed, or unknowable —
-   * there is always a row tying the signature to the debit. A failure that
-   * left no record was how a landed-but-unconfirmed transfer could be
-   * blind-refunded into a double payout.
-   */
-  recordWithdrawalIntent(sig: string, wallet: string, lamports: number): void {
-    this.db
-      .prepare(
-        "INSERT OR IGNORE INTO transfers (sig, wallet, direction, lamports, at, status) VALUES (?, ?, 'withdraw', ?, ?, 'pending')",
-      )
-      .run(sig, wallet, lamports, Date.now());
-  }
-
-  setTransferStatus(sig: string, status: "ok" | "failed" | "unknown"): void {
-    this.db.prepare("UPDATE transfers SET status = ? WHERE sig = ?").run(status, sig);
-  }
-
-  /**
-   * Reverses a withdrawal PROVEN not to have landed: the re-credit and the
-   * status stamp commit together, so a crash can never pay the refund while
-   * leaving the row claiming the transfer is still in flight.
-   */
-  refundWithdrawal(sig: string, wallet: string, lamports: number): void {
-    this.db.exec("BEGIN");
-    try {
-      this.db
-        .prepare("UPDATE players SET balance = balance + ? WHERE wallet = ?")
-        .run(lamports, wallet);
-      this.db.prepare("UPDATE transfers SET status = 'failed' WHERE sig = ?").run(sig);
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
   }
 
   /** Mints/rotates the wallet's session token. */

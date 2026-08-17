@@ -8,7 +8,6 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.98.4",
     "@zinc/engine": "*",
     "bs58": "^6.0.0",
     "tsx": "^4.19.2",

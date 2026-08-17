@@ -160,28 +160,20 @@ export type ClientMessage =
   | { t: "setAuto"; enabled: boolean; target: number; plates: number }
   | { t: "setChar"; charId: string }
   /** A line for the room. Cleaned, capped and rate-limited server-side. */
-  | { t: "chat"; text: string }
-  /** Presents a confirmed on-chain transaction to be credited. */
-  | { t: "deposit"; sig: string }
-  /** Asks the house to pay this much of the ledger balance on-chain. */
-  | { t: "withdraw"; sol: number };
+  | { t: "chat"; text: string };
 
 export type ServerMessage =
   | { t: "challenge"; nonce: string }
-  /** `house` is where deposits go. Absent for guests, who have no chain identity.
-      `token` arrives once, after a fresh signature: the client stores it and
+  /** `token` arrives once, after a fresh signature: the client stores it and
       resumes with it instead of asking Phantom to sign every connection. */
   | {
       t: "ready";
       wallet: string;
       guest: boolean;
-      house?: string;
       token?: string;
     }
   | { t: "state"; state: NetState }
   | { t: "history"; history: NetHistory[] }
   /** New chat line(s). The backlog on connect and live lines use one shape. */
   | { t: "chat"; msgs: NetChat[] }
-  /** Outcome of a deposit or withdrawal, for the bank panel to display. */
-  | { t: "tx"; kind: "deposit" | "withdraw"; ok: boolean; sol: number; note: string }
   | { t: "error"; message: string };
