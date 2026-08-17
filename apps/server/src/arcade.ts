@@ -172,9 +172,44 @@ export function createArcadeLedger({
    */
   const refFor = (roundId: number, seat: number): string => `${GAME}:r${roundId}:s${seat}`;
 
+  /** A GET behind the same service key. Reads never decide; see the header. */
+  async function get(route: string, params: Record<string, string>): Promise<any> {
+    if (!enabled) throw new LedgerError("LEDGER_CLOSED", "this server has no LEDGER_KEY", 503);
+    const q = new URLSearchParams(params).toString();
+    let res: Response;
+    try {
+      res = await fetchImpl(`${base}/api/ledger/${route}?${q}`, {
+        headers: { "x-ledger-key": key },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (err) {
+      throw new LedgerError("LEDGER_UNREACHABLE", `could not reach the arcade ledger: ${(err as Error).message}`, 503);
+    }
+    const text = await res.text();
+    const parsed = text ? JSON.parse(text) : null;
+    if (!res.ok) {
+      const e = parsed?.error ?? {};
+      throw new LedgerError(e.code ?? "LEDGER_REFUSED", e.message ?? `ledger said ${res.status}`, res.status);
+    }
+    return parsed;
+  }
+
   return {
     enabled,
     refFor,
+
+    /**
+     * Where a wallet stands, FOR THE SCREEN ONLY.
+     *
+     * Nothing in this game decides anything from this number -- `hold` is the
+     * check, atomically, where the money is. This exists because the state
+     * frame shows a balance and there is no longer a local column to read it
+     * from.
+     */
+    async balanceOf(wallet: string): Promise<{ freeLamports: number; heldLamports: number }> {
+      const r = await get("balance", { wallet });
+      return { freeLamports: Number(r.balance ?? 0), heldLamports: Number(r.held ?? 0) };
+    },
 
     /**
      * Take a stake into escrow. Throws LedgerError; `isBroke` means exactly

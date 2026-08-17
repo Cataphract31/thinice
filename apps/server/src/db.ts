@@ -16,7 +16,6 @@ import { CHARS, CONFIG } from "./config.ts";
 
 export interface PlayerRow {
   wallet: string;
-  balance: number;
   charId: string;
   autoEnabled: number;
   autoTarget: number;
@@ -38,13 +37,13 @@ export class Database {
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
     this.migrate();
+    this.dropLocalBalance();
   }
 
   private migrate(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS players (
         wallet         TEXT PRIMARY KEY,
-        balance        INTEGER NOT NULL DEFAULT 0,
         charId         TEXT    NOT NULL DEFAULT 'chad',
         autoEnabled    INTEGER NOT NULL DEFAULT 0,
         autoTarget     REAL    NOT NULL DEFAULT 2,
@@ -123,6 +122,25 @@ export class Database {
    * session, and stamping seenAt here was a disk write 20 times a second per
    * player. Presence is stamped by `touch`, at connect and join.
    */
+  /*
+   * THE BALANCE COLUMN GOES, AND IT HAS TO GO RATHER THAN JUST STOP BEING USED.
+   *
+   * Money lives in the arcade's double-entry ledger now (see arcade.ts). A
+   * `players.balance` column left sitting in the file would be a second answer
+   * to "what does this wallet own" -- stale from the moment the first stake
+   * moves, and readable by anyone who writes the obvious query. Two sources of
+   * truth is the exact disease being cured here, and a disused one is worse
+   * than an active one because nothing keeps it honest.
+   *
+   * Existing databases are playtest data with no real money behind them, so
+   * whatever the column says is simply dropped rather than reconciled.
+   */
+  private dropLocalBalance(): void {
+    const cols = this.db.prepare("PRAGMA table_info(players)").all() as { name: string }[];
+    if (!cols.some((c) => c.name === "balance")) return;
+    this.db.exec("ALTER TABLE players DROP COLUMN balance");
+  }
+
   player(wallet: string): PlayerRow {
     const found = this.db
       .prepare("SELECT * FROM players WHERE wallet = ?")
@@ -136,10 +154,10 @@ export class Database {
     const charId = CHARS[Math.floor(Math.random() * CHARS.length)]!;
     this.db
       .prepare(
-        `INSERT INTO players (wallet, balance, charId, createdAt, seenAt)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO players (wallet, charId, createdAt, seenAt)
+         VALUES (?, ?, ?, ?)`,
       )
-      .run(wallet, 0, charId, now, now);
+      .run(wallet, charId, now, now);
     return this.db
       .prepare("SELECT * FROM players WHERE wallet = ?")
       .get(wallet) as unknown as PlayerRow;
@@ -150,31 +168,6 @@ export class Database {
     this.db
       .prepare("UPDATE players SET seenAt = ? WHERE wallet = ?")
       .run(Date.now(), wallet);
-  }
-
-  balanceOf(wallet: string): number {
-    const r = this.db.prepare("SELECT balance FROM players WHERE wallet = ?").get(wallet) as
-      | { balance: number }
-      | undefined;
-    return r?.balance ?? 0;
-  }
-
-  /**
-   * Moves money. Returns false without touching anything if the player cannot
-   * cover a debit, which is the one check standing between this and a player
-   * entering rounds they have not paid for.
-   */
-  adjustBalance(wallet: string, deltaLamports: number): boolean {
-    if (deltaLamports < 0) {
-      const changed = this.db
-        .prepare("UPDATE players SET balance = balance + ? WHERE wallet = ? AND balance >= ?")
-        .run(deltaLamports, wallet, -deltaLamports);
-      return changed.changes > 0;
-    }
-    this.db
-      .prepare("UPDATE players SET balance = balance + ? WHERE wallet = ?")
-      .run(deltaLamports, wallet);
-    return true;
   }
 
   setChar(wallet: string, charId: string): void {
@@ -207,6 +200,32 @@ export class Database {
    * The round row keeps its NULL endedAt: it is the audit trail of the crash,
    * and history queries already exclude it.
    */
+  /**
+   * Crash recovery, run once at startup before any round opens.
+   *
+   * A round that never reached `closeRound` is rolled back: every unsettled
+   * entry is marked refunded and its stats un-counted, as if it never played.
+   *
+   * WHAT CHANGED WHEN THE MONEY LEFT THIS FILE, because the old behaviour was
+   * stranger than it looked. This used to refund the stake AND CLAW BACK any
+   * payout already made in the orphaned round -- cash-outs reversed, deaths
+   * made whole -- on the grounds that refunding only the survivors would let
+   * the house quietly keep the redistributed money. That was the only reading
+   * under which a single-sided balance column still added up.
+   *
+   * It does not apply now and would be wrong if it did. A seat that settled
+   * settled: its hold was closed against an idempotent ref and the player was
+   * paid, and this game has no power to debit anybody to take it back. What is
+   * left open is exactly what is still owed, and `ledger.sweep()` returns it.
+   * A player who cashed out before the crash keeps what they were paid, which
+   * is what anybody would expect and what the old code went out of its way to
+   * undo.
+   *
+   * The round row keeps its NULL endedAt: it is the audit trail of the crash,
+   * and history queries already exclude it.
+   *
+   * @returns the entries rolled back, for the caller to log
+   */
   refundOpenEntries(): number {
     const orphans = this.db
       .prepare(
@@ -226,21 +245,17 @@ export class Database {
     this.db.exec("BEGIN");
     try {
       for (const o of orphans) {
-        // Net move that leaves the player exactly where they started: give
-        // back the stake, take back anything already paid out for this round.
-        const delta = o.staked - o.returned;
         const wonBack = o.outcome === "cashed" && o.returned >= o.staked ? 1 : 0;
         this.db
           .prepare(
             `UPDATE players
-                SET balance = balance + ?,
-                    wagered = wagered - ?,
+                SET wagered = wagered - ?,
                     returned = returned - ?,
                     roundsPlayed = roundsPlayed - 1,
                     roundsWon = roundsWon - ?
               WHERE wallet = ?`,
           )
-          .run(delta, o.staked, o.returned, wonBack, o.wallet);
+          .run(o.staked, o.returned, wonBack, o.wallet);
         // Per seat, not per wallet: a multi-plate wallet has one row per
         // plate in the orphaned round and each is its own refund.
         this.db
@@ -256,6 +271,21 @@ export class Database {
       throw err;
     }
     return orphans.length;
+  }
+
+  /**
+   * What a settled seat was owed, for retrying a settlement the ledger missed.
+   *
+   * Read back from the entry row rather than remembered in the process, so a
+   * retry uses the number that was actually recorded for that seat and not one
+   * that has been sitting in memory since before the failure.
+   */
+  owedFor(roundId: number, seat: number): number | null {
+    const r = this.db
+      .prepare("SELECT returned, outcome FROM entries WHERE roundId = ? AND seat = ?")
+      .get(roundId, seat) as { returned: number; outcome: string } | undefined;
+    if (!r || r.outcome === "in") return null;
+    return r.returned;
   }
 
   openRound(id: number, commit: string, startedAt: number): void {
@@ -276,16 +306,20 @@ export class Database {
    * between the debit and the insert left money debited with no record of it —
    * silently gone, which is the one thing this ledger may never do.
    */
-  takeEntry(roundId: number, wallet: string, stakedLamports: number, seat: number): boolean {
+  /**
+   * Record a bought plate. THE MONEY IS ALREADY HELD when this runs.
+   *
+   * This used to debit `players.balance` in the same transaction and return
+   * false when the wallet could not cover it -- the one check standing between
+   * the game and a player entering rounds they had not paid for. That check now
+   * happens where the money is: `ledger.hold` refuses atomically inside the
+   * arcade's own transaction, and the caller does not reach here unless it
+   * succeeded. Returning a boolean would now be a lie, because there is nothing
+   * left in this method that can fail on affordability.
+   */
+  takeEntry(roundId: number, wallet: string, stakedLamports: number, seat: number): void {
     this.db.exec("BEGIN");
     try {
-      const debited = this.db
-        .prepare("UPDATE players SET balance = balance + ? WHERE wallet = ? AND balance >= ?")
-        .run(-stakedLamports, wallet, stakedLamports);
-      if (debited.changes === 0) {
-        this.db.exec("ROLLBACK");
-        return false;
-      }
       this.db
         .prepare(`INSERT INTO entries (roundId, wallet, staked, seat) VALUES (?, ?, ?, ?)`)
         .run(roundId, wallet, stakedLamports, seat);
@@ -295,7 +329,6 @@ export class Database {
         )
         .run(stakedLamports, wallet);
       this.db.exec("COMMIT");
-      return true;
     } catch (err) {
       this.db.exec("ROLLBACK");
       throw err;
@@ -321,10 +354,10 @@ export class Database {
       this.db
         .prepare(
           `UPDATE players
-              SET balance = balance + ?, wagered = wagered - ?, roundsPlayed = roundsPlayed - 1
+              SET wagered = wagered - ?, roundsPlayed = roundsPlayed - 1
             WHERE wallet = ?`,
         )
-        .run(row.staked, row.staked, wallet);
+        .run(row.staked, wallet);
       this.db
         .prepare("DELETE FROM entries WHERE roundId = ? AND wallet = ? AND seat = ?")
         .run(roundId, wallet, seat);
@@ -346,20 +379,18 @@ export class Database {
     outcome: string,
     won: boolean,
   ): void {
-    // ONE transaction: the balance credit, the entry row, and the stats move
-    // together or not at all. The credit used to be a separate autocommit in
-    // the caller — a crash between the two left the entry reading 'in', so
-    // the startup sweep re-credited the full stake ON TOP of the payout and
-    // then stamped the row 'refunded', hiding the minted money from every
-    // later reconciliation. The mirror-image path (takeEntry) was always
-    // wrapped; this one simply was not.
+    // ONE transaction: the entry row and the stats move together or not at all.
+    //
+    // The balance credit that used to ride in here is gone -- the money is in
+    // the arcade ledger and is settled against this seat's hold, by a ref that
+    // makes paying twice impossible. The old comment here recorded a real bug:
+    // crediting outside this transaction let a crash leave the entry reading
+    // 'in', so the startup sweep re-credited the stake ON TOP of the payout and
+    // then stamped the row 'refunded', hiding minted money from every later
+    // reconciliation. An idempotent ref is a stronger fix than a transaction
+    // was, because it survives the process dying between the two systems.
     this.db.exec("BEGIN");
     try {
-      if (returnedLamports > 0) {
-        this.db
-          .prepare("UPDATE players SET balance = balance + ? WHERE wallet = ?")
-          .run(returnedLamports, wallet);
-      }
       // Keyed on the seat: with multi-plate entries a wallet has several rows
       // in one round, and settling "the wallet's row" would settle one plate's
       // money onto whichever row SQLite found first.

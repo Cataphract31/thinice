@@ -12,6 +12,7 @@ import {
 } from "@zinc/engine";
 import { CONFIG, toLamports, toSol } from "./config.ts";
 import type { Database } from "./db.ts";
+import { LedgerError, type ArcadeLedger } from "./arcade.ts";
 import type { NetChat, NetHistory, NetPlayer, NetState } from "./protocol.ts";
 
 /** The roster. Also the whitelist for what a client may set as its character. */
@@ -112,10 +113,45 @@ export class GameServer {
   private chatLog: Array<NetChat & { wallet: string }> = [];
   private nextChatId = 1;
 
-  constructor(private db: Database) {
+  /*
+   * WHAT A WALLET HAS, AS LAST REPORTED BY THE BOOKS.
+   *
+   * The state frame carries a balance and is sent on every broadcast, so it
+   * cannot ask the ledger each time. This is a CACHE and nothing decides
+   * anything from it: a stake is admitted or refused by `ledger.hold`, inside
+   * the arcade's own transaction, and this number is only what the screen says.
+   * It is refreshed whenever the ledger answers -- every hold and every settle
+   * comes back with the wallet's position -- and on attach.
+   *
+   * `free` is spendable; `held` is staked in rounds that have not settled yet,
+   * anywhere on this box. Kept apart because a player whose money is in flight
+   * is not broke, and a screen showing only the free half says they are.
+   */
+  private balances = new Map<string, { free: number; held: number }>();
+
+  /** Seats whose ledger settlement has not been confirmed. Retried at close. */
+  private unsettled = new Set<number>();
+
+  constructor(private db: Database, private ledger: ArcadeLedger) {
     this.rulesHash = sha256Hex(canonicalConfig(this.config));
     this.roundId = db.lastRoundId();
     this.teamWins = db.teamWins();
+  }
+
+  /** Remember what the books last said about a wallet. Display only. */
+  private noteBalance(wallet: string, b: { freeLamports: number; heldLamports: number }): void {
+    this.balances.set(wallet, { free: b.freeLamports, held: b.heldLamports });
+  }
+
+  /** Ask the books where a wallet stands, and tell the screen. Never decides. */
+  private async refreshBalance(wallet: string): Promise<void> {
+    try {
+      this.noteBalance(wallet, await this.ledger.balanceOf(wallet));
+      for (const s of this.sessions) if (s.wallet === wallet) s.send(this.stateFor(s));
+    } catch {
+      // The books being briefly unreachable must not take the table down. The
+      // screen keeps whatever it last knew, and no decision rests on it.
+    }
   }
 
   start(): void {
@@ -169,6 +205,7 @@ export class GameServer {
 
   attach(s: Session): void {
     this.sessions.add(s);
+    void this.refreshBalance(s.wallet);
     this.pushHistory(s);
     // The backlog, so a fresh arrival lands in a room mid-conversation
     // instead of one that looks empty until somebody happens to speak.
@@ -265,15 +302,26 @@ export class GameServer {
   private autoJoin(): void {
     for (const s of this.uniqueSessions()) {
       const row = this.db.player(s.wallet);
-      if (row.autoEnabled) this.autoBuy(s, row.autoPlates ?? 1);
+      // Deliberately not awaited: this runs from the lobby tick, which is
+      // synchronous and must stay that way. Each buy settles on its own and a
+      // failure is already a normal outcome -- see autoBuy.
+      if (row.autoEnabled) void this.autoBuy(s, row.autoPlates ?? 1).catch(() => {});
     }
   }
 
-  /** Buys up to auto's plate count, stopping at any refusal (cap, funds). */
-  private autoBuy(s: Session, want: number): void {
+  /**
+   * Buys up to auto's plate count, stopping at any refusal (cap, funds).
+   *
+   * Async now, because buying a plate moves money and money lives across an
+   * HTTP call. Its callers run inside the lobby, which is a waiting phase with
+   * seconds to spare, so the buy landing a moment later is invisible -- and a
+   * refusal was always the normal outcome for a wallet that cannot cover it.
+   */
+  private async autoBuy(s: Session, want: number): Promise<void> {
     const target = Math.min(Math.max(1, want), CONFIG.maxPlatesPerWallet);
     while ((this.seatsOf.get(s.wallet)?.length ?? 0) < target) {
-      if (this.join(s) !== null) break;
+      if (this.phase !== "lobby") break;
+      if ((await this.join(s)) !== null) break;
     }
   }
 
@@ -284,7 +332,7 @@ export class GameServer {
    * the cap protects the LOBBY, because the field is finite and one whale
    * filling it locks everyone else out of the round.
    */
-  join(s: Session): string | null {
+  async join(s: Session): Promise<string | null> {
     if (this.phase !== "lobby") return "the lattice is already sealed";
     const mine = this.seatsOf.get(s.wallet) ?? [];
     if (mine.length >= CONFIG.maxPlatesPerWallet) {
@@ -297,11 +345,58 @@ export class GameServer {
     if (this.seats.size >= this.config.field.max) return "the lattice is full";
     const stake = toLamports(this.config.entry);
     const id = this.nextSeatId++;
-    // Read BEFORE the debit, so the lifetime snapshot on the profile card is
-    // "as of stepping on" rather than dipping by one unsettled stake.
+    // Read BEFORE the stake moves, so the lifetime snapshot on the profile card
+    // is "as of stepping on" rather than dipping by one unsettled stake.
     const row = this.db.player(s.wallet);
-    // Debit and entry row commit together, or the seat does not exist.
-    if (!this.db.takeEntry(this.roundId, s.wallet, stake, id)) return "not enough balance";
+
+    /*
+     * THE MONEY MOVES FIRST, AND IN THE ARCADE'S BOOKS.
+     *
+     * The hold IS the affordability check: it refuses atomically inside the
+     * ledger's own transaction, so there is no window in which this game
+     * believes a wallet can cover a stake that another game on this box has
+     * just taken. Reading a balance and then deciding would have exactly that
+     * window.
+     *
+     * If it throws for any other reason -- the books unreachable, no service
+     * key -- the seat is NOT sold. Failing closed costs a player one refused
+     * join; failing open costs the house a round it never took payment for.
+     */
+    try {
+      this.noteBalance(s.wallet, await this.ledger.hold(s.wallet, stake, this.roundId, id));
+    } catch (err) {
+      if (err instanceof LedgerError && err.isBroke) return "not enough balance";
+      /*
+       * A GUEST HAS NO WALLET, AND THEREFORE NO MONEY.
+       *
+       * Guest ids are namespaced `guest:...` so they can never collide with a
+       * real address -- which also means the ledger has no account for them and
+       * refuses with BAD_ACCOUNT. That is correct and permanent: money is keyed
+       * by wallet across this whole arcade, and an id minted by this server is
+       * not one. Said plainly here, because the generic message below would
+       * blame the books for a player simply not having signed in.
+       */
+      if (err instanceof LedgerError && err.code === "BAD_ACCOUNT") {
+        return "connect a wallet to play for real -- a guest id holds no money";
+      }
+      const why = err instanceof LedgerError ? err.code : "unknown";
+      console.error(`[thin-ice] hold failed for ${s.wallet} r${this.roundId}s${id}: ${why}`);
+      return "the books are unreachable -- your money has not been touched";
+    }
+
+    /*
+     * And only then the local record. If THIS throws the money is already held
+     * with no seat to show for it -- so it is given straight back, and the
+     * player is told nothing happened. The release is idempotent, so a second
+     * attempt during the startup sweep is free.
+     */
+    try {
+      this.db.takeEntry(this.roundId, s.wallet, stake, id);
+    } catch (err) {
+      void this.ledger.release(this.roundId, id, "seat could not be recorded").catch(() => {});
+      console.error(`[thin-ice] takeEntry failed after a hold: ${(err as Error).message}`);
+      return "the table could not record that seat -- nothing was staked";
+    }
 
     this.db.touch(s.wallet);
     this.seats.set(id, {
@@ -330,15 +425,26 @@ export class GameServer {
    * Auto play switches off with it: stepping off IS the statement that you
    * are done, and auto re-buying the seat back would make the button a lie.
    */
-  unjoin(s: Session): string | null {
+  async unjoin(s: Session): Promise<string | null> {
     if (this.phase !== "lobby") return "the lattice is already sealed";
     const mine = this.seatsOf.get(s.wallet);
     if (!mine || mine.length === 0) return null;
     for (const id of mine) {
       if (this.db.refundLobbyEntry(this.roundId, s.wallet, id)) {
         this.seats.delete(id);
+        // The stake goes back in the books. Idempotent, so the startup sweep
+        // finding the same hold later is free rather than a double refund.
+        try {
+          await this.ledger.release(this.roundId, id, "stepped off before the seal");
+        } catch (err) {
+          // The row is already gone locally and the hold is still open; the
+          // sweep will return it. Logged rather than shown, because from the
+          // player's side stepping off did work.
+          console.error(`[thin-ice] release failed r${this.roundId}s${id}: ${(err as Error).message}`);
+        }
       }
     }
+    void this.refreshBalance(s.wallet);
     this.seatsOf.delete(s.wallet);
     const row = this.db.player(s.wallet);
     if (row.autoEnabled) {
@@ -410,9 +516,6 @@ export class GameServer {
 
   private settleExit(wallet: string, seat: number, sol: number, ticks: number, outcome: string): void {
     const lamports = toLamports(sol);
-    // The balance credit rides INSIDE settleEntry's transaction: credited
-    // separately, a crash between the two made the startup sweep re-credit
-    // the stake on top of the payout (see settleEntry).
     const multiple = sol / this.config.entry;
     this.db.settleEntry(
       this.roundId,
@@ -427,6 +530,31 @@ export class GameServer {
     for (const s of this.sessions) {
       if (s.wallet === wallet) s.session += sol - this.config.entry;
     }
+
+    /*
+     * AND THE MONEY, WHICH IS NOT AWAITED HERE ON PURPOSE.
+     *
+     * This runs inside the tick loop -- a player cashing out, or dying, while
+     * the round is still walking. Awaiting an HTTP call in there would put the
+     * arcade's latency inside the game's clock, and a slow ledger would stretch
+     * the tick every player is watching.
+     *
+     * It is safe to fire because the ref makes it exactly-once: `settleRound`
+     * retries every seat that has not confirmed when the round closes, and the
+     * startup sweep catches anything after a crash. The worst case is that a
+     * payout lands a moment late in the books, never that it lands twice or not
+     * at all.
+     */
+    this.unsettled.add(seat);
+    void this.ledger
+      .settle(this.roundId, seat, lamports)
+      .then(() => {
+        this.unsettled.delete(seat);
+        void this.refreshBalance(wallet);
+      })
+      .catch((err) => {
+        console.error(`[thin-ice] settle deferred r${this.roundId}s${seat}: ${(err as Error).message}`);
+      });
   }
 
   private seal(): void {
@@ -499,7 +627,7 @@ export class GameServer {
       // never tops up a position the player chose themselves.
       if (this.seatsOf.has(s.wallet)) continue;
       const row = this.db.player(s.wallet);
-      if (row.autoEnabled) this.autoBuy(s, row.autoPlates ?? 1);
+      if (row.autoEnabled) void this.autoBuy(s, row.autoPlates ?? 1).catch(() => {});
     }
   }
 
@@ -681,6 +809,36 @@ export class GameServer {
     this.phaseEnd = now + this.config.timing.resultMs;
     for (const s of this.sessions) this.pushHistory(s);
     this.broadcast(true);
+
+    // Anything the tick loop fired and did not get confirmation for. Idempotent
+    // by ref, so retrying a settle that actually succeeded costs one request
+    // and changes nothing.
+    void this.reconcileRound(this.roundId);
+  }
+
+  /**
+   * Make the books agree with the round that just ended.
+   *
+   * Settlement is fired from the tick loop without awaiting, so a slow or
+   * briefly unreachable ledger leaves seats marked unsettled. This retries
+   * them once the round is over and nothing is watching the clock. What it
+   * cannot fix -- the ledger still down -- is left to the startup sweep, which
+   * releases every hold this game still has open.
+   */
+  private async reconcileRound(roundId: number): Promise<void> {
+    if (this.unsettled.size === 0) return;
+    const pending = [...this.unsettled];
+    for (const seat of pending) {
+      const owed = this.db.owedFor(roundId, seat);
+      if (owed === null) continue;
+      try {
+        await this.ledger.settle(roundId, seat, owed);
+        this.unsettled.delete(seat);
+      } catch (err) {
+        console.error(`[thin-ice] reconcile r${roundId}s${seat} failed: ${(err as Error).message}`);
+      }
+    }
+    for (const s of this.sessions) void this.refreshBalance(s.wallet);
   }
 
   // ------------------------------------------------------------------ output
@@ -829,7 +987,7 @@ export class GameServer {
           max: CONFIG.maxPlatesPerWallet,
         },
       },
-      wallet: toSol(row.balance),
+      wallet: toSol(this.balances.get(s.wallet)?.free ?? 0),
       session: s.session,
       charId: row.charId,
       // Compared on the full wallet, never the display name: shortAddress

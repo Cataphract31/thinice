@@ -5,18 +5,46 @@ import nacl from "tweetnacl";
 import { WebSocketServer, type WebSocket } from "ws";
 import { CONFIG } from "./config.ts";
 import { Database } from "./db.ts";
+import { createArcadeLedger } from "./arcade.ts";
 import { CHARS, GameServer, type Session } from "./game.ts";
 import type { ClientMessage, NetChat, NetHistory, NetState, ServerMessage } from "./protocol.ts";
 
 const db = new Database();
 
-// A round interrupted by a crash left stakes debited and never settled. Refund
-// them before opening anything new: money that silently evaporates on restart
-// is the one bug a ledger may never have.
-const refunded = db.refundOpenEntries();
-if (refunded > 0) console.log(`refunded ${refunded} entries from an unfinished round`);
+/*
+ * THE BOOKS, AND THE SWEEP THAT MAKES A CRASH SURVIVABLE.
+ *
+ * A round interrupted by a crash left stakes held and never settled. The local
+ * rollback marks those entries refunded; `ledger.sweep()` gives the money back,
+ * releasing every hold this game still has open. Money that silently evaporates
+ * on restart is the one bug a ledger may never have.
+ *
+ * The sweep runs BEFORE the first lobby opens, so no new stake can be taken
+ * while the old ones are still in flight -- and it is idempotent, so a restart
+ * loop cannot refund anything twice.
+ */
+const ledger = createArcadeLedger();
+if (!ledger.enabled) {
+  console.warn(
+    "NO LEDGER_KEY: this server cannot take a stake. Rounds will open and every join will be refused.",
+  );
+}
 
-const game = new GameServer(db);
+const refunded = db.refundOpenEntries();
+if (refunded > 0) console.log(`rolled back ${refunded} entries from an unfinished round`);
+if (ledger.enabled) {
+  try {
+    const released = await ledger.sweep();
+    if (released > 0) console.log(`released ${released} stranded holds back to their wallets`);
+  } catch (err) {
+    // Refusing to boot would leave the table down for a ledger hiccup; the
+    // holds stay open and the next restart sweeps them. Loud, because money
+    // sitting in escrow with no round behind it is a thing somebody must see.
+    console.error(`COULD NOT SWEEP STRANDED HOLDS: ${(err as Error).message}`);
+  }
+}
+
+const game = new GameServer(db, ledger);
 game.start();
 
 /** What a wallet has to sign to prove it is really theirs. */
@@ -247,15 +275,19 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     if (!msg || typeof msg !== "object" || typeof msg.t !== "string") return;
     // One malformed or unlucky request must never take the casino down with
     // it: everyone else is mid-round and would lose their stake to a restart.
-    try {
-      handle(msg);
-    } catch (err) {
+    // `handle` is async because two of its cases move money and money is an
+    // HTTP call away. The catch has to become a rejection handler with it, or
+    // a throw inside one of those awaits unwinds past this try to the
+    // process-level handler -- which is the one thing this block exists to
+    // prevent: everyone else is mid-round and would lose their stake to a
+    // restart.
+    void handle(msg).catch((err) => {
       console.error("message failed", msg.t, err);
       send({ t: "error", message: "server error" });
-    }
+    });
   });
 
-  function handle(msg: ClientMessage): void {
+  async function handle(msg: ClientMessage): Promise<void> {
     switch (msg.t) {
       case "auth": {
         // Already seated: nothing here may run. Processing a late auth used
@@ -340,14 +372,17 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
       case "join": {
         if (!session) return;
-        const err = game.join(session);
+        // Awaited now: buying a plate moves money, and money is an HTTP call
+        // away. The socket handler is already async, so the only change is
+        // that the refusal arrives when the books have actually answered.
+        const err = await game.join(session);
         if (err) send({ t: "error", message: err });
         return;
       }
 
       case "unjoin": {
         if (!session) return;
-        const err = game.unjoin(session);
+        const err = await game.unjoin(session);
         if (err) send({ t: "error", message: err });
         return;
       }
