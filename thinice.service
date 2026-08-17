@@ -1,0 +1,58 @@
+# THIN ICE, on the box.
+#
+#   sudo cp thinice.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart thinice
+#   journalctl -fu thinice
+#
+# This unit was hand-written on the machine and existed nowhere else, which
+# meant a box rebuild lost it and nobody could review what the live server was
+# actually being told. It is in the repository now.
+
+[Unit]
+Description=THIN ICE -- crash game server
+# The arcade holds the books this game moves money in, and this process fails
+# closed without them: it wants gielinor up, but does not require it, because a
+# ledger that is briefly down should mean "no stakes for a minute" and not "the
+# game server is also down and takes a manual restart".
+After=network-online.target gielinor.service
+Wants=network-online.target gielinor.service
+
+[Service]
+Type=simple
+User=thinice
+WorkingDirectory=/opt/thinice
+ExecStart=/usr/bin/npm run server
+Restart=always
+RestartSec=3
+
+Environment=NODE_ENV=production
+Environment=PORT=8787
+Environment=DB_PATH=/var/lib/thinice/zinc.db
+
+# -- the arcade's books ------------------------------------------------------
+#
+# LEDGER_KEY, ARCADE_LEDGER_URL and ARCADE_AUTH_URL, in ONE file shared with
+# gielinor.service and cursors.service. See the long note in gielinor.service:
+# the key is the whole authority to move anybody's money on this box, and three
+# copies of it is not a filing problem but a rotation hazard.
+#
+# THE URLS ARE LOOPBACK AND MUST STAY LOOPBACK. apps/server/src/arcade.ts
+# refuses to start if LEDGER_KEY is set and the ledger URL is not on 127.0.0.1,
+# because posting a service key to a public origin is a compromise that looks
+# exactly like ordinary traffic. Caddy terminates TLS in front of both
+# processes, so they are already on the same machine.
+#
+# No `-` prefix: a missing file must stop this unit rather than bring up a
+# server that looks healthy and refuses every stake.
+EnvironmentFile=/etc/arcade/arcade.env
+
+# The database is this game's own -- rounds, seats, chat. Not money: money is
+# the arcade's, and `players.balance` was dropped by migration.
+StateDirectory=thinice
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
