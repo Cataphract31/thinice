@@ -412,6 +412,48 @@ export class GameServer {
     }
 
     /*
+     * EVERY GUARD AT THE TOP OF THIS FUNCTION IS ASKED AGAIN, BECAUSE THE
+     * AWAIT ABOVE THREW THE FIRST ANSWERS AWAY.
+     *
+     * `index.ts` dispatches with `void handle(msg)` and the rate limit is a
+     * burst budget rather than a lock, so two bond presses in one tick both
+     * enter this function. Before this block they both read the caps, both
+     * awaited the hold, and both wrote -- and the write at the bottom used
+     * `mine`, a snapshot taken BEFORE the await, so the second `set` landed on
+     * top of the first and one seat id vanished from `seatsOf`.
+     *
+     * That is not a cap being loose, it is a plate the player cannot reach.
+     * `unjoin` and `cashOut` both walk `seatsOf`, so an orphaned seat cannot be
+     * refunded in the lobby and cannot be banked during the round -- it rides
+     * to whatever the ice does to it, having been paid for. Measured before the
+     * fix: two presses, two holds, two seats, one id in `seatsOf`.
+     *
+     * CURSORS solved this first and this is its shape. `commitDeploy` re-runs
+     * the whole of `checkDeploy` after the hold returns and hands the money
+     * back if it now fails; see server/sim.js. Everything from here to the end
+     * of this function is synchronous, so the re-check and the write cannot be
+     * split by another join the way the original pair was.
+     */
+    const mineNow = this.seatsOf.get(s.wallet) ?? [];
+    const stale =
+      this.phase !== "lobby"
+        ? "the lattice is already sealed"
+        : mineNow.length >= CONFIG.maxPlatesPerWallet
+          ? `plate limit is ${CONFIG.maxPlatesPerWallet} per round`
+          : this.seats.size >= this.config.field.max
+            ? "the lattice is full"
+            : null;
+    if (stale) {
+      // Idempotent, and the startup sweep is the backstop if it does not land.
+      void this.ledger
+        .release(this.roundId, id, "the lattice changed while the stake was moving")
+        .catch((err) =>
+          console.error(`[thin-ice] release after a stale join: ${(err as Error).message}`),
+        );
+      return stale;
+    }
+
+    /*
      * And only then the local record. If THIS throws the money is already held
      * with no seat to show for it -- so it is given straight back, and the
      * player is told nothing happened. The release is idempotent, so a second
@@ -440,7 +482,8 @@ export class GameServer {
         best: row.bestMultiple,
       },
     });
-    this.seatsOf.set(s.wallet, [...mine, id]);
+    // `mineNow`, never `mine`: the list read before the await is the whole bug.
+    this.seatsOf.set(s.wallet, [...mineNow, id]);
     this.broadcast(true);
     return null;
   }

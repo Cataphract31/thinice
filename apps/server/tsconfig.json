@@ -14,6 +14,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
+    /* The lamport arithmetic is the arcade's own JavaScript, vendored verbatim
+       -- see tools/vendor-arcade.mjs. checkJs stays off deliberately: that file
+       is not ours to make strict-clean, and editing it to satisfy this compiler
+       would be exactly the drift the copy exists to prevent. */
+    "allowJs": true,
+    "checkJs": false,
     "noEmit": true,
     "types": ["node"],
     "baseUrl": ".",
@@ -21,5 +27,5 @@
       "@zinc/engine": ["../../packages/engine/src/index.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "vendor"]
 }

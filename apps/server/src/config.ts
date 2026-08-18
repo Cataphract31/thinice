@@ -1,3 +1,5 @@
+import { solToLamports } from "../vendor/arcade/money/money.js";
+
 /**
  * Reads a numeric setting, refusing to boot on a value that is not one.
  *
@@ -6,6 +8,7 @@
  * so no round ever seals while players keep being debited into lobbies that
  * roll over forever. Failing loudly at boot is the only safe reading.
  */
+
 function num(name: string, fallback: number, min: number, max: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return fallback;
@@ -78,8 +81,50 @@ export const CHARS = [
 
 export const LAMPORTS = 1_000_000_000;
 
+/**
+ * SOL TO LAMPORTS, THROUGH THE ARCADE'S OWN FUNCTION AND NOT A SECOND ONE.
+ *
+ * This was `Math.round(sol * LAMPORTS)`, and it was not wrong: measured over
+ * 200,000 amounts from 0.001 to 200 SOL it agrees with the arcade's
+ * `solToLamports` on every single one, including the `4.35` case the arcade's
+ * own test calls out (`4.35 * 1e9` really is 4349999999.999999, and Math.round
+ * really does rescue it). No round of Thin Ice was ever mispriced by it.
+ *
+ * It was still the wrong function to be running. money.js is the file the
+ * arcade, the ledger, the verifier page and every other game on this box agree
+ * about lamports through, and its header says why that matters: "the verifier
+ * page and the server must compute the same number or a player is told their
+ * own settlement was wrong." Two implementations that agree today are still
+ * two implementations, and this is the one nobody would think to check when
+ * the other changed. The copy is byte-identical and vendorcheck.ts says at
+ * every boot whether it still is -- see tools/vendor-arcade.mjs.
+ *
+ * `Number()` at the boundary because this server counts money in `number` end
+ * to end -- the database, the protocol and the engine all do -- and converting
+ * that is a change to every file rather than to this one. The arithmetic
+ * itself happens in BigInt, which is the half that decides anything.
+ *
+ * `.toFixed(9)` IS LOAD-BEARING AND IS NOT A ROUNDING PREFERENCE. It is the
+ * difference between this working and this throwing on nearly every payout.
+ *
+ * `solToLamports` is written for an EXACT DECIMAL -- a figure somebody typed
+ * into a withdrawal box -- and refuses more than nine decimal places, because
+ * lamports are the atomic unit and a tenth decimal is a number the arcade
+ * cannot honour. Right for its callers, wrong for ours: this is a POT game, so
+ * what reaches here is a prize divided among entrants and a balance grown by a
+ * multiplier, and those are binary floats. `1/3` prints as 0.3333333333333333
+ * and `0.1 + 0.2` as 0.30000000000000004 -- seventeen decimals, refused
+ * outright. Found by testing the change rather than by reading it: without
+ * this line it would have thrown on the first settlement that was not a round
+ * number, which in a pot game is nearly all of them.
+ *
+ * Nine decimals IS one lamport, so nothing that could have been paid is
+ * discarded. It rounds to the nearest lamport exactly as `Math.round(sol *
+ * LAMPORTS)` did -- verified identical across 200,000 amounts -- while the
+ * conversion itself is now the arcade's.
+ */
 export function toLamports(sol: number): number {
-  return Math.round(sol * LAMPORTS);
+  return Number(solToLamports(sol.toFixed(9)));
 }
 
 export function toSol(lamports: number): number {

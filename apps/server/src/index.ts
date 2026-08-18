@@ -6,6 +6,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { CONFIG } from "./config.ts";
 import { Database } from "./db.ts";
 import { createArcadeLedger } from "./arcade.ts";
+import { reportVendoredMoney } from "./vendorcheck.ts";
 import { CHARS, GameServer, type Session } from "./game.ts";
 import type { ClientMessage, NetChat, NetHistory, NetState, ServerMessage } from "./protocol.ts";
 
@@ -29,6 +30,16 @@ if (!ledger.enabled) {
     "NO LEDGER_KEY: this server cannot take a stake. Rounds will open and every join will be refused.",
   );
 }
+
+/*
+ * ASKED ONCE, AT BOOT, ON THE MACHINE THAT CAN ALWAYS ANSWER IT.
+ *
+ * config.ts converts every SOL figure through the arcade's own money.js, which
+ * lives here as a byte-for-byte copy. Nothing else in this repository checks
+ * that the copy is still honest -- there is no unit suite, and itest-ledger.mjs
+ * needs two live servers -- so the server checks itself.
+ */
+const moneyRule = reportVendoredMoney();
 
 const refunded = db.refundOpenEntries();
 if (refunded > 0) console.log(`rolled back ${refunded} entries from an unfinished round`);
@@ -118,7 +129,10 @@ const http = createServer((req, res) => {
   // A trivial health endpoint, so "is the server up" never needs a websocket.
   if (req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
+    // `moneyRule` is "matches", "DRIFTED", or "unchecked" -- see vendorcheck.ts.
+    // On a machine with no arcade checkout the honest answer is that nobody
+    // asked, which is not the same as an answer of yes.
+    res.end(JSON.stringify({ ok: true, ledger: ledger.enabled, moneyRule }));
     return;
   }
   res.writeHead(404);
