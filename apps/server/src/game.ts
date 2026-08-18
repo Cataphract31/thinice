@@ -499,23 +499,63 @@ export class GameServer {
     if (this.phase !== "lobby") return "the lattice is already sealed";
     const mine = this.seatsOf.get(s.wallet);
     if (!mine || mine.length === 0) return null;
+
+    /*
+     * DECIDE AND MUTATE FIRST, WITH NO AWAIT ANYWHERE IN IT. THEN MOVE MONEY.
+     *
+     * This loop used to await the ledger release for every plate, in the middle
+     * of deciding. `seal()` is fully synchronous and fires off a timer, so it
+     * lands between two of those awaits whenever a countdown expires while a
+     * release is in the air -- and the loop carried on refunding against a
+     * round that was already live. `refundLobbyEntry` still found the row, the
+     * stake still went back, and the seat was ALREADY an entrant.
+     *
+     * That is a solvency leak rather than an accounting oddity, because the
+     * prize is sized off the entrant count:
+     *
+     *     grossHandle = entrants.length * config.entry
+     *     pot         = grossHandle * (1 - rake)
+     *
+     * so a seat sealed in and then refunded inflates the pot by one entry the
+     * house does not hold. The phantom's balance redistributes to whoever
+     * survives and `~house` pays the difference. Measured before this change:
+     * three seats, one wallet steps off as the lobby seals, and the round pays
+     * a pot sized on two entries with one stake behind it -- 0.1 SOL of prize
+     * nobody put in.
+     *
+     * Splitting it in two closes the window rather than narrowing it. There is
+     * no await between reading the phase and finishing every mutation, so
+     * `seal()` cannot run inside the decision at all -- and neither can a
+     * concurrent `join`, which is what used to make the blanket
+     * `seatsOf.delete` below wipe a plate bought while this was awaiting.
+     */
+    const refunded: number[] = [];
     for (const id of mine) {
       if (this.db.refundLobbyEntry(this.roundId, s.wallet, id)) {
         this.seats.delete(id);
-        // The stake goes back in the books. Idempotent, so the startup sweep
-        // finding the same hold later is free rather than a double refund.
-        try {
-          await this.ledger.release(this.roundId, id, "stepped off before the seal");
-        } catch (err) {
-          // The row is already gone locally and the hold is still open; the
-          // sweep will return it. Logged rather than shown, because from the
-          // player's side stepping off did work.
-          console.error(`[thin-ice] release failed r${this.roundId}s${id}: ${(err as Error).message}`);
-        }
+        refunded.push(id);
+      }
+    }
+
+    // Exactly what was refunded, never the whole wallet: anything bought while
+    // this was running is somebody's live plate and is not ours to forget.
+    const left = (this.seatsOf.get(s.wallet) ?? []).filter((id) => !refunded.includes(id));
+    if (left.length > 0) this.seatsOf.set(s.wallet, left);
+    else this.seatsOf.delete(s.wallet);
+
+    // And only now the books. The stake goes back; idempotent, so the startup
+    // sweep finding the same hold later is free rather than a double refund.
+    for (const id of refunded) {
+      try {
+        await this.ledger.release(this.roundId, id, "stepped off before the seal");
+      } catch (err) {
+        // The row is already gone locally and the hold is still open; the
+        // sweep will return it. Logged rather than shown, because from the
+        // player's side stepping off did work.
+        console.error(`[thin-ice] release failed r${this.roundId}s${id}: ${(err as Error).message}`);
       }
     }
     void this.refreshBalance(s.wallet);
-    this.seatsOf.delete(s.wallet);
     const row = this.rowFor(s);
     if (row.autoEnabled) {
       this.db.setAuto(s.wallet, false, row.autoTarget, row.autoPlates ?? 1);
