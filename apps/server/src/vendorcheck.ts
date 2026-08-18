@@ -45,7 +45,22 @@ export type VendorStatus = "matches" | "DRIFTED" | "unchecked";
  */
 function committedBytes(repo: string, rel: string): Buffer {
   try {
-    return execFileSync("git", ["-C", repo, "show", `HEAD:${rel}`], { maxBuffer: 8 * 1024 * 1024 });
+    return execFileSync("git", ["-C", repo, "show", `HEAD:${rel}`], {
+      maxBuffer: 8 * 1024 * 1024,
+      // GIT'S STDERR IS DISCARDED BECAUSE THE FALLBACK IS THE POINT.
+      //
+      // On the box this service runs as its own user and the arcade checkout
+      // belongs to another, so git refuses with "detected dubious ownership"
+      // -- correctly, and every boot printed a `fatal:` line for a condition
+      // that is handled two lines below. An alarm that shouts on the healthy
+      // path is an alarm people learn to scroll past.
+      //
+      // The catch reads the file instead, which on the box is the same bytes:
+      // the arcade there is a clean checkout, so its working tree IS its
+      // commit. Deliberately NOT fixed with `safe.directory`, which would be a
+      // privileged config change on a shared box to silence a message.
+      stdio: ["ignore", "pipe", "ignore"],
+    });
   } catch {
     return fs.readFileSync(path.join(repo, rel));
   }
