@@ -54,5 +54,56 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 
+# WHAT THIS PROCESS MAY DO, WHICH IS NEARLY NOTHING.
+#
+# Matched to gielinor.service, which is the unit these three sit beside on the
+# same box. The reasoning is written out there in full; the short version is that
+# a process which answers HTTP and writes one database has no business reaching
+# any of the below, and a compromised Node process is exactly what this bounds.
+
+# ITS OWN DATABASE IS NOT WORLD-READABLE. Without UMask= a service inherits 0022,
+# so node creates the database 0644 -- readable by every other account on this
+# box, including the other games. These databases hold balances and, in Thin
+# Ice's case, the bearer tokens that ARE a player's identity.
+UMask=0077
+
+# Nothing here binds a port below 1024, so no capability is needed at all.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+# Other processes become invisible. ProcSubset=pid is deliberately NOT set: it
+# also hides /proc/stat, where Node reads CPU information.
+ProtectProc=invisible
+
+# AF_NETLINK is in the list because glibc's getaddrinfo uses it to enumerate
+# interfaces; without it DNS fails in a way that looks like the network being down.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# MemoryDenyWriteExecute IS DELIBERATELY ABSENT, here as in gielinor.service: V8
+# compiles JavaScript to machine code at runtime and needs pages that are
+# writable and then executable, so it would not harden this service, it would
+# stop it booting.
+
+# ProtectSystem=strict was missing entirely, so this service could write anywhere
+# its user could reach -- including /opt/thinice, the tree it runs FROM, which
+# turns any file-write bug into something that survives a restart. Its database
+# lives under StateDirectory=thinice, which stays writable on its own.
+ProtectSystem=strict
+
 [Install]
 WantedBy=multi-user.target
