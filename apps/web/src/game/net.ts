@@ -14,6 +14,7 @@ import {
   sfxTick,
   sfxYouDied,
 } from "../audio/sound";
+import { arcadeToken, clearArcade, onArcadeDomain, SHARED_DOMAIN } from "./arcade";
 
 /**
  * The networked client.
@@ -124,8 +125,6 @@ const WALLET_SESSION_KEY = "zinc.walletSession";
  * signature and it cannot produce one.
  */
 const SHARED_COOKIE = "zinc_ice";
-/** The family of hosts this arcade lives on. */
-const SHARED_DOMAIN = ".voidsolana.com";
 
 /*
  * AND THE OPT-IN ITSELF, WHICH IS NOT THE SEAT.
@@ -153,30 +152,13 @@ const NAME_COOKIE = "zinc_wallet";
  * verifies it against the one issuer that made it. A player who signed in
  * anywhere walks in here already proven, with no Phantom prompt at all -- see
  * the `arcade` message in the server's protocol.
+ *
+ * That cookie, and the two questions asked of it, are IMPORTED rather than
+ * written here now. They lived here first because a seat was the only thing
+ * this game ever wanted from the arcade; the bank wants the same session for a
+ * different reason, and one definition of "am I signed in to the arcade" is
+ * the only safe number of definitions. See game/arcade.ts.
  */
-const ARCADE_COOKIE = "zinc_session";
-
-/** Forget a rejected arcade session, everywhere it is read. */
-function clearArcade(): void {
-  if (!onArcadeDomain()) return;
-  document.cookie =
-    `${ARCADE_COOKIE}=; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=0; SameSite=Lax; Secure`;
-}
-
-function arcadeToken(): string | null {
-  try {
-    const m = document.cookie.match(new RegExp("(?:^|; )" + ARCADE_COOKIE + "=([^;]*)"));
-    const raw = m && m[1] ? decodeURIComponent(m[1]) : "";
-    return /^[0-9a-f]{64}$/.test(raw) ? raw : null;
-  } catch {
-    return null;
-  }
-}
-
-function onArcadeDomain(): boolean {
-  const h = location.hostname;
-  return h === "voidsolana.com" || h.endsWith(SHARED_DOMAIN);
-}
 
 function readShared(): { wallet: string; token: string } | null {
   try {
@@ -811,6 +793,24 @@ export class NetClient {
 
   join(): void {
     this.send({ t: "join" });
+  }
+
+  /**
+   * "Go and read the books again."
+   *
+   * This game does not hold anybody's balance; it shows what the arcade's
+   * ledger last said, and it re-reads that when something here moves money.
+   * A deposit does not move money HERE, so without this the wallet on screen
+   * stays a round or so behind the money that has already landed, which is
+   * exactly the wrong number to be stale on the one screen where somebody is
+   * watching for it.
+   *
+   * Sent, never awaited: the answer arrives as an ordinary state frame. A
+   * server too old to know the word ignores it, and the number simply catches
+   * up at the end of the round the way it did before.
+   */
+  sync(): void {
+    this.send({ t: "sync" });
   }
 
   walkOut(): void {

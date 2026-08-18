@@ -258,9 +258,18 @@ export class GameServer {
     return { ...pub, you: w === wallet };
   }
 
-  /** Pushes a fresh state to one session — after a deposit or withdrawal. */
+  /**
+   * Re-read the books for one session, then push what they said.
+   *
+   * For after a deposit or a withdrawal, neither of which happens here: money
+   * enters and leaves at the arcade's custody edge, so nothing in this process
+   * observes it. This used to push the CACHED balance, which is the one thing
+   * it must not do on this path — the whole reason to call it is that the
+   * cached number is the stale one.
+   */
   refresh(s: Session): void {
-    if (this.sessions.has(s)) s.send(this.stateFor(s));
+    if (!this.sessions.has(s)) return;
+    void this.refreshBalance(s.wallet);
   }
 
   detach(s: Session): void {

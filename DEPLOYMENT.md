@@ -38,6 +38,15 @@ environment and you get a bundle pointing at someone's laptop. It fooled the
 author of this document during verification, which is why the grep above is
 here.
 
+`VITE_ARCADE_URL` is the same kind of variable and points at a **different
+box**: the arcade, whose custody edge the bank panel calls for balances,
+deposits and withdrawals. It defaults to the deployed arcade in
+`apps/web/vite.config.ts`, is bypassed on localhost (a local run must not sign
+in against production) and can be overridden for one page load with
+`?arcade=https://host`. Wherever this client is served from, that origin has to
+appear in the box's `ALLOWED_ORIGINS` or the browser blocks the call before it
+is sent, and the failure reads as "could not reach the arcade".
+
 If you want runtime configuration instead, the change is small and lives in
 `apps/web/src/game/session.ts` — read the URL from a `window.__CONFIG__` written
 by a small non-cached `config.js`, or from a `<meta>` tag, instead of

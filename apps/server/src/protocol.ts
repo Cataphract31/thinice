@@ -153,6 +153,16 @@ export type ClientMessage =
    */
   | { t: "resume"; wallet: string; token: string }
   | { t: "guest"; id: string }
+  /**
+   * "Re-read my balance from the books."
+   *
+   * Money enters and leaves at the arcade's custody edge, which is not this
+   * server: a deposit lands without any message ever reaching this process, so
+   * the wallet on the player's screen would sit stale until the next round
+   * settled. The bank panel sends this the moment a transfer confirms. It
+   * decides nothing, moves nothing and reads only the session's own wallet.
+   */
+  | { t: "sync" }
   | { t: "join" }
   /** Steps off during the lobby: every plate refunded, as if never bought. */
   | { t: "unjoin" }

@@ -293,16 +293,20 @@ function Stat({
   label,
   value,
   color,
+  suffix,
 }: {
   label: string;
   value: string;
   color?: string;
+  /** Sits after the number, in its own colour. The wallet's money door uses it. */
+  suffix?: JSX.Element;
 }): JSX.Element {
   return (
     <div className="text-right">
       <div className="label">{label}</div>
       <div className="tnum text-[13px] font-semibold" style={color ? { color } : undefined}>
         {value}
+        {suffix}
       </div>
     </div>
   );
@@ -311,6 +315,7 @@ function Stat({
 export function Stats({
   snap,
   mobile = false,
+  onBank,
 }: {
   snap: Snapshot;
   /**
@@ -319,6 +324,16 @@ export function Stats({
    * "focus on gameplay" means the chrome above the lattice stays thin.
    */
   mobile?: boolean;
+  /**
+   * Opens the money panel. Given only for a seated wallet: a guest's balance
+   * is house chips and there is nothing behind the press.
+   *
+   * The balance IS the door, which is the shortest possible route from "I am
+   * out of money" to doing something about it. It was the alternative to a
+   * second control in a corner nobody looks at, which is what the arcade's own
+   * bank tab was.
+   */
+  onBank?: () => void;
 }): JSX.Element {
   // The round's own result floats over the wallet in the game's own colours,
   // profit green or danger red, once the round settles.
@@ -337,10 +352,36 @@ export function Stats({
     });
   }, [snap.phase, snap.roundId, snap.you, snap.entry]);
 
+  const walletStat = (
+    <Stat
+      label="wallet"
+      value={`${snap.wallet.toFixed(3)} ◎`}
+      color="var(--color-zinc-hi)"
+      suffix={
+        onBank ? (
+          <span className="pl-1 text-[var(--color-cyan)]" aria-hidden="true">
+            +
+          </span>
+        ) : undefined
+      }
+    />
+  );
+
   return (
     <>
       <div className="relative">
-        <Stat label="wallet" value={`${snap.wallet.toFixed(3)} ◎`} color="var(--color-zinc-hi)" />
+        {onBank ? (
+          <button
+            onClick={onBank}
+            aria-label="Deposit or withdraw"
+            title="deposit or withdraw"
+            className="chip -mr-1.5 block px-1.5 py-0.5"
+          >
+            {walletStat}
+          </button>
+        ) : (
+          walletStat
+        )}
         {gain && (
           <span
             key={gain.key}

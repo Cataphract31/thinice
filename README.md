@@ -99,9 +99,15 @@ that matters publicly. It verifies in the client itself: every finished round
 replays in the browser from its revealed seed, against the commitment published
 before it sealed.
 
-> **This repo no longer contains a deposit/withdraw path at all.** Proving one
-> out is still the first item of real work before real money — but it is now
-> the arcade's edge to prove, not this game's. See [MAINNET.md](MAINNET.md).
+> **This repo still holds no key and signs nothing.** It now carries a deposit
+> and withdrawal *screen* — `apps/web/src/ui/Bank.tsx` — but every verb behind
+> it is an HTTP call to the arcade's custody edge, which is a different process
+> on a different box. The deposit half asks that edge for the bytes of a
+> transfer and hands them to the player's own wallet to approve; the withdrawal
+> half posts an amount and no destination, because the payee is whichever
+> wallet the session proved. Proving the round trip out is still the first item
+> of real work before real money, and it is the arcade's edge to prove, not
+> this game's. See [MAINNET.md](MAINNET.md).
 
 ---
 
@@ -199,9 +205,14 @@ drift from it.
 
 ## Taking this to mainnet
 
-**This game no longer banks.** It holds no keypair, opens no RPC connection,
-and has no deposit or withdrawal path — `chain.ts` and everything that called
-it were deleted, not disabled.
+**This game no longer banks.** It holds no keypair and opens no RPC connection
+— `chain.ts` and everything that called it were deleted, not disabled.
+
+It does have a bank *screen* again, which is a different claim. `Bank.tsx` and
+`game/arcade.ts` are a client for somebody else's custody edge: they read a
+balance, ask the arcade to build the bytes of a transfer, and hand those bytes
+to the player's own wallet. The server in this repo never sees any of it. The
+worst bug reachable from that screen is a request the arcade refuses.
 
 That was the last structural difference between this game and the others in
 the arcade. It used to generate its own custodial hot wallet on first boot and

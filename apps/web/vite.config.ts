@@ -25,8 +25,30 @@ import { fileURLToPath } from "node:url";
  */
 const DEFAULT_BETA = "wss://34.70.75.204.sslip.io";
 
+/**
+ * Where the ARCADE is, which is a different box from the game.
+ *
+ * This game holds no money: balances live in the arcade's shared ledger and
+ * deposits and withdrawals happen at the arcade's one custody edge. The bank
+ * panel therefore talks to a second origin.
+ *
+ * IT IS USED EVERYWHERE EXCEPT LOCALHOST, including from
+ * voidsolana.com/thin-ice/ where the panel could have gone same-origin through
+ * the portal's /api/* proxy instead. It does not: game/arcade.ts goes DIRECT to
+ * the box, matching CURSORS.EXE, on the grounds that only one of the two roads
+ * is already carrying signed custody traffic in production and money is a poor
+ * place to be the first caller down a new one. The cost is one entry in the
+ * box's ALLOWED_ORIGINS, which the two voidsolana hosts already have.
+ *
+ * `VITE_ARCADE_URL` overrides it at build time. The `?arcade=` query override
+ * is LOCALHOST ONLY -- see the note in game/arcade.ts for why that matters when
+ * the thing on the other end decides where a transfer goes.
+ */
+const DEFAULT_ARCADE = "https://gielinor.34-70-75-204.sslip.io";
+
 export default defineConfig(({ command }) => {
   const url = process.env.VITE_SERVER_URL ?? (command === "build" ? DEFAULT_BETA : undefined);
+  const arcade = process.env.VITE_ARCADE_URL ?? DEFAULT_ARCADE;
   return {
     /*
      * RELATIVE, BECAUSE THIS GAME HAS TWO HOMES.
@@ -50,7 +72,10 @@ export default defineConfig(({ command }) => {
     },
     // Set explicitly so the resolution above is the single authority over
     // what a production bundle connects to.
-    define: url !== undefined ? { "import.meta.env.VITE_SERVER_URL": JSON.stringify(url) } : {},
+    define: {
+      ...(url !== undefined ? { "import.meta.env.VITE_SERVER_URL": JSON.stringify(url) } : {}),
+      "import.meta.env.VITE_ARCADE_URL": JSON.stringify(arcade),
+    },
     server: { port: 5173 },
   };
 });

@@ -16,6 +16,17 @@ default*, *withdrawal failure is not proof of failure*, *withdrawal path
 re-verified*, and the bots interlock. None of them can regress, because none
 of the code they guarded still exists.
 
+**A SCREEN CAME BACK; THE CUSTODY DID NOT.** `apps/web/src/ui/Bank.tsx` and
+`apps/web/src/game/arcade.ts` put deposits and withdrawals back in front of
+the player, in this game's own furniture instead of the arcade's injected
+panel. Nothing on that list moves: the browser talks to the arcade's custody
+edge directly, this repo's server is not in the path, and the only bytes that
+can move money are built by the arcade and signed by the player's own wallet.
+The one thing it adds to a mainnet review is the client-side deposit flow, and
+what has to be true of it is that it never composes a transaction and never
+names a destination in either direction. Both are enforced at the arcade's
+routes, not here.
+
 ## Money and fairness
 
 - [ ] **Wipe the beta DB.** Rounds, history, profiles — all from a beta where

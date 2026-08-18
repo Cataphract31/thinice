@@ -36,15 +36,57 @@ function Dot({ color }: { color: string }): JSX.Element {
  * changes tick to tick lives here, which is the whole reason it can be read
  * at a glance and then ignored for an hour.
  */
+/**
+ * The money door, in the corner the arcade's own BANK tab used to occupy.
+ *
+ * Two states, and the difference is the whole point of it being here. A player
+ * who cannot cover the entry is one press from being able to, so it is filled
+ * and loud; a player with money on the books gets a quiet chip, because at
+ * that moment the loudest thing on the page should be the ice.
+ *
+ * Guests never see it: their balance is house chips and there is nothing
+ * behind the press.
+ */
+function FundsButton({ snap, onOpen }: { snap: Snapshot; onOpen: () => void }): JSX.Element | null {
+  if (!snap.seat || snap.seat.guest) return null;
+  const broke = snap.wallet < snap.entry;
+  return (
+    <button
+      onClick={onOpen}
+      title="deposit or withdraw"
+      className={
+        broke
+          ? "label flex items-center gap-1.5 rounded-sm bg-[var(--color-cyan)] px-2.5 py-1.5 font-semibold text-[#03211f] hover:brightness-95"
+          : "chip label flex items-center gap-1.5 px-2 py-1.5 text-[var(--color-cyan)]"
+      }
+    >
+      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M8 2.4v7.2m0 0L5.2 6.9M8 9.6l2.8-2.7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M2.8 12.4h10.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+      <span className="max-sm:hidden">{broke ? "add funds" : "funds"}</span>
+    </button>
+  );
+}
+
 export function TopNav({
   snap,
   onShowInfo,
   onShowChars,
+  onShowBank,
   onWalletChange,
 }: {
   snap: Snapshot;
   onShowInfo: () => void;
   onShowChars: () => void;
+  onShowBank: () => void;
   onWalletChange?: (connected: boolean) => void;
 }): JSX.Element {
   return (
@@ -75,6 +117,7 @@ export function TopNav({
         >
           <CharArt charId={snap.charId} pose="head" size={22} />
         </button>
+        <FundsButton snap={snap} onOpen={onShowBank} />
         <WalletButton seat={snap.seat} onChange={onWalletChange} />
         <button
           onClick={onShowInfo}
@@ -95,7 +138,7 @@ export function TopNav({
       {/* Phones have no room for a state band, so the money keeps its thin
           row here, exactly as before. */}
       <div className="mt-1.5 flex items-center justify-between gap-3 sm:hidden">
-        <Stats snap={snap} mobile />
+        <Stats snap={snap} mobile onBank={seated(snap) ? onShowBank : undefined} />
       </div>
     </div>
   );
@@ -110,7 +153,16 @@ export function TopNav({
  * three different alignments, at the same type size as the footer's legal
  * links.
  */
-export function StateBar({ snap }: { snap: Snapshot }): JSX.Element {
+/** A real wallet on the books, as opposed to a guest playing house chips. */
+const seated = (snap: Snapshot): boolean => Boolean(snap.seat && !snap.seat.guest);
+
+export function StateBar({
+  snap,
+  onShowBank,
+}: {
+  snap: Snapshot;
+  onShowBank: () => void;
+}): JSX.Element {
   return (
     <div className="shrink-0 border-b border-[var(--color-line)] max-sm:hidden">
       <div className="flex items-stretch">
@@ -124,7 +176,7 @@ export function StateBar({ snap }: { snap: Snapshot }): JSX.Element {
         {/* Wallet and session keep their own component: the wallet float
             animation lives inside it. */}
         <div className="ml-auto flex items-center gap-5 border-l border-[var(--color-line-soft)] px-4 py-1.5">
-          <Stats snap={snap} />
+          <Stats snap={snap} onBank={seated(snap) ? onShowBank : undefined} />
         </div>
       </div>
     </div>

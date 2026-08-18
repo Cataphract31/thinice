@@ -274,6 +274,17 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     chatBudget = Math.min(4, chatBudget + 1);
   }, 1500);
 
+  // And a bucket of its own for `sync`, tighter still. That message is the one
+  // in this protocol that costs an HTTP round trip to the arcade's ledger, so
+  // a socket in a loop on it does not stall this process, it leans on the
+  // books every other game on the box is also reading. Two now, one back every
+  // three seconds: a bank panel watching a deposit land asks a handful of
+  // times over a minute and never notices this exists.
+  let syncBudget = 2;
+  const syncRefill = setInterval(() => {
+    syncBudget = Math.min(2, syncBudget + 1);
+  }, 3000);
+
   ws.on("message", (raw) => {
     // Clamped at zero and reported. Post-decrementing on every message drove
     // the counter unboundedly negative, so a burst muted the socket for
@@ -428,6 +439,16 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         if (session) game.cashOut(session);
         return;
 
+      case "sync": {
+        // Guests have no books to read: their balance is this box's own row,
+        // and nothing at the custody edge can move it.
+        if (!session || session.guest) return;
+        if (syncBudget <= 0) return;
+        syncBudget--;
+        game.refresh(session);
+        return;
+      }
+
       case "setAuto": {
         if (!session) return;
         // Clamped at both ends. An unbounded or non-finite target is written
@@ -499,6 +520,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     clearInterval(ping);
     clearInterval(refill);
     clearInterval(chatRefill);
+    clearInterval(syncRefill);
     const left = (perIp.get(ip) ?? 1) - 1;
     if (left <= 0) perIp.delete(ip);
     else perIp.set(ip, left);

@@ -10,6 +10,7 @@ import { TickRing } from "@/ui/TickRing";
 import { ActionBar, AutoPanel } from "@/ui/Hud";
 import { OfflineBar, SlimFooter, StateBar, TopNav } from "@/ui/Chrome";
 import { InfoOverlay } from "@/ui/Info";
+import { BankOverlay } from "@/ui/Bank";
 import { Tutorial, tutorialSeen } from "@/ui/Tutorial";
 import { CharArt, CharSelect, ShatterCard, WinnerOverlay } from "@/ui/Chars";
 import { ChatPanel } from "@/ui/Chat";
@@ -36,6 +37,9 @@ export default function App(): JSX.Element {
     () => !tutorialSeen() || new URLSearchParams(window.location.search).has("intro"),
   );
   const [showChars, setShowChars] = useState(false);
+  // Deposits and withdrawals. This game holds no key and signs nothing: the
+  // panel talks to the arcade's custody edge and the player's own wallet.
+  const [showBank, setShowBank] = useState(false);
   const [tab, setTab] = useState<Tab>("roster");
   // Mobile only: the bottom panel folds to its tab row so the lattice gets
   // the height back. Desktop's rail ignores this entirely.
@@ -112,10 +116,11 @@ export default function App(): JSX.Element {
         snap={snap}
         onShowInfo={() => setShowInfo(true)}
         onShowChars={() => setShowChars(true)}
+        onShowBank={() => setShowBank(true)}
         onWalletChange={(connected) => client.reauth(connected)}
       />
       <OfflineBar snap={snap} />
-      <StateBar snap={snap} />
+      <StateBar snap={snap} onShowBank={() => setShowBank(true)} />
 
       <div className="mt-1.5 flex min-h-0 flex-1 gap-2 px-1.5 lg:px-3">
         <div className="relative flex min-h-0 flex-1 flex-col">
@@ -239,6 +244,17 @@ export default function App(): JSX.Element {
         <Tutorial
           onClose={() => setShowIntro(false)}
           onShowInfo={() => setShowInfo(true)}
+        />
+      )}
+      {showBank && (
+        <BankOverlay
+          onClose={() => setShowBank(false)}
+          // Money landing at the custody edge never reaches this game's server,
+          // so the wallet on screen would sit stale until the round settled.
+          onBalanceMoved={() => client.sync()}
+          // A fresh arcade session is a seat here. The socket was opened
+          // before it existed, so it has to be opened again to use it.
+          onSignedIn={() => client.reauth()}
         />
       )}
       {showChars && (
