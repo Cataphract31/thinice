@@ -1,19 +1,8 @@
 import { type JSX } from "react";
 import type { Snapshot } from "@/game/client";
 
-/**
- * Your record.
- *
- * Every number here is an accumulated fact rather than a snapshot of the
- * moment: what you have staked in total, what has come back, and therefore
- * what the game has actually cost or paid you. In networked play these come
- * from the server's database, so they survive refreshes, reconnects and
- * restarts, and cannot be edited by the browser showing them.
- */
 export function StatsPanel({ snap }: { snap: Snapshot }): JSX.Element {
   const s = snap.stats;
-  // Everything a round paid back. With the rake flat and nothing streamed or
-  // pooled on the side, this is the whole of what the game has ever returned.
   const paid = s.returned;
   const net = paid - s.wagered;
   const rtp = s.wagered > 0 ? (paid / s.wagered) * 100 : 0;
@@ -42,14 +31,10 @@ export function StatsPanel({ snap }: { snap: Snapshot }): JSX.Element {
           {net >= 0 ? "+" : ""}
           {net.toFixed(4)} ◎
         </div>
-        {/* Return over everything ever staked. Converges on the advertised
-            number over a long enough run and says nothing about a short one. */}
         <div className="label">{rtp.toFixed(1)}% returned on {s.wagered.toFixed(2)} ◎ wagered</div>
       </div>
 
       <div className="mt-1.5">
-        {/* The phone top row dropped the session counter to stay thin, so
-            this tab is where it lives — same number desktop shows up top. */}
         {row(
           "session p/l",
           `${snap.session >= 0 ? "+" : ""}${snap.session.toFixed(3)} ◎`,
@@ -57,8 +42,6 @@ export function StatsPanel({ snap }: { snap: Snapshot }): JSX.Element {
         )}
         {row("total wagered", `${s.wagered.toFixed(3)} ◎`)}
         {row("total returned", `${s.returned.toFixed(3)} ◎`)}
-        {/* Plates, not rounds: with multi-betting one round can hold several
-            of your entries, and every counter here ticks once per plate. */}
         {row("plates bought", String(s.roundsPlayed))}
         {row(
           "plates in profit",

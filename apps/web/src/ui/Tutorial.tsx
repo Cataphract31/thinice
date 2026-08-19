@@ -2,13 +2,6 @@ import { useState, type JSX } from "react";
 import { DEFAULT_CONFIG, totalRake } from "@zinc/engine";
 import { CharArt } from "./Chars";
 
-/**
- * First-visit walkthrough, modelled on the step-card onboarding the owner
- * supplied as reference: dimmed board behind, one card with a visual pane and
- * a few short steps. Copy is deliberately ape-simple — one idea per step,
- * nothing a first-timer has to parse twice.
- */
-
 const SEEN_KEY = "zinc.introSeen";
 
 export function tutorialSeen(): boolean {
@@ -23,7 +16,6 @@ function markSeen(): void {
   try {
     localStorage.setItem(SEEN_KEY, "1");
   } catch {
-    /* just shows again next visit */
   }
 }
 
@@ -34,12 +26,6 @@ interface Step {
   visual: "ice" | "number" | "ring" | "payout";
 }
 
-// Quick pitches, not documentation — one idea per line, marketing-short.
-// Anyone who wants the full math gets a door to "how it works" on the last
-// card. Numbers are derived, never restated: a hardcoded rake figure in
-// player-facing copy has already gone stale once in this build.
-// ("The dice roll", not "the ice rolls" — owner feedback: dice say "random
-// chance, every time" in one word to exactly this audience.)
 const STEPS: Step[] = [
   {
     chip: "introduction",
@@ -63,8 +49,6 @@ const STEPS: Step[] = [
     chip: "the danger",
     title: "Know when to run",
     body: [
-      // All four mechanics in two breaths, and no colour-reading advice:
-      // players tried to "game" the shades, and it is just the odds.
       "The ring shows every plate's chance to shatter, rolled fresh each time it fills.",
       "Crowds strain the ice. Exits ease it. Time thins it. Anyone can go, on any roll.",
     ],
@@ -131,8 +115,6 @@ function Visual({ kind }: { kind: Step["visual"] }): JSX.Element {
       </div>
     );
   }
-  // The ice: one hex plate with its snowflake dendrite — and the crowd of
-  // strangers actually standing on it, in the game's own pixel art.
   const pts = Array.from({ length: 6 }, (_, i) => {
     const a = (Math.PI / 3) * i;
     return `${50 + 42 * Math.cos(a)},${50 + 42 * Math.sin(a)}`;
@@ -176,7 +158,6 @@ export function Tutorial({
   onShowInfo,
 }: {
   onClose: () => void;
-  /** The door for readers: closes the walkthrough and opens "how it works". */
   onShowInfo?: () => void;
 }): JSX.Element {
   const [step, setStep] = useState(0);
@@ -190,9 +171,6 @@ export function Tutorial({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#04070a]/80 p-3 backdrop-blur-sm">
-      {/* Stacked on phones (visual on top, never hidden), side-by-side from
-          sm up, and genuinely large on big monitors — a 760px card read as a
-          postage stamp on 4K. */}
       <div className="flex w-full max-w-[780px] flex-col overflow-hidden rounded-sm bg-[var(--color-panel)] shadow-[0_20px_80px_rgba(0,0,0,0.6)] sm:flex-row xl:max-w-[940px] 2xl:max-w-[1100px]">
         <div className="flex h-[150px] w-full shrink-0 items-center justify-center bg-[var(--color-pit)] sm:h-auto sm:w-[300px] xl:w-[380px] 2xl:w-[450px]">
           <Visual kind={s.visual} />
@@ -228,8 +206,6 @@ export function Tutorial({
             </p>
           ))}
 
-          {/* The reading door, only where the pitches end. A real button:
-              gray text read as decoration, not something you could tap. */}
           {last && onShowInfo && (
             <button
               onClick={() => {

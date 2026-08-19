@@ -5,49 +5,16 @@ import { charImage } from "@/game/chars";
 import { crtOn } from "@/ui/fx";
 import { sfxStatic } from "@/audio/sound";
 
-/**
- * The seam.
- *
- * The shaft is a hexagonal lattice of ore, one plate per player. Danger is not
- * drawn as weather sitting on top of the scene — it comes from *between* the
- * plates. As the hazard climbs, the seams behind the lattice heat from cold
- * zinc blue through violet to crimson, so the room is lit by the thing that is
- * about to kill you.
- *
- * Plates hold fixed positions for the whole round. Nothing reflows when a
- * player dies, so the lattice erodes into voids and the emptying grid is what
- * explains the multiplier climbing.
- */
-
 export interface CellInput {
   id: number;
   state: CellState;
-  /**
-   * Marks the viewer's own plates, whatever their state. Ownership must ride
-   * separately from `state` — a dead plate stops being state "you" but is
-   * still yours, and a relayout that forgets that ejects it from your cluster.
-   */
   you?: boolean;
-  /**
-   * Rim tint (0-360) shared by a multi-plate owner's cluster, so a stack
-   * reads as one holding at a glance. Undefined = no rim (singles, and the
-   * viewer's own plates, which already carry the cyan "you" treatment).
-   */
   hue?: number;
-  /**
-   * Owner key (the wallet's display name). Cells sharing a group are laid
-   * out as one contiguous blob of adjacent hexes — the layout does the
-   * clustering itself, spatially, because any ordering-based scheme tears
-   * groups apart at column boundaries.
-   */
   group?: string;
-  /** Banked multiple, set only on cashed plates. Printed on the plate. */
   multiple?: number;
-  /** Owner's character. Worn as a tiny corner seal on the plate. */
   charId?: string;
 }
 
-/** The slice of a chat message the board needs to pop it over its sender. */
 export interface ChatPopMsg {
   id: number;
   name: string;
@@ -62,11 +29,8 @@ export interface LatticeSnapshot {
   hazard: number;
   grace: boolean;
   phase: "lobby" | "live" | "result";
-  /** Your own standing. Drives the personal hit when your round ends. */
   youOutcome: "out" | "in" | "cashed" | "dead";
-  /** Your character. Your plates alone wear its head on the board. */
   youCharId: string;
-  /** The chat log. Fresh messages pop briefly over their sender's cluster. */
   chat: ChatPopMsg[];
 }
 
@@ -75,19 +39,12 @@ interface Cell {
   x: number;
   y: number;
   state: CellState;
-  /** Seconds since the state last changed. */
   t: number;
-  /** Per-cell phase offset so the lattice never shimmers in unison. */
   seed: number;
-  /** Spawn-in progress, 0-1. */
   born: number;
-  /** Owner rim tint for multi-plate clusters. See CellInput.hue. */
   hue?: number;
-  /** Banked multiple on cashed plates. See CellInput.multiple. */
   multiple?: number;
-  /** Owner key, for finding a chatting player's cluster. See CellInput. */
   group?: string;
-  /** Owner's character, worn as the corner seal. See CellInput. */
   charId?: string;
 }
 
@@ -112,13 +69,6 @@ function lerp3(a: readonly number[], b: readonly number[], t: number): [number, 
   return [a[0]! + (b[0]! - a[0]!) * t, a[1]! + (b[1]! - a[1]!) * t, a[2]! + (b[2]! - a[2]!) * t];
 }
 
-/**
- * Takes the PERCEPTUAL risk scale (0-1), not a raw rate. On raw hazard the
- * seams barely moved through the 1-3% band where whole rounds are decided:
- * 3% of a 13% ceiling is a quarter of the ramp. On the log scale 1% is
- * already warming, ~2.2% is fully violet, and past 5% it runs toward
- * crimson, so the room visibly answers every step of real danger.
- */
 function seamColor(t: number): [number, number, number] {
   return t < 0.5 ? lerp3(COLD, WARM, t / 0.5) : lerp3(WARM, HOT, (t - 0.5) / 0.5);
 }
@@ -135,16 +85,8 @@ export class LatticeRenderer {
   private time = 0;
   private heat = 0;
   private heatTarget = 0;
-  /**
-   * Material stress on the perceptual risk scale, smoothed. Separate from
-   * `heat` (which drives the seam glow on a linear scale) so the cracking can
-   * respond across the whole band players actually see — from a hot mid-round
-   * ~3% up through the endgame — instead of gating on rates that only occur
-   * with two plates left.
-   */
   private stressS = 0;
   private stressTarget = 0;
-  /** Grace-period freeze-over, 0-1. Rises fast when grace starts, thaws slow. */
   private frost = 0;
   private shake = 0;
   private raf = 0;
@@ -158,52 +100,24 @@ export class LatticeRenderer {
     youCharId: "",
     chat: [],
   };
-  /** Live chat bubbles, one per speaking owner, briefly over their cluster. */
   private pops: { group: string; charId: string; text: string; shownAt: number }[] = [];
-  /** Highest chat id already seen; -1 until the first push seeds it. */
   private lastChatId = -1;
-  /** Your last known standing, so the moment it changes can be staged. */
   private youWas: LatticeSnapshot["youOutcome"] = "out";
-  /**
-   * The endgame sequence clock: wall-clock seconds since the break that
-   * decided the round, or -1 outside one. While it runs, scene time is bent —
-   * the deciding shatter plays at quarter speed under a lean-in zoom, then
-   * time ramps back as the crown lands on whoever is left standing.
-   */
   private finaleT = -1;
-  /** True for endings with no deciding break: no slow-mo, just the fade. */
   private finaleQuiet = false;
-  /** The winner's surviving plates — spared from the endgame fade. */
   private keepIds = new Set<number>();
-  /** The ONE plate that wears the crown: the survivor nearest the cluster's
-   *  centre. Two crowns on a two-plate winner read as a joke, not a win. */
   private crownBearer: number | null = null;
-  /** One plate per owner cluster wears the corner seal. */
   private sealIds = new Set<number>();
-  /** group -> the plate carrying its seal. STICKY: once chosen it stays put
-   *  until that plate dies or leaves, so the face does not hop around the
-   *  cluster every time a lobby join relays the board out. */
   private sealBearer = new Map<string, number>();
-  /** Where the deciding break happened; the zoom leans into it. */
   private focus = { x: 0, y: 0 };
 
-  /**
-   * The signal system, CRT mode's content-side half. The CSS overlay bends
-   * scanlines and rolls glare, but it can only decorate the glass — these
-   * warp and tear the PICTURE. `glitch` is burst energy: deaths inject it,
-   * idle static strays inject a little, and it decays fast. `roll` is the
-   * v-hold slip on YOUR death: the picture loses vertical lock and wraps
-   * once, the broadcast's version of the crimson flood.
-   */
   private fxBuf: HTMLCanvasElement | null = null;
   private glitch = 0;
   private roll = -1;
   private strayIn = 4;
-  /** Reduced motion keeps the static barrel warp but stills every fault. */
   private readonly calmSignal =
     typeof window !== "undefined" &&
     (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
-  /** 1 to 0 over the beat after your own round ends. */
   private hit = 0;
   private hitKind: "dead" | "cashed" = "dead";
   private layoutKey = "";
@@ -219,41 +133,15 @@ export class LatticeRenderer {
     this.resize();
   }
 
-  /** Static gradients rebuilt only on resize — not 240 times a second in frame(). */
   private rockG: CanvasGradient | null = null;
   private keyG: CanvasGradient | null = null;
   private atmosG: CanvasGradient | null = null;
 
-  /**
-   * Measure the LAYOUT box, never the visual one.
-   *
-   * getBoundingClientRect() reports the rect after ancestor transforms, and
-   * the lattice sits inside the element that plays the TV power cycle: for
-   * 700ms between rounds it is scaled down to 0.4% of its height. Any resize
-   * landing inside that window measured a board two pixels tall, built the
-   * backing store and packed the hexes for it, and then never recovered,
-   * because reverting a transform does not change the content box and so
-   * never fires the observer a second time. The result sat there stretched
-   * and blurry until the next phase change happened to resize the bar again.
-   *
-   * The observer hands us the content box; clientWidth/clientHeight are the
-   * same quantity when it does not. Both ignore transforms entirely.
-   */
   resize(box?: { width: number; height: number }): void {
     const w = box?.width ?? this.canvas.clientWidth;
     const h = box?.height ?? this.canvas.clientHeight;
-    // A degenerate box is never worth committing to. Layout is thrown away and
-    // rebuilt on the next real measurement, so skipping costs one frame of the
-    // previous picture; acting on it costs the whole round.
     if (w < 8 || h < 8) return;
     const rect = { width: w, height: h };
-    // Re-read the pixel ratio here rather than trusting the one sampled at
-    // construction: dragging the window to a display with a different density,
-    // or zooming the browser, changes it, and a backing store rebuilt at the
-    // stale ratio leaves the whole lattice blurry until a reload. Capped at 3
-    // (was 2): a 4K display at 250% OS scaling reports 2.5, and rendering
-    // under the cap upscales the whole scene — visibly soft on exactly the
-    // screens with the most pixels to show off on.
     this.dpr = Math.min(3, window.devicePixelRatio || 1);
     this.w = Math.max(1, rect.width);
     this.h = Math.max(1, rect.height);
@@ -264,10 +152,6 @@ export class LatticeRenderer {
     this.rockG = null;
     this.keyG = null;
     this.atmosG = null;
-    // Relayout NOW, not on the next snapshot push: the frame loop keeps
-    // drawing between pushes, and until one arrived a resize or rotation
-    // showed the whole grid at coordinates computed for the old dimensions —
-    // misplaced in a corner of the new frame for up to a second.
     if (this.snap.cells.length > 0) this.layout(this.snap.cells);
   }
 
@@ -275,14 +159,6 @@ export class LatticeRenderer {
     this.sink = { x, y };
   }
 
-  /**
-   * One pre-baked radial glow per shard kind.
-   *
-   * These were built with createRadialGradient inside the per-shard draw loop,
-   * i.e. once per glowing shard per frame. A packed lattice shedding value on
-   * every tick is hundreds of live shards allocating hundreds of gradients
-   * sixty times a second. Baked once, then blitted.
-   */
   private glow: HTMLCanvasElement | null = null;
 
   private glowSprite(): HTMLCanvasElement {
@@ -301,7 +177,6 @@ export class LatticeRenderer {
     return c;
   }
 
-  /** Fine static grain. Costs one blit and stops large flat areas looking bare. */
   private buildGrain(): HTMLCanvasElement {
     const size = 180;
     const c = document.createElement("canvas");
@@ -320,7 +195,6 @@ export class LatticeRenderer {
     return c;
   }
 
-  /** Nearest cell to a canvas-space point, if the click landed on one. */
   hitTest(px: number, py: number): number | null {
     let best: number | null = null;
     let bestD = this.radius * this.radius * 1.25;
@@ -339,48 +213,23 @@ export class LatticeRenderer {
   update(snap: LatticeSnapshot): void {
     const wasPhase = this.snap.phase;
     this.snap = snap;
-    // Both on the perceptual scale, so backdrop and material answer the same
-    // curve the ring and the audio do.
     this.heatTarget =
       snap.grace || snap.phase !== "live" ? 0.05 : riskScale(snap.hazard);
     this.stressTarget = snap.grace || snap.phase !== "live" ? 0 : riskScale(snap.hazard);
 
-    // The key must identify WHICH cells, not just how many: two consecutive
-    // rounds can have the same population with different ids (join one round,
-    // sit out the next), and a count-only key skipped relayout — leaving one
-    // player never drawn and a stale plate from the previous round on screen.
-    //
-    // A cheap sum-and-count summary rather than first:last:count. The old key
-    // relied on ids being sequential, which is a property of the local demo's
-    // id allocator and nothing the server promises; two rosters that agreed on
-    // count, first and last but differed in the middle would silently skip
-    // relayout and reproduce exactly the bug this key exists to prevent.
     let sig = 0;
     for (const c of snap.cells) sig = (sig * 31 + c.id) >>> 0;
     const key = `${snap.cells.length}:${sig}:${this.w | 0}:${this.h | 0}`;
     const relayout = key !== this.layoutKey;
     if (relayout) {
-      // Positions only. `layout` used to stamp the NEW state onto every cell
-      // while keeping the old timer, so the diff below then found nothing
-      // changed and skipped the fracture, the shards and the shake — while
-      // the stale timer made drawCells treat the plate as already gone. The
-      // result was a plate vanishing in one frame with the shatter sound
-      // still playing, on exactly the snapshots where a death and a roster
-      // change arrive together, which is most of them.
       this.layout(snap.cells);
       this.layoutKey = key;
     }
 
-    // Your round ending is the one event worth taking over the screen. It
-    // fires for you alone, so it stays a single beat whether the lobby holds
-    // ten players or a thousand, and it needs no announcements of other
-    // people's wallets to land.
     if (snap.youOutcome !== this.youWas) {
       if (this.youWas === "in" && (snap.youOutcome === "dead" || snap.youOutcome === "cashed")) {
         this.hit = 1;
         this.hitKind = snap.youOutcome;
-        // YOUR death breaks the broadcast: full glitch burst and one v-hold
-        // roll. The camera does not flinch like this for anyone else.
         if (snap.youOutcome === "dead" && crtOn()) {
           this.glitch = 1;
           this.roll = 0;
@@ -390,7 +239,6 @@ export class LatticeRenderer {
       this.youWas = snap.youOutcome;
     }
 
-    // A new lobby stands the clock back up for the next round's ending.
     if (snap.phase === "lobby" && this.finaleT >= 0) {
       this.finaleT = -1;
       this.finaleQuiet = false;
@@ -398,13 +246,6 @@ export class LatticeRenderer {
       this.crownBearer = null;
     }
 
-    // ≤1 OWNER standing after this push means these deaths END the round:
-    // that break is the story beat the survivors paid to watch, so it lands
-    // heavier — more shards, thrown harder, under the biggest shake the
-    // scene does. Owners, not plates: a winner holding a whole cluster is
-    // still one player standing. First live feedback: "the final ice
-    // breaking is not depicted, you just... win". It was depicted; the
-    // winner screen was covering it.
     const owners = new Set<string>();
     for (const c of snap.cells)
       if (c.state === "live" || c.state === "you") owners.add(c.group ?? `#${c.id}`);
@@ -414,8 +255,6 @@ export class LatticeRenderer {
     for (const input of snap.cells) {
       const cell = this.cells.get(input.id);
       if (!cell) continue;
-      // Rim tint, banked multiple and identity refresh every push, before the
-      // state short-circuit — display-only, must never wait on a state change.
       cell.hue = input.hue;
       cell.multiple = input.multiple;
       cell.group = input.group;
@@ -435,18 +274,12 @@ export class LatticeRenderer {
       this.shake = finale
         ? 1.5
         : Math.min(1, this.shake + 0.14 + deaths * 0.04);
-      // Every break hits the signal too: tears rip across the picture for a
-      // quarter second, harder when several plates go at once. The crackle
-      // rides under the shatter — the tape complaining about the explosion.
       if (crtOn()) {
         this.glitch = Math.min(1, this.glitch + 0.4 + deaths * 0.12);
         if (!this.calmSignal) sfxStatic(Math.min(0.55, 0.3 + deaths * 0.05));
       }
     }
 
-    // Cue the sequence exactly once per round, on the deciding deaths. Every
-    // surviving plate is the winner's and survives the fade; only the one
-    // nearest the cluster's centre wears the crown.
     if (deaths > 0 && finale && this.finaleT < 0) {
       this.finaleT = 0;
       this.finaleQuiet = false;
@@ -479,14 +312,6 @@ export class LatticeRenderer {
       }
     }
 
-    // Endings with no deciding break still clear the stage with a quick
-    // quiet fade and no slow-mo (nothing exploded; there is nothing to slow
-    // down). But a walk-out can end the round with someone genuinely still
-    // standing — the engine auto-banks the survivor of a 1v1 whose opponent
-    // left — and the first cut faded THEM to black too, then showed a "last
-    // one standing" card over an empty board. The survivor keeps their
-    // plates and takes the crown; only a stage with nobody standing (all
-    // banked, tied best ride, wipe-by-walkout) fades to empty.
     if (wasPhase === "live" && snap.phase === "result" && this.finaleT < 0) {
       this.finaleT = 0;
       this.finaleQuiet = true;
@@ -523,15 +348,6 @@ export class LatticeRenderer {
       }
     }
 
-    // One seal per owner: a cluster is already one holding (shared rim, one
-    // brain), so stamping every plate repeated the same face five times.
-    // Placement is STICKY: a new cluster gets its seal on the member nearest
-    // its centre of mass — defined for ANY size, including 2 and 4 where
-    // "the middle plate" does not exist — and then the seal stays on that
-    // plate for good, only walking when its bearer dies. Recomputing the
-    // centre every push made the face dance around the stack with every
-    // lobby join; a face that keeps its plate reads as a person standing
-    // still while the room fills around them.
     this.sealIds.clear();
     const clusters = new Map<string, Cell[]>();
     for (const c of this.cells.values()) {
@@ -567,13 +383,9 @@ export class LatticeRenderer {
       this.sealBearer.set(key, best.id);
       this.sealIds.add(best.id);
     }
-    // Groups gone from the board release their bearer slot.
     for (const key of this.sealBearer.keys())
       if (!clusters.has(key)) this.sealBearer.delete(key);
 
-    // Fresh chat surfaces on the board as a bubble over its sender. The very
-    // first push seeds the id cursor silently, so a (re)connect replaying the
-    // whole backlog cannot burst thirty bubbles over the lattice at once.
     if (this.lastChatId < 0) {
       this.lastChatId = 0;
       for (const m of snap.chat) if (m.id > this.lastChatId) this.lastChatId = m.id;
@@ -582,8 +394,6 @@ export class LatticeRenderer {
       for (const m of snap.chat) {
         if (m.id <= this.lastChatId) continue;
         this.lastChatId = m.id;
-        // Stale-at guard for the same reason as the cursor seed: only words
-        // said just now belong on the ice. System notices stay in the panel.
         if (m.system || Math.abs(now - m.at) > 6000) continue;
         this.pops = this.pops.filter((p) => p.group !== m.name);
         this.pops.push({ group: m.name, charId: m.charId, text: m.text, shownAt: now });
@@ -592,11 +402,6 @@ export class LatticeRenderer {
     }
   }
 
-  /**
-   * Packs flat-top hexes into the largest grid that fits the viewport. Cell
-   * size falls out of the population, so a small lobby gets chunky plates and a
-   * packed one gets fine ore.
-   */
   private layout(inputs: CellInput[]): void {
     const n = inputs.length;
     if (n === 0) {
@@ -610,31 +415,8 @@ export class LatticeRenderer {
     const availW = this.w - padX * 2;
     const availH = Math.max(40, this.h - top - bottom);
 
-    // Shrink until the grid genuinely holds every cell.
-    //
-    // Two clipping bugs lived here. The height budget ignored the half-hex
-    // stagger that every other column carries, so the bottom plate of each odd
-    // column hung past the frame. And the loop stopped shrinking at r=3 even
-    // when the grid still had fewer slots than players, which sent the
-    // overflow columns off the right edge. The stagger is now budgeted and
-    // capacity is a hard requirement.
     const hexH = Math.sqrt(3);
     let r = Math.sqrt((availW * availH) / (2.6 * n));
-    // Tiny fields used to zoom absurdly: with one or two players the capacity
-    // check passes immediately and a lone hex could outgrow the canvas,
-    // overflowing the frame on phones. The ceiling has to scale with the
-    // viewport, not be a fixed pixel count — a flat cap sized for a phone
-    // shrinks a full desktop field to a third of the space it should own.
-    //
-    // And the cap has to loosen as the field thins: at a flat 16% a 3-plate
-    // beta lobby huddled in the middle of a frame four times its size. Small
-    // fields own the frame; the capacity loop below still shrinks whatever
-    // cannot actually fit, so overflow stays impossible.
-    // Retuned upward after watching real sparse lobbies on a desktop frame:
-    // at the old tiers an 11-plate field claimed barely a third of the frame
-    // and the rest was dead gradient. The capacity loop below still shrinks
-    // whatever cannot actually fit, so these caps only decide how much of the
-    // frame a small field is ALLOWED to own, never whether it overflows.
     const fillShare = n <= 4 ? 0.34 : n <= 9 ? 0.28 : n <= 16 ? 0.22 : 0.18;
     const roomy = Math.max(70, Math.min(availW, availH) * fillShare);
     r = Math.min(r, roomy, availW / 2.4, availH / (hexH * 1.6));
@@ -651,11 +433,6 @@ export class LatticeRenderer {
     this.atlas = new CellAtlas(r, this.dpr);
     this.tiles = new TileAtlas(r, this.dpr);
 
-    // Shape the occupied block to the canvas, not to whatever the capacity
-    // grid happens to be. Since the radius cap landed, a half-full desktop
-    // lobby had far more rows than it needed and players stacked into one or
-    // two tall columns; picking the row count so the block's aspect tracks
-    // the canvas brings back the beehive cluster at every population.
     const aspect = (availW * hexH) / (availH * 1.5);
     let usedRows = Math.max(
       1,
@@ -668,14 +445,12 @@ export class LatticeRenderer {
     }
 
     const gridW = usedCols * r * 1.5 + r * 0.5;
-    // Includes the stagger, so centring can never push plates out of frame.
     const gridH = usedRows * r * hexH + (r * hexH) / 2;
     const startX = (this.w - gridW) / 2 + r;
     const startY = top + (availH - gridH) / 2 + (r * hexH) / 2;
 
     this.bounds = { x: startX - r * 1.2, y: startY - r, w: gridW + r * 0.4, h: gridH + r };
 
-    // Slot coordinates for the packed block, in column-major order.
     const slots: { x: number; y: number }[] = [];
     for (let i = 0; i < n; i++) {
       const col = Math.floor(i / usedRows);
@@ -686,26 +461,12 @@ export class LatticeRenderer {
       });
     }
 
-    // ------------------------------------------------ owner-aware assignment
-    //
-    // The grid is a packed block; HOW cells map onto its slots decides
-    // whether a wallet's plates look like a holding or like confetti. Two
-    // failed schemes preceded this one, both ordering-based: array position
-    // maps onto column-major slot order, so any group straddling a column
-    // boundary tears — bottom of one column, top of the next — and the slots
-    // reserved for the viewer punch holes in everyone else's runs. Ordinal
-    // schemes cannot cluster a 2-D surface. So the mapping is spatial: each
-    // owner grows a compact blob by repeatedly claiming the free slot nearest
-    // to what it already holds. The viewer's blob grows from the block's
-    // centre; other groups, largest first, grow from the tiling frontier;
-    // singles fill whatever remains. Deterministic throughout — identical
-    // roster, identical layout.
     const cx = slots.reduce((a, s) => a + s.x, 0) / n;
     const cy = slots.reduce((a, s) => a + s.y, 0) / n;
     const YOU_KEY = "<you>";
     const groupsMap = new Map<string, CellInput[]>();
     for (const input of inputs) {
-      const key = input.you ? YOU_KEY : (input.group ?? `solo:${input.id}`);
+      const key = input.you ? YOU_KEY : (input.group ?? `solo:${input.id}`);
       const members = groupsMap.get(key);
       if (members) members.push(input);
       else groupsMap.set(key, [input]);
@@ -716,8 +477,6 @@ export class LatticeRenderer {
       return a[0] < b[0] ? -1 : 1;
     });
 
-    // Every neighbour in this packing — same-column or diagonal — sits at
-    // exactly sqrt(3)·r, so one distance threshold defines hex adjacency.
     const adj: number[][] = slots.map(() => []);
     const adjLimit = 3.2 * r * r;
     for (let a = 0; a < n; a++) {
@@ -734,7 +493,6 @@ export class LatticeRenderer {
     const unassigned = new Set<number>(slots.map((_, i) => i));
     const slotOfCell = new Map<number, number>();
 
-    /** Connected regions of the free slots, under hex adjacency. */
     const components = (): number[][] => {
       const seen = new Set<number>();
       const out: number[][] = [];
@@ -762,19 +520,10 @@ export class LatticeRenderer {
       members.sort((a, b) => a.id - b.id);
       let need = members.length;
       let mi = 0;
-      // Desired anchor: the viewer at the block's centre; other groups at the
-      // current scan-order frontier, so the tiling stays gap-free.
       const first = unassigned.values().next().value;
       if (first === undefined) break;
       const anchor = key === YOU_KEY ? { x: cx, y: cy } : slots[first]!;
       while (need > 0 && unassigned.size > 0) {
-        // Grow inside ONE connected free region that fits the whole group —
-        // a connected region always offers a free slot adjacent to the blob,
-        // so growth provably cannot strand or jump. A naive greedy over all
-        // free slots (the previous attempt) seeded into pockets smaller than
-        // the group and split ~2.5% of clusters. When no region fits (free
-        // space is all pockets), take the largest and spill the remainder —
-        // geometrically unavoidable, and rare because big groups place first.
         const comps = components();
         const fitting = comps.filter((c) => c.length >= need);
         const pool =
@@ -795,10 +544,6 @@ export class LatticeRenderer {
         }
         const compSet = new Set(comp);
 
-        // True when the region stays in one piece after `removed` leaves it.
-        // Claiming an articulation slot is what fragments the free space into
-        // pockets too small for the next group, so every claim prefers a
-        // non-articulation candidate and cuts only when there is no choice.
         const stillConnected = (removed: number): boolean => {
           let start = -1;
           for (const v of compSet) {
@@ -822,7 +567,6 @@ export class LatticeRenderer {
           return seen.size === compSet.size - 1;
         };
 
-        /** Claims the best-ranked slot that avoids cutting the region. */
         const claim = (ranked: number[]): number => {
           const pick = ranked.find((s) => stillConnected(s)) ?? ranked[0]!;
           compSet.delete(pick);
@@ -838,12 +582,6 @@ export class LatticeRenderer {
         );
         const blob: number[] = [claim(byAnchor)];
         while (blob.length < Math.min(need, comp.length)) {
-          // Candidates are the blob's FRONTIER — free slots touching it —
-          // because anything else would disconnect the blob itself. A
-          // connected region always has one while slots remain. Ranked by
-          // how many blob neighbours a slot touches (pocket-fillers first,
-          // for compact shapes), then index; the articulation veto in
-          // `claim` then keeps the leftover region whole when it can.
           const touch = (s: number): number => {
             let t = 0;
             for (const m of blob) if (adj[s]!.includes(m)) t++;
@@ -868,8 +606,6 @@ export class LatticeRenderer {
         id: input.id,
         x,
         y,
-        // Carry the PREVIOUS state forward and let the transition diff apply
-        // the new one, so a relayout never swallows a death or a cash-out.
         state: prev?.state ?? input.state,
         t: prev?.t ?? 0,
         seed: ((input.id * 2654435761) >>> 0) / 4294967296,
@@ -883,12 +619,6 @@ export class LatticeRenderer {
     this.cells = kept;
   }
 
-  /**
-   * A plate breaking apart. Shards carry its value toward the multiplier.
-   * boost > 1 is the round-ending break: double the debris, thrown harder,
-   * hanging a touch longer, so the kill that decides the round reads bigger
-   * than any mid-round crack.
-   */
   private fracture(cell: Cell, boost = 1): void {
     const r = this.radius;
     for (let i = 0; i < 7 * boost; i++) {
@@ -909,7 +639,6 @@ export class LatticeRenderer {
     }
   }
 
-  /** A plate lifted out cleanly. Drifts up, no value released. */
   private release(cell: Cell): void {
     const r = this.radius;
     for (let i = 0; i < 3; i++) {
@@ -946,16 +675,9 @@ export class LatticeRenderer {
   }
 
   private frame(dt: number): void {
-    // The finale bends time: its own clock runs on the wall, the scene runs
-    // on scaled dt. Quarter speed while the deciding break crumbles, then
-    // time ramps back to full as the crown lands. Every animation downstream
-    // (cell faces, shards, shake, floods) slows as one, which is what makes
-    // it read as slow motion rather than as one slowed effect.
     let timescale = 1;
     if (this.finaleT >= 0) {
       this.finaleT += dt;
-      // Quiet endings (nobody broke) run at normal speed — slow-mo on a
-      // board where nothing is happening is just lag.
       if (!this.finaleQuiet) {
         const f = this.finaleT;
         timescale = f < 1.4 ? 0.22 : f < 1.9 ? 0.22 + ((f - 1.4) / 0.5) * 0.78 : 1;
@@ -966,20 +688,14 @@ export class LatticeRenderer {
     this.time += sdt;
     this.heat += (this.heatTarget - this.heat) * Math.min(1, sdt * 3.5);
     this.stressS += (this.stressTarget - this.stressS) * Math.min(1, sdt * 4.5);
-    // The lake freezes over during the grace ticks, then the frost lifts as
-    // the first real roll arrives — freezing is quick, thawing is gradual.
     const frostTarget = this.snap.phase === "live" && this.snap.grace ? 1 : 0;
     this.frost += (frostTarget - this.frost) * Math.min(1, sdt * (frostTarget > this.frost ? 3.2 : 1.6));
     this.shake *= Math.pow(0.002, sdt);
     if (this.hit > 0) this.hit = Math.max(0, this.hit - sdt / 1.1);
 
-    // The signal's own clock runs on the WALL, not on slow-mo time: a
-    // broadcast fault does not care that the replay is in slow motion.
     if (crtOn()) {
       this.strayIn -= dt;
       if (this.strayIn <= 0) {
-        // Idle static: a small tracking fault every few seconds so the feed
-        // reads live even on a calm board. Danger makes the tape worse.
         this.glitch = Math.max(this.glitch, 0.28 + this.heat * 0.25);
         if (!this.calmSignal) sfxStatic(0.2 + this.heat * 0.3);
         this.strayIn = 3 + Math.random() * (9 - this.heat * 5);
@@ -998,11 +714,6 @@ export class LatticeRenderer {
       ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
     }
     if (this.finaleT >= 0 && !this.finaleQuiet) {
-      // Lean-in on the deciding plate: quick push to +19%, held through the
-      // slow-mo, released as real time returns. Scaling up around an interior
-      // point always keeps the canvas covered, so no edges ever show. Pushed
-      // deeper when the crown emoji retired: the zoom and the halo carry the
-      // coronation alone now.
       const f = this.finaleT;
       const zin = 1 - Math.pow(1 - Math.min(1, f / 0.35), 3);
       const zout = f < 1.9 ? 1 : Math.max(0, 1 - (f - 1.9) / 0.8);
@@ -1029,15 +740,6 @@ export class LatticeRenderer {
     this.applySignal();
   }
 
-  /**
-   * The content-side CRT pass: the finished frame is copied to a buffer and
-   * redrawn in horizontal bands through a barrel curve — verticals genuinely
-   * bow, completing what the overlay's bent scanlines only imply. Glitch
-   * energy shears random bands sideways (tears in the picture itself), high
-   * energy adds a ghosted double-exposure, and your death rolls the whole
-   * frame through one vertical wrap. ~24 GPU blits per frame, only while CRT
-   * mode is on, and the game's own draw code never knows it happened.
-   */
   private applySignal(): void {
     if (!crtOn()) return;
     const cv = this.ctx.canvas;
@@ -1056,7 +758,6 @@ export class LatticeRenderer {
 
     const ctx = this.ctx;
     const g = this.calmSignal ? 0 : this.glitch;
-    // V-hold roll: ease through one full vertical wrap.
     let yShift = 0;
     if (!this.calmSignal && this.roll >= 0) {
       const r = this.roll;
@@ -1070,16 +771,12 @@ export class LatticeRenderer {
     const bow = Math.min(14, W * 0.007);
     const bands = 24;
     const bh = Math.ceil(H / bands);
-    // Offsets hold for ~70ms at a time so tears read as frames of damage,
-    // not per-frame noise.
     const tbin = (this.time * 14) | 0;
     for (let i = 0; i < bands; i++) {
       const y = i * bh;
       const h = Math.min(bh, H - y);
       if (h <= 0) break;
       const v = ((y + h / 2) / H) * 2 - 1;
-      // Barrel: rows near the vertical centre draw slightly wider, so the
-      // side edges bulge at the middle exactly as the scanlines promise.
       const s = 1 + ((bow * 2) / W) * (1 - v * v);
       let dx = (W - W * s) / 2;
       if (g > 0.03 && LatticeRenderer.rnd(i * 7.31 + tbin * 0.173) < g * 0.4) {
@@ -1089,11 +786,9 @@ export class LatticeRenderer {
       const first = Math.min(h, H - sy);
       ctx.drawImage(this.fxBuf, 0, sy, W, first, dx, y, W * s, first);
       if (first < h) {
-        // The band crossed the bottom of the rolling source; wrap the rest.
         ctx.drawImage(this.fxBuf, 0, 0, W, h - first, dx, y + first, W * s, h - first);
       }
     }
-    // Heavy bursts ghost the whole picture sideways for a beat.
     if (g > 0.45) {
       ctx.globalAlpha = 0.14 * g;
       ctx.drawImage(this.fxBuf, g * W * 0.012, 0);
@@ -1102,19 +797,12 @@ export class LatticeRenderer {
     ctx.restore();
   }
 
-  /**
-   * Words appearing where the speaker stands. The chat panel is where chat
-   * lives; this is the two-second proof that the plates are PEOPLE — a small
-   * bubble with the sender's face, floating over their cluster, then gone.
-   * Deliberately compact: it must never block reading the board.
-   */
   private drawChatPops(): void {
     const now = Date.now();
     this.pops = this.pops.filter((p) => now - p.shownAt < 2600);
     const { ctx } = this;
     const r = this.radius;
     for (const p of this.pops) {
-      // Cluster anchor: centroid x, topmost y of the sender's plates.
       let sx = 0;
       let n = 0;
       let top = Infinity;
@@ -1139,8 +827,6 @@ export class LatticeRenderer {
       const bw = padX * 2 + head + gap + ctx.measureText(text).width;
       const bh = 26;
       const bx = Math.max(6, Math.min(this.w - bw - 6, sx / n - bw / 2));
-      // Above the cluster, drifting up a touch as it lives; flipped below
-      // when the cluster already touches the top of the lattice.
       let by = top - r * 1.5 - bh - k * 5;
       if (by < 4) by = top + r * 1.45 + 8 + k * 5;
 
@@ -1166,24 +852,12 @@ export class LatticeRenderer {
     }
   }
 
-  /**
-   * The victor's light. Once the slow-mo break has landed, the surviving
-   * cluster gets a swelling gold halo with a breathing pulse — a beat of
-   * "that one won" on the board itself, before the winner screen takes
-   * over. There used to be a crown emoji dropped on top; it read as a
-   * sticker from another product, and the light says it better. The wipe
-   * gets nothing; the ice is the only winner there.
-   */
   private drawCrown(): void {
-    // Quiet endings glow sooner: there is no slow-mo break to wait out,
-    // just the fade — the light lands as the stage finishes clearing.
     const t = this.finaleT - (this.finaleQuiet ? 0.8 : 1.45);
     if (t < 0) return;
     const { ctx } = this;
     const r = this.radius;
     const halo = Math.min(1, t / 0.5);
-    // A slow breath on top of the swell, so the light feels alive while the
-    // result screen assembles over it.
     const breathe = 0.85 + 0.15 * Math.sin(t * 3.2);
 
     ctx.save();
@@ -1199,15 +873,9 @@ export class LatticeRenderer {
     ctx.restore();
   }
 
-  /**
-   * Your own ending, felt rather than announced: the room floods from the
-   * edges, crimson when the ice takes you and mint when you get out. Fast in,
-   * slow out, so it hits like an impact and then lets go of the screen.
-   */
   private drawHit(): void {
     const { ctx, w, h } = this;
     const k = this.hit;
-    // The first instant is the punch; the rest is the room settling.
     const punch = k > 0.82 ? (k - 0.82) / 0.18 : 0;
     const body = Math.pow(k, 1.6);
     const rgb = this.hitKind === "dead" ? "255, 45, 111" : "63, 232, 192";
@@ -1235,7 +903,6 @@ export class LatticeRenderer {
     const { ctx, w, h } = this;
     if (!this.grainPattern) {
       if (!this.grain) this.grain = this.buildGrain();
-      // One pattern fill instead of ~66 drawImage tiles per frame.
       this.grainPattern = ctx.createPattern(this.grain, "repeat");
     }
     if (!this.grainPattern) return;
@@ -1248,10 +915,6 @@ export class LatticeRenderer {
 
   private drawRock(): void {
     const { ctx, w, h } = this;
-    // Lifted off near-black. The hues are unchanged — these are the same cold
-    // blue-greys, just carrying enough luminance that the empty space around
-    // the lattice reads as a room the grid is sitting in rather than as a void
-    // pressing in on it.
     if (!this.rockG) {
       const g = ctx.createLinearGradient(0, 0, 0, h);
       g.addColorStop(0, "#0a121a");
@@ -1262,9 +925,6 @@ export class LatticeRenderer {
     ctx.fillStyle = this.rockG;
     ctx.fillRect(0, 0, w, h);
 
-    // A soft cold light from above the shaft. Costs almost nothing and does
-    // most of the work of making the space feel open — a flat fill reads as a
-    // wall, a gradient with a source reads as depth.
     if (!this.keyG) {
       const key = ctx.createRadialGradient(w / 2, -h * 0.1, 0, w / 2, -h * 0.1, h * 0.95);
       key.addColorStop(0, "rgba(120,170,205,0.10)");
@@ -1276,10 +936,6 @@ export class LatticeRenderer {
     ctx.fillRect(0, 0, w, h);
   }
 
-  /**
-   * The heat behind the lattice. Plates are drawn opaque on top, so this shows
-   * only through the gaps — the grid appears backlit along its seams.
-   */
   private drawSeams(): void {
     const { ctx } = this;
     const b = this.bounds;
@@ -1296,13 +952,8 @@ export class LatticeRenderer {
     grad.addColorStop(0, `rgba(${r | 0},${g | 0},${bl | 0},${a})`);
     grad.addColorStop(1, `rgba(${r | 0},${g | 0},${bl | 0},0)`);
     ctx.fillStyle = grad;
-    // The fill must cover the gradient's whole falloff circle. Clipped at
-    // bounds+40 the glow was cut while still visibly non-zero, printing a
-    // hard-edged rectangle behind the lattice.
     ctx.fillRect(midX - reach, midY - reach, reach * 2, reach * 2);
 
-    // A second tighter core so genuine danger reads as molten. On the
-    // perceptual scale 0.4 is ~1.9% hazard, so this joins mid-band and grows.
     if (this.heat > 0.4) {
       ctx.globalCompositeOperation = "lighter";
       ctx.globalAlpha = (this.heat - 0.4) * 0.55;
@@ -1312,22 +963,11 @@ export class LatticeRenderer {
     ctx.restore();
   }
 
-  /** Deterministic per-cell noise, so stress visuals never flicker frame to frame. */
   private static rnd(s: number): number {
     const x = Math.sin(s * 127.1) * 43758.5453;
     return x - Math.floor(x);
   }
 
-  /**
-   * Hairline stress cracks — the frozen lake groaning before it gives.
-   *
-   * Uniform across the field: every live plate cracks at the same intensity,
-   * because every live plate faces the same hazard. Per-plate stagger read as
-   * differential risk — players took a clean neighbour to mean their own
-   * plate was the weak one and cashed out on a signal that did not exist. The
-   * seed only varies geometry (crack angles and jags), never how cracked a
-   * plate is.
-   */
   private drawStress(c: Cell, k: number, jx: number, jy: number): void {
     const { ctx } = this;
     const r = this.radius;
@@ -1337,18 +977,13 @@ export class LatticeRenderer {
     ctx.strokeStyle = "#eaf6ff";
     ctx.lineWidth = Math.max(0.6, r * 0.06);
     ctx.lineCap = "round";
-    // Short opacity ramp at the bottom of the band: the whole field's
-    // hairlines emerge together, faint first, instead of popping in at once.
     ctx.globalAlpha = Math.min(1, k * 6) * (0.24 + 0.55 * k);
     const grow = 0.5 + 0.5 * k;
-    // More fractures join as the plate gets deeper into trouble.
     const arms = 2 + (k > 0.4 ? 1 : 0) + (k > 0.75 ? 1 : 0);
     for (let arm = 0; arm < arms; arm++) {
       const a0 = R(c.seed * 31.7 + arm * 7.3) * Math.PI * 2;
       ctx.beginPath();
       ctx.moveTo(c.x + jx + Math.cos(a0) * r * 0.85, c.y + jy + Math.sin(a0) * r * 0.85);
-      // Walk inward from the edge with sideways jags; the drawn length grows
-      // with stress. Points stay inside the plate by construction, so no clip.
       const steps = 3;
       for (let s = 1; s <= steps; s++) {
         const frac = (s / steps) * grow;
@@ -1362,11 +997,6 @@ export class LatticeRenderer {
     ctx.restore();
   }
 
-  /**
-   * The plate face for the current stress, cross-faded so the ice degrades
-   * continuously instead of snapping between the four drawn stages. A plate
-   * that is breaking jumps straight to the shattered face.
-   */
   private drawTileFace(
     c: Cell,
     tiles: TileAtlas,
@@ -1382,10 +1012,6 @@ export class LatticeRenderer {
     const x = c.x - dw / 2 + jx;
     const y = c.y - dh / 2 + jy;
     const R = LatticeRenderer.rnd;
-    // Personality without dishonesty. Each plate gets a fixed sixth-turn and
-    // a hair of tonal drift, so no two look stamped from the same mould —
-    // but the DAMAGE on every plate is identical, because the field shares
-    // one hazard and the ice must never imply otherwise.
     const turn = Math.floor(R(c.seed * 5.31) * 6) * TILE_TURN;
     const tone = 0.94 + R(c.seed * 2.77) * 0.06;
 
@@ -1411,9 +1037,6 @@ export class LatticeRenderer {
     }
     ctx.restore();
 
-    // Every plate is now the same sheet of ice, so "you" has to be marked
-    // loudly: a cyan wash, a heavy breathing rim, and a glow that carries
-    // across a full field. Finding yourself must never take a second look.
     if (c.state === "you") {
       const pulse = 0.68 + 0.32 * Math.sin(this.time * 4.2);
       ctx.save();
@@ -1435,17 +1058,11 @@ export class LatticeRenderer {
     const { ctx } = this;
     const atlas = this.atlas;
     if (!atlas) return;
-    // The faces decode after the first layout is already on screen, so the
-    // atlas rebakes itself once whenever more art has arrived.
     if (this.tiles && this.tiles.version !== tileVersion && this.radius > 0) {
       this.tiles = new TileAtlas(this.radius, this.dpr);
     }
     const tiles = this.tiles?.usable ? this.tiles : null;
 
-    // Material stress on the perceptual scale: first hairlines below 2%
-    // hazard, half the field visibly cracked by ~3%, violent from 5% up. The
-    // 3-6% band is where most rounds peak, so that is where the gradient
-    // must live, not above it.
     const stress = Math.max(0, Math.min(1, (this.stressS - 0.35) / 0.65));
     const b = this.bounds;
     const midX = b.x + b.w / 2;
@@ -1464,7 +1081,6 @@ export class LatticeRenderer {
       let dy = 0;
 
       if (c.born < 1) {
-        // Crystallising in as a player joins the lobby.
         const k = c.born;
         alpha = k;
         scale = 0.55 + 0.45 * (1 - Math.pow(1 - k, 3));
@@ -1473,20 +1089,12 @@ export class LatticeRenderer {
       const inPlay = c.state === "live" || c.state === "you";
 
       if (c.state === "dying") {
-        // Hold the shattered face at full strength before the plate falls
-        // away. Without the hold it faded from the first frame, so the
-        // broken-ice art was on screen for about a tenth of a second and
-        // players never actually saw the plate break.
         const k = Math.max(0, Math.min(1, (c.t - 0.2) / 0.45));
         alpha *= 1 - k;
         scale *= 1 - k * 0.3;
         if (k >= 1) continue;
       } else if (c.state === "cashed") {
         const k = Math.min(1, c.t / 0.55);
-        // Mid-round a vacated plate stays a legible ghost — the sheet reads
-        // as one surface with people missing. On the RESULT screen the same
-        // ghost read as "still standing" under the dark overlay, flatly
-        // contradicting the verdict beside it, so leavers all but vanish.
         const fade = this.snap.phase === "result" ? 0.9 : 0.45;
         alpha *= 1 - k * fade;
         dy = -k * 3;
@@ -1496,8 +1104,6 @@ export class LatticeRenderer {
 
       if (alpha <= 0.02) continue;
 
-      // Trembling under stress — each plate shivers on its own phase, so the
-      // lattice shudders rather than sliding around as one rigid body.
       let jx = 0;
       let jy = 0;
       if (stress > 0.02 && inPlay) {
@@ -1505,10 +1111,6 @@ export class LatticeRenderer {
         jy = Math.cos(this.time * 11.3 + c.seed * 31) * 1.2 * stress;
       }
 
-      // The endgame clears the stage: every plate not wearing the crown
-      // fades out during the finale, so the board the curtain finds holds
-      // exactly the winner's cluster — or nothing at all after a wipe or a
-      // banked-out ending. Cashed-out ghosts included; their story is over too.
       if (this.finaleT >= 0 && !this.keepIds.has(c.id)) {
         const fs = this.finaleQuiet ? 0.15 : 1.0;
         const fe = this.finaleQuiet ? 0.75 : 2.2;
@@ -1522,14 +1124,9 @@ export class LatticeRenderer {
       const dh = sprite.h * scale;
       ctx.drawImage(sprite.canvas, c.x - dw / 2 + jx, c.y - dh / 2 + jy + dy, dw, dh);
 
-      // The drawn plate face, laid over the procedural one so its glow and
-      // rim still frame the plate. Everyone shows the same stage of failure:
-      // the field shares one hazard, so it must read as one sheet of ice.
       if (tiles && c.state !== "cashed") {
         this.drawTileFace(c, tiles, stress, alpha, scale, jx, jy + dy);
       } else if (tiles) {
-        // A vacated plate keeps its ice, drained of light: the lattice reads
-        // as one sheet with people missing from it, not as black holes.
         const ghost = tiles.get("base");
         if (ghost) {
           ctx.globalAlpha = alpha * 0.26;
@@ -1544,17 +1141,12 @@ export class LatticeRenderer {
         }
       }
 
-      // YOUR plates alone wear your character's head. The whole field wore
-      // heads once and nobody liked it at any size — but one face, yours, on
-      // your own cluster is identity rather than noise, and it makes "which
-      // plates are mine" answerable without reading rims at all.
       if (c.state === "you" && this.radius > 7) {
         const face = charImage(this.snap.youCharId, "head");
         if (face) {
           const side = this.radius * 1.16 * scale;
           ctx.save();
           ctx.globalAlpha = alpha * 0.95;
-          // Crunchy, like every other blit of the pixel art.
           ctx.imageSmoothingEnabled = false;
           ctx.drawImage(face, c.x - side / 2 + jx, c.y - side / 2 + jy + dy, side, side);
           ctx.restore();
@@ -1562,15 +1154,7 @@ export class LatticeRenderer {
         }
       }
 
-      // Everyone else's identity is a corner SEAL: their face, small and
-      // dimmed, stamped on the bottom-right vertex like wax on an envelope —
-      // never a portrait in the middle, because the centre belongs to the
-      // plate's state. (Centred faces on the whole field died twice at two
-      // sizes; the competition with the state signal was why.) Gone entirely
-      // when the lattice packs too tight to afford legible faces.
       if (c.charId !== undefined && this.sealIds.has(c.id) && this.radius > 13) {
-        // Stash, draw later: hexes touch, so a face drawn here got painted
-        // over by the neighbouring plate (and its fat rim) a moment later.
         sealDraws.push({
           charId: c.charId,
           x: c.x + jx,
@@ -1580,9 +1164,6 @@ export class LatticeRenderer {
         });
       }
 
-      // An exited plate is BANKED money, not a casualty: it holds its ground
-      // in gold with the multiple it left at printed on the ice, so "got out
-      // with 2.3×" and "went under" can never be confused at a glance.
       if (c.state === "cashed") {
         ctx.save();
         ctx.globalAlpha = alpha;
@@ -1602,16 +1183,7 @@ export class LatticeRenderer {
         ctx.restore();
       }
 
-      // Owner rim: a multi-plate wallet's cluster shares one tinted outline,
-      // so a stack reads as one holding instead of coincidentally similar
-      // neighbours. Thin and dim on purpose — it labels, it does not compete
-      // with the hazard glow. Dying plates keep theirs while they fade, so a
-      // cluster visibly loses a member rather than a stranger.
       if (c.hue !== undefined && c.state !== "cashed" && this.radius > 5) {
-        // A rim you can actually USE to split two stacks at a glance: a dark
-        // underlay stroke first so the colour has an edge against the pale
-        // ice, then a thick saturated band. The old thin 65%-sat line was
-        // the polite version, and politely nobody could read it.
         hexPath(ctx, c.x + jx, c.y + jy + dy, this.radius * scale * 0.86);
         ctx.globalAlpha = alpha * 0.5;
         ctx.strokeStyle = "rgba(4, 8, 12, 0.9)";
@@ -1624,8 +1196,6 @@ export class LatticeRenderer {
         ctx.globalAlpha = alpha;
       }
 
-      // Grace freeze-over: frost sweeps outward from the centre of the lattice
-      // and settles over every plate, then lifts as the first real roll lands.
       if (this.frost > 0.02 && inPlay) {
         const dist = Math.hypot(c.x - midX, c.y - midY) / span;
         const f = Math.max(0, Math.min(1, this.frost * 1.7 - dist * 0.7));
@@ -1638,14 +1208,10 @@ export class LatticeRenderer {
         }
       }
 
-      // Procedural fractures are the fallback only: when the drawn faces are
-      // present they carry the whole cracking gradient, and running both
-      // scribbles a second set of cracks over the art.
       if (!tiles && stress > 0.03 && inPlay && this.radius > 6) {
         this.drawStress(c, stress, jx, jy);
       }
 
-      // Fracture lines race across the plate in the instant before it breaks.
       if (c.state === "dying" && c.t < 0.26 && this.radius > 6) {
         const k = c.t / 0.26;
         ctx.save();
@@ -1665,9 +1231,6 @@ export class LatticeRenderer {
         ctx.restore();
       }
     }
-    // Seals in their own pass, AFTER every plate and rim, so nothing can
-    // bury a face. INSIDE the plate now — standing on its floor, clear of
-    // the rim band — instead of straddling the border the thick rims own.
     if (sealDraws.length > 0) {
       ctx.save();
       ctx.imageSmoothingEnabled = false;
@@ -1687,13 +1250,9 @@ export class LatticeRenderer {
       ctx.restore();
     }
 
-    // No floating YOU tag any more: the cyan plates and your big centred
-    // head already answer "whose are these", and the tag was a second voice
-    // saying the same thing over the same spot.
     ctx.globalAlpha = 1;
   }
 
-  /** Broken ore in flight. Value shards home in on the multiplier. */
   private drawShards(dt: number): void {
     const { ctx, w, h } = this;
     const sinkX = this.sink.x * w;
@@ -1746,15 +1305,6 @@ export class LatticeRenderer {
     ctx.restore();
   }
 
-  /**
-   * Depth haze and vignette.
-   *
-   * This was the single biggest source of the closed-in feeling: it crushed
-   * the edges to 78% black, so however bright the backdrop was, the frame
-   * always ended in darkness. It now starts further out and lands far
-   * lighter — still enough to sit the lattice in space and pull the eye to
-   * the middle, but no longer a tunnel.
-   */
   private drawAtmosphere(): void {
     const { ctx, w, h } = this;
     if (!this.atmosG) {

@@ -1,25 +1,3 @@
-/*
- * DOES A ROUND OF THIN ICE MOVE REAL MONEY CORRECTLY?
- *
- * Not a unit test -- it drives two live servers and a websocket, which is
- * exactly why it exists. Every part of this path was individually plausible and
- * the only question that mattered was whether the whole chain adds up: sign in
- * at the arcade, hold a stake in the ledger, play, settle, and have the books
- * close at zero.
- *
- *   Terminal 1:  PORT=8080 LEDGER_KEY=itest-key LEDGER_DB=:memory:  *                  node /c/GIELINOR/arcade/server/main.js
- *   Terminal 2:  PORT=8787 LEDGER_KEY=itest-key DB_PATH=:memory: MIN_ENTRANTS=2  *                  npx tsx apps/server/src/index.ts
- *   Terminal 3:  node itest-ledger.mjs
- *
- * It mints two ed25519 keypairs and signs in for real, because the arcade
- * checks the signature and a fake token proves nothing. What to look for in the
- * output: `sum: 0`, `escrow: 0`, `openHolds: 0`, `escrowMatchesHolds: true`, and
- * the two wallets' movements plus the house rake adding to exactly nothing.
- *
- * The signature is BASE64, not base58 -- base58Decode caps at 64 characters and
- * a 64-byte signature encodes to about 88, which is how the first run of this
- * failed.
- */
 import { generateKeyPairSync, sign } from "node:crypto";
 import WebSocket from "ws";
 
@@ -36,7 +14,6 @@ const post = (p, b, h = {}) => fetch(ARCADE + p, {
   method: "POST", headers: { "content-type": "application/json", ...h }, body: JSON.stringify(b),
 }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
 
-/** A wallet that can actually sign, because the arcade checks. */
 function makeWallet() {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const raw = publicKey.export({ type: "spki", format: "der" }).subarray(-32);
@@ -63,7 +40,6 @@ for (const p of players) {
 console.log("signed in and funded 2 wallets, 2 SOL each");
 for (const p of players) console.log("  ", p.address.slice(0, 12) + "...", JSON.stringify(await bal(p.address)));
 
-/** Drive one socket through auth -> join -> whatever the round does. */
 function play(p) {
   return new Promise((resolve) => {
     const ws = new WebSocket("ws://127.0.0.1:8787");

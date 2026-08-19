@@ -1,25 +1,3 @@
-/*
- * IS OUR LAMPORT ARITHMETIC STILL THE ARCADE'S? ASKED ON THE BOX, AT BOOT.
- *
- * `apps/server/vendor/arcade/money/money.js` is a byte-for-byte copy of the
- * arcade's own, and `config.ts` converts every SOL figure through it. A copy
- * with nothing watching it is a copy that drifts, and the failure would be
- * silent in the worst way: this server and the verifier page would each be
- * certain about a settlement and disagree about the last lamport of it.
- *
- * THIS RUNS AT BOOT BECAUSE THE BOX IS WHERE THE ANSWER MATTERS. There is a
- * unit suite now -- apps/server/test/ covers this function too -- but it runs
- * on whatever machine somebody is developing on, and the copy that decides a
- * settlement is the one deployed next to the arcade. Only the box has both
- * checkouts sitting side by side, and until this it never asked. That is the
- * same gap the same check closed in C:\HOLD, and it closed it after a real
- * drift went unnoticed until somebody happened to run the tests.
- *
- * IT WARNS AND NEVER REFUSES TO START. A mismatch usually means the arcade was
- * pulled and we have not been yet -- an ordinary five minutes in the middle of
- * a deploy -- and a game server that would not boot during it would turn a
- * routine update into an outage for everyone mid-round.
- */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -30,36 +8,14 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VENDOR = path.join(HERE, "..", "vendor", "arcade", "money");
 const FILES = ["money.js"];
 
-/** The box first, because the box is the machine whose answer matters. */
 const CANDIDATES = ["/opt/gielinor/repo", "C:/GIELINOR", "/c/GIELINOR"];
 
 export type VendorStatus = "matches" | "DRIFTED" | "unchecked";
 
-/**
- * THE ARCADE'S FILE MEANS THE ARCADE'S COMMITTED FILE.
- *
- * `tools/vendor-arcade.mjs` reads `git show HEAD:path` and this has to ask the
- * same question, or the two disagree by construction: a clean box would look
- * drifted the moment anybody edited that file on a laptop, which is an alarm
- * that cries wolf. Falls back to the file on disk when git cannot answer,
- * which is weaker and still better than refusing to answer at all.
- */
 function committedBytes(repo: string, rel: string): Buffer {
   try {
     return execFileSync("git", ["-C", repo, "show", `HEAD:${rel}`], {
       maxBuffer: 8 * 1024 * 1024,
-      // GIT'S STDERR IS DISCARDED BECAUSE THE FALLBACK IS THE POINT.
-      //
-      // On the box this service runs as its own user and the arcade checkout
-      // belongs to another, so git refuses with "detected dubious ownership"
-      // -- correctly, and every boot printed a `fatal:` line for a condition
-      // that is handled two lines below. An alarm that shouts on the healthy
-      // path is an alarm people learn to scroll past.
-      //
-      // The catch reads the file instead, which on the box is the same bytes:
-      // the arcade there is a clean checkout, so its working tree IS its
-      // commit. Deliberately NOT fixed with `safe.directory`, which would be a
-      // privileged config change on a shared box to silence a message.
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
@@ -89,7 +45,6 @@ export function checkVendoredMoney(): { status: VendorStatus; detail: string } {
   return { status: "DRIFTED", detail: `${drifted.join(", ")} differ from ${arcade}` };
 }
 
-/** Say it at boot, in the log somebody reads when a settlement looks wrong. */
 export function reportVendoredMoney(): VendorStatus {
   const { status, detail } = checkVendoredMoney();
   if (status === "DRIFTED") {

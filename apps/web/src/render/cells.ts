@@ -1,21 +1,7 @@
-/**
- * Ice cell sprites.
- *
- * Each player is a plate of ice in a frozen lattice — and snowflakes are
- * hexagonal, so the same geometry carries both readings: hexes tile without
- * gaps, stay legible from eight cells to a thousand, and a six-fold dendrite
- * etched into each face turns the plate into a snowflake without costing the
- * grid anything. Death gets something better to do than fade out: the ice
- * fractures.
- *
- * Sprites are rebuilt only when the layout changes, then blitted per frame.
- */
-
 export type CellState = "live" | "you" | "dying" | "cashed";
 
 export interface CellSprite {
   canvas: HTMLCanvasElement;
-  /** Offset from the hex centre to the sprite's top-left corner. */
   ox: number;
   oy: number;
   w: number;
@@ -31,7 +17,6 @@ interface Tones {
   glow: string | null;
 }
 
-/** Glacial ice. */
 const TONES: Record<CellState, Tones> = {
   live: {
     face: "#1f3a4d",
@@ -67,7 +52,6 @@ const TONES: Record<CellState, Tones> = {
   },
 };
 
-/** Flat-top hexagon. Corner k sits at angle 60k degrees. */
 export function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
   ctx.beginPath();
   for (let i = 0; i < 6; i++) {
@@ -95,7 +79,6 @@ function buildSprite(state: CellState, r: number, dpr: number): CellSprite {
   const cy = h / 2;
   const hollow = state === "cashed";
 
-  // Outer bloom for the states that should read across the whole lattice.
   if (t.glow) {
     const g = ctx.createRadialGradient(cx, cy, r * 0.4, cx, cy, r + pad);
     g.addColorStop(0, `${t.glow}55`);
@@ -104,7 +87,6 @@ function buildSprite(state: CellState, r: number, dpr: number): CellSprite {
     ctx.fillRect(0, 0, w, h);
   }
 
-  // Plate face
   hexPath(ctx, cx, cy, r);
   const face = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
   face.addColorStop(0, t.facetLight);
@@ -115,8 +97,6 @@ function buildSprite(state: CellState, r: number, dpr: number): CellSprite {
   ctx.fill();
   ctx.globalAlpha = 1;
 
-  // Crystal facets: two wedges from the centre catch the light differently, so
-  // the plate reads as a cut mineral rather than a flat polygon.
   if (!hollow && r > 7) {
     ctx.save();
     hexPath(ctx, cx, cy, r);
@@ -142,11 +122,6 @@ function buildSprite(state: CellState, r: number, dpr: number): CellSprite {
     ctx.globalAlpha = 1;
   }
 
-  // Dendrite etching: the six-fold branching that makes a hexagon read as a
-  // snowflake. Etched *into* the ice — low alpha, clipped to the plate — not
-  // drawn on top of it. Arms point at the corners, side branchlets fork at
-  // 60° the way real dendrites grow, and a small hexagonal core anchors the
-  // centre.
   if (!hollow && r > 8 && (state === "live" || state === "you")) {
     ctx.save();
     hexPath(ctx, cx, cy, r);
@@ -178,7 +153,6 @@ function buildSprite(state: CellState, r: number, dpr: number): CellSprite {
     ctx.globalAlpha = 1;
   }
 
-  // Rim
   hexPath(ctx, cx, cy, r * 0.985);
   ctx.strokeStyle = t.rim;
   ctx.lineWidth = Math.max(0.7, r * (state === "you" ? 0.1 : 0.05));
@@ -186,8 +160,6 @@ function buildSprite(state: CellState, r: number, dpr: number): CellSprite {
   ctx.stroke();
   ctx.globalAlpha = 1;
 
-  // Specular along the top-left edges only — a single light source keeps the
-  // whole lattice looking lit rather than glowing.
   if (r > 5) {
     ctx.beginPath();
     const a1 = (Math.PI / 3) * 3;
@@ -208,7 +180,6 @@ function buildSprite(state: CellState, r: number, dpr: number): CellSprite {
 
 export class CellAtlas {
   private sprites = new Map<CellState, CellSprite>();
-  /** Fracture overlays, drawn over a plate as it breaks. */
   readonly radius: number;
 
   constructor(radius: number, dpr: number) {

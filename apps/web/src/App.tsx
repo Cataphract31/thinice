@@ -20,8 +20,6 @@ import { riskBand } from "@/game/risk";
 import { charById, initCharAssets } from "@/game/chars";
 import { DEFAULT_CONFIG } from "@zinc/engine";
 
-// Read from the engine, not restated. A second copy of the tick interval means
-// the ring animation silently races the wrong clock the moment timing changes.
 const TICK_MS = DEFAULT_CONFIG.timing.tickMs;
 
 type Tab = "roster" | "history" | "stats" | "chat";
@@ -31,63 +29,28 @@ export default function App(): JSX.Element {
   const [snap, setSnap] = useState<Snapshot>(() => client.snapshot());
   const [selected, setSelected] = useState<{ roundId: number; id: number } | null>(null);
   const [showInfo, setShowInfo] = useState(false);
-  // ?intro on the URL re-summons the walkthrough — it is otherwise a
-  // once-per-browser event, which makes reviewing copy changes impossible.
   const [showIntro, setShowIntro] = useState(
     () => !tutorialSeen() || new URLSearchParams(window.location.search).has("intro"),
   );
   const [showChars, setShowChars] = useState(false);
-  // Deposits and withdrawals. This game holds no key and signs nothing: the
-  // panel talks to the arcade's custody edge and the player's own wallet.
   const [showBank, setShowBank] = useState(false);
   const [tab, setTab] = useState<Tab>("roster");
-  // Mobile only: the bottom panel folds to its tab row so the lattice gets
-  // the height back. Desktop's rail ignores this entirely.
   const [panelOpen, setPanelOpen] = useState(true);
-  // CRT mode, toggled from the sound popover, worn by the lattice frame.
   const [crt, setCrtState] = useState(() => crtOn());
   useEffect(() => onCrtChange(setCrtState), []);
 
-  /*
-   * THE BOOKS MOVED, AND THIS GAME WAS NOT THE ONE THAT MOVED THEM.
-   *
-   * `onBalanceMoved` below already does this -- but only while the BankOverlay
-   * is mounted, because the panel's poll is what notices. Closing it takes the
-   * only eye on the ledger off it. So a deposit made here, then dismissed, and
-   * then a minute at the lattice, left the wallet on screen showing what it
-   * showed before the money landed; and a deposit made in ANOTHER TAB was
-   * never seen at all.
-   *
-   * `zinc:balance` is the arcade's own watch, running on every page that
-   * carries the chrome, on a poll that outlives any one panel. See
-   * arcade/web/balance.js in GIELINOR.
-   *
-   * SYNC RATHER THAN PAINT. Every number on this screen comes off a server
-   * snapshot -- the wallet included -- and drawing the arcade's figure over it
-   * would put two authorities on one line. `sync` asks the game's own server
-   * to go and read the books again, and the answer arrives as an ordinary
-   * state frame the way every other number here does.
-   */
   useEffect(() => {
     const moved = (): void => client.sync();
     window.addEventListener("zinc:balance", moved);
     return () => window.removeEventListener("zinc:balance", moved);
   }, [client]);
 
-  // The TV power cycle: when the result screen gives way to the next lobby,
-  // the picture collapses to a line and snaps back open on fresh ice.
   const [tv, setTv] = useState<"off" | "on" | null>(null);
   const prevPhase = useRef(snap.phase);
   useEffect(() => {
     const was = prevPhase.current;
     prevPhase.current = snap.phase;
     if (!crt || !(was === "result" && snap.phase === "lobby")) {
-      // A cycle interrupted mid-flight must not leave the picture collapsed.
-      // Re-running this effect clears the pending timers below, and those
-      // timers are the only thing that ever restores the screen: toggling CRT
-      // off during the 700ms blink, or a reconnect jumping the phase inside
-      // it, would otherwise strand tv at "off" — the board held at 0.4% of
-      // its height by the animation's fill mode, invisible for good.
       setTv((t) => (t === null ? t : null));
       return;
     }
@@ -105,10 +68,8 @@ export default function App(): JSX.Element {
   }, [snap.phase, crt]);
 
   useEffect(() => client.subscribe(setSnap), [client]);
-  // Ice faces are drawn in code now; only the character art loads from disk.
   useEffect(() => initCharAssets(), []);
 
-  // Browsers block audio until the first gesture, so arm it on any interaction.
   useEffect(() => {
     const arm = (): void => initAudio();
     window.addEventListener("pointerdown", arm, { once: true });
@@ -119,11 +80,6 @@ export default function App(): JSX.Element {
     };
   }, []);
 
-  // Seat ids are only unique within a round: id 3 next round is a different
-  // person. The selection therefore carries the round it was made in, and is
-  // discarded during render rather than in an effect — an effect runs after
-  // paint, so the first frame of the new round still resolved the old id and
-  // showed a stranger's card as if it were the same continuous player.
   const chosen =
     selected && selected.roundId === snap.roundId
       ? (snap.players.find((p) => p.id === selected.id) ?? null)
@@ -131,9 +87,6 @@ export default function App(): JSX.Element {
   const select = (id: number | null): void =>
     setSelected(id === null ? null : { roundId: snap.roundId, id });
 
-  // One tab state serves both layouts, but only mobile offers "chat" as a tab
-  // — the desktop rail has a dedicated chat panel instead, so there the value
-  // falls back to the roster rather than rendering an unlisted tab.
   const deskTab = tab === "chat" ? "roster" : tab;
 
   return (
@@ -143,18 +96,6 @@ export default function App(): JSX.Element {
         onShowInfo={() => setShowInfo(true)}
         onShowChars={() => setShowChars(true)}
         onShowBank={() => setShowBank(true)}
-        /* Disconnecting REVOKES the seat rather than merely re-handshaking.
-           Clearing the browser's copy of the token left the server's row valid
-           forever, so "disconnect" meant "this device forgot" — and that token
-           rides in a cookie shared with every world on the domain.
-
-           AND A WALLET THAT JUST SIGNED IN TO THE ARCADE IS NOT ASKED TO SIGN
-           AGAIN. `reauth(true)` means "run the wallet ceremony on the next
-           challenge", which is right when the connect got us nothing but an
-           address — and wrong when it got us an arcade session, because the
-           socket takes that token as proof (`t: "arcade"`). Forcing a
-           signature here is what made connecting cost two prompts and made the
-           bank ask a freshly-connected player to connect. */
         onWalletChange={(connected, arcadeSeated) =>
           connected ? client.reauth(!arcadeSeated) : client.logout()
         }
@@ -164,11 +105,6 @@ export default function App(): JSX.Element {
 
       <div className="mt-1.5 flex min-h-0 flex-1 gap-2 px-1.5 lg:px-3">
         <div className="relative flex min-h-0 flex-1 flex-col">
-          {/* The vitals strip. Everything a player must not miss lives here,
-              above the lattice: the tick/danger ring, the hero multiplier, and
-              the field count. The old placement — multiplier floating on the
-              canvas, risk relegated to a thin bar below it — left the single
-              most important quantity in the game unread. */}
           <div className="mb-1.5 flex shrink-0 items-stretch gap-2">
             <TickRing snap={snap} tickMs={TICK_MS} />
             <div className="flex min-w-0 flex-1 items-center justify-center">
@@ -177,20 +113,11 @@ export default function App(): JSX.Element {
             <AliveCard snap={snap} />
           </div>
 
-          {/* Flat: the lattice reads as a surface, not a framed screenshot.
-              Its darker pit background is the only separation it needs. The
-              tube filter warms the picture only while CRT mode is on. */}
           <div
             className={`relative min-h-0 flex-1 overflow-hidden ${crt ? "crt-tube" : ""} ${
               tv === "off" ? "tv-off" : tv === "on" ? "tv-on" : ""
             }`}
           >
-            {/* `bleed` fades the BOARD into the pit, and only the board. It is
-                a mask, so it applies to the whole subtree it sits on — with
-                the overlays inside it, the first 64px from every side of a
-                card were multiplied down toward transparent, which is why a
-                card parked at left-2 had no visible left edge no matter what
-                colour it was drawn in. The atmosphere belongs to the ice. */}
             <div className="bleed absolute inset-0">
               <Shaft snap={snap} onSelectCell={select} />
               {crt && <CrtLayer snap={snap} />}
@@ -209,11 +136,6 @@ export default function App(): JSX.Element {
           </div>
         </div>
 
-        {/* Desktop rail: your controls on top, at eye level with the game,
-            the way every crash game places its bet panel. */}
-        {/* Scored off the board by one hairline, not boxed: the house draws
-            its sidebar as a region of the same surface, and the whole page
-            stops reading as cards floating on a background. */}
         <aside className="hidden w-[286px] shrink-0 border-l border-[var(--color-line-soft)] pl-3 lg:flex lg:flex-col lg:gap-1.5">
           <ActionBar
             inline
@@ -223,8 +145,6 @@ export default function App(): JSX.Element {
             onStepOff={() => client.stepOff()}
           />
           <AutoPanel snap={snap} onChange={(p) => client.setAuto(p)} />
-          {/* Chat lives on mobile as a fourth tab; on desktop it has its own
-              panel below, so the tab maps back to the roster here. */}
           <div className="min-h-0 flex-[1.15]">
             <TabbedPanel snap={snap} tab={deskTab} onTab={setTab}>
               {deskTab === "roster" ? (
@@ -236,17 +156,12 @@ export default function App(): JSX.Element {
               )}
             </TabbedPanel>
           </div>
-          {/* Always visible, never behind a tab: a PvP room where the other
-              players are silent and hidden reads as a single-player game. */}
           <div className="min-h-0 flex-1">
             <ChatPanel snap={snap} client={client} onSelect={select} />
           </div>
         </aside>
       </div>
 
-      {/* Mobile panel. Kept deliberately short: on a phone every row of chrome
-          is taken straight out of the lattice, which is the thing people came
-          to look at. The roster scrolls, so height here is a luxury. */}
       <div className={`mt-1 shrink-0 px-1.5 lg:hidden ${panelOpen ? "h-[124px]" : ""}`}>
         <TabbedPanel
           snap={snap}
@@ -289,11 +204,7 @@ export default function App(): JSX.Element {
       {showBank && (
         <BankOverlay
           onClose={() => setShowBank(false)}
-          // Money landing at the custody edge never reaches this game's server,
-          // so the wallet on screen would sit stale until the round settled.
           onBalanceMoved={() => client.sync()}
-          // A fresh arcade session is a seat here. The socket was opened
-          // before it existed, so it has to be opened again to use it.
           onSignedIn={() => client.reauth()}
         />
       )}
@@ -304,11 +215,7 @@ export default function App(): JSX.Element {
           onClose={() => setShowChars(false)}
         />
       )}
-      {/* Root level, NOT inside the lattice frame: the tube's filter turns any
-          ancestor into the containing block for fixed children, which caged
-          this "fullscreen" card inside the TV and clipped it on phones. */}
 
-      {/* Mobile keeps the thumb-reach bottom bar, with auto play just above. */}
       <div className="lg:hidden">
         <div className="px-3 pb-1">
           <AutoPanel snap={snap} onChange={(p) => client.setAuto(p)} />
@@ -326,18 +233,6 @@ export default function App(): JSX.Element {
   );
 }
 
-/**
- * The rink behind curved glass. Mounted directly over the canvas — under the
- * player card and the winner scene, which are chrome, not broadcast. Pure
- * composited CSS plus one canvas of BENT scanlines redrawn only on resize:
- * the curvature is the whole trick, straight lines say overlay and bent
- * lines say tube. The game canvas never pays a frame for any of it.
- *
- * The signal degrades with the danger: a sub-pixel sway when the ice is
- * tense, hard tracking steps when it is critical, and a tear-band glitch
- * the instant a plate goes under. Presentation reacting to the same number
- * as the ring and the seams — a channel, not a costume.
- */
 function CrtLayer({ snap }: { snap: Snapshot }): JSX.Element {
   const lines = useRef<HTMLCanvasElement | null>(null);
 
@@ -358,9 +253,6 @@ function CrtLayer({ snap }: { snap: Snapshot }): JSX.Element {
       x.scale(dpr, dpr);
       x.strokeStyle = "rgba(0, 0, 0, 0.22)";
       x.lineWidth = 1;
-      // Barrel curvature: each line bows away from the vertical centre, the
-      // way a tube's face bulges. A quadratic through-midpoint needs double
-      // the sag on its control point.
       const bow = Math.min(9, h * 0.018);
       for (let y = 1.5; y < h; y += 3) {
         const v = (y / h) * 2 - 1;
@@ -376,7 +268,6 @@ function CrtLayer({ snap }: { snap: Snapshot }): JSX.Element {
     return () => ro.disconnect();
   }, []);
 
-  // One tear per death, riding wherever the clock happens to point.
   const [glitch, setGlitch] = useState<{ key: number; top: number } | null>(null);
   const prevDead = useRef(-1);
   useEffect(() => {
@@ -417,14 +308,6 @@ function CrtLayer({ snap }: { snap: Snapshot }): JSX.Element {
   );
 }
 
-/**
- * Everything about one player on one plate.
- *
- * Fixed width with a pinned close
- * button, so the geometry never depends on the length of a name; capped to
- * the lattice frame and scrollable inside, because on a phone the frame is
- * shorter than the card and the overflow was silently clipped.
- */
 function PlayerCard({
   p,
   entry,
@@ -504,13 +387,6 @@ function PlayerCard({
         )}
       </div>
 
-      {/* The record, not the stopwatch.
-          Volume is ONE line: entry is fixed, so plates and SOL wagered are
-          the same fact and printing both was one number twice. The rows that
-          earn their space are the style tells — how often this wallet
-          finishes a plate ahead, and how far it has ever ridden one. Those
-          separate a nit from a degen, which is the thing worth knowing about
-          a stranger you are sharing a lattice with. */}
       {p.lifetime && (
         <div className="mt-1.5 space-y-0.5 border-t border-[var(--color-panel2)] pt-1.5">
           {line(
@@ -532,12 +408,6 @@ function PlayerCard({
               {p.lifetime.best > 0 ? `${p.lifetime.best.toFixed(2)}×` : "-"}
             </span>,
           )}
-          {/* RTP, not net SOL. A 24/7 grinder's card would otherwise read
-              like a casualty report ("-20 ◎ lifetime") when the honest
-              summary of the same volume is "98% returned" — the number the
-              game actually promises. Green only at or above break-even;
-              below it stays neutral, because under 100% IS the expected
-              case, not damage. Hidden until a wallet has wagered anything. */}
           {p.lifetime.wagered > 0 &&
             line(
               "lifetime rtp",
@@ -554,11 +424,6 @@ function PlayerCard({
   );
 }
 
-/**
- * Field count, and the one number that matters for the current phase: how many
- * are bonded and when the round seals, how many are still alive and what the
- * pot is, or how long until the next round.
- */
 function AliveCard({ snap }: { snap: Snapshot }): JSX.Element {
   const secs = Math.ceil(snap.msToPhaseEnd / 1000);
 
@@ -587,7 +452,6 @@ function AliveCard({ snap }: { snap: Snapshot }): JSX.Element {
     sub = "";
   }
 
-  // Boxless on purpose: numbers over the page, same as the hero multiplier.
   return (
     <div className="flex w-[88px] shrink-0 flex-col items-center justify-center p-2 sm:w-[118px]">
       <div className="label">{label}</div>
@@ -599,7 +463,6 @@ function AliveCard({ snap }: { snap: Snapshot }): JSX.Element {
   );
 }
 
-/** Flat surface, no frame: the lattice keeps the product's one border. */
 function TabbedPanel({
   snap,
   tab,
@@ -612,18 +475,12 @@ function TabbedPanel({
   snap: Snapshot;
   tab: Tab;
   onTab: (t: Tab) => void;
-  /** Offer chat as a tab — the mobile layout, which has no room for a rail. */
   chat?: boolean;
-  /** Collapse support (mobile): false hides the body, leaving the tab row. */
   open?: boolean;
   onToggleOpen?: () => void;
   children: React.ReactNode;
 }): JSX.Element {
   const shown = open !== false;
-  // Active tab is a cyan underline on lit text — the house marks the current
-  // arena this way, and an underline says "section" where a filled pill said
-  // "button". The inactive border is transparent, not absent, so switching
-  // tabs never shifts the row by two pixels.
   const tabBtn = (id: Tab, label: string): JSX.Element => (
     <button
       onClick={() => onTab(id)}
@@ -643,8 +500,6 @@ function TabbedPanel({
         {chat && tabBtn("chat", "chat")}
         {tabBtn("history", "history")}
         {tabBtn("stats", "stats")}
-        {/* The give-me-my-screen-back button: collapses the panel to this
-            row so the lattice takes the height. Tapping any tab reopens. */}
         {onToggleOpen && (
           <button
             onClick={onToggleOpen}

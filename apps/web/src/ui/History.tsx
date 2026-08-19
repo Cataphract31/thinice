@@ -1,20 +1,11 @@
 import { type JSX } from "react";
 import type { HistoryEntry, Snapshot } from "@/game/client";
 
-/** Either client verifies rounds the same way: locally, from the seed. */
 interface Verifier {
   verifyRound(roundId: number): void | Promise<void>;
 }
 import { CharArt } from "@/ui/Chars";
 
-/**
- * Your past rounds, each one verifiable.
- *
- * Every round's seed is committed to (sha256) before it seals and revealed
- * when it ends. "Verify" replays the whole round from that seed right here in
- * the browser and checks both that the replay matches what you watched and
- * that the seed matches the hash published up front.
- */
 export function HistoryPanel({
   snap,
   client,
@@ -24,9 +15,6 @@ export function HistoryPanel({
 }): JSX.Element {
   if (snap.history.length === 0) {
     return (
-      /* Scrollable rather than vertically centred: on a phone this panel is
-         short enough that a centred block simply hangs off both ends, which
-         is why the commitment was arriving half cut off. */
       <div className="scroll-fade h-full overflow-y-auto px-2 pb-2 pt-3 text-center">
         <div className="label">no rounds yet</div>
         <div className="mt-1.5 text-[11px] leading-relaxed text-[var(--color-dim)]">
@@ -48,12 +36,7 @@ export function HistoryPanel({
   const standings = Object.entries(snap.teamWins).sort((a, b) => b[1] - a[1]);
 
   return (
-    /* Padded past the top fade so the first block is never half-swallowed. */
     <div className="scroll-fade h-full overflow-y-auto pt-2.5">
-      {/* Team dominance: all-time round wins per character. Fun data, zero
-          stakes — the teams are cosmetic and every plate rolls the same odds.
-          Label on its own line and the tally centred: as a single wrapping row
-          it broke across two lines in the desktop rail and looked accidental. */}
       {standings.length > 0 && (
         <div className="mx-1 rounded-sm bg-[var(--color-panel2)] p-1.5">
           <div className="label mb-1 text-center">team wins</div>
@@ -114,11 +97,6 @@ function Row({ h, onVerify }: { h: HistoryEntry; onVerify: () => void }): JSX.El
           {h.commit ? h.commit.slice(0, 14) : "no commit"}… / {h.seedHex}
         </span>
         {h.unavailable ? (
-          /* No verdict at all rather than a false one: without crypto.subtle
-             (any insecure origin, e.g. testing over a LAN IP) the hash cannot
-             be computed, and a round whose record will not parse cannot be
-             replayed either. Calling an honest round a mismatch is the worst
-             thing this panel could possibly say, so it says neither. */
           <span className="label ml-auto shrink-0 text-[var(--color-warn)]">
             unverifiable
           </span>
@@ -136,8 +114,6 @@ function Row({ h, onVerify }: { h: HistoryEntry; onVerify: () => void }): JSX.El
         )}
       </div>
 
-      {/* The receipts. A bare "fair" verdict convinces nobody: show exactly
-          what was recomputed and what it was checked against. */}
       {h.verified !== null && (
         <div className="mt-1 space-y-0.5 rounded-sm bg-[var(--color-panel2)]/60 p-1.5 text-[9.5px] leading-relaxed">
           <div
@@ -146,11 +122,6 @@ function Row({ h, onVerify }: { h: HistoryEntry; onVerify: () => void }): JSX.El
             {h.seedOk ? "✓" : "✗"} sha256(seed) matches the hash published before
             the round started
           </div>
-          {/* Null on a round the server never finished. A crash mid-round
-              still reveals the seed and records who was in it, but there is no
-              outcome to replay against — and calling that a mismatch would
-              condemn the operator for the one thing they got right, which is
-              publishing the round at all rather than leaving it hidden. */}
           {h.replayOk === null ? (
             <div className="text-[var(--color-dim)]">
               · round interrupted: the seed was revealed, but the round never
@@ -164,12 +135,6 @@ function Row({ h, onVerify }: { h: HistoryEntry; onVerify: () => void }): JSX.El
               {h.entrants} players, every elimination and payout identical
             </div>
           )}
-          {/* Without this a round replays perfectly under rigged numbers and
-              still reads "fair" — the other two checks only prove the operator
-              is consistent with itself. Null on rounds played before the rules
-              were folded into the commitment: there is nothing to check them
-              against, and claiming otherwise would be the lie this panel
-              exists to prevent. */}
           {h.rulesOk === null ? (
             <div className="text-[var(--color-dim)]">
               · legacy round: its commitment covered the seed only, not the rules
@@ -182,9 +147,6 @@ function Row({ h, onVerify }: { h: HistoryEntry; onVerify: () => void }): JSX.El
               hazard curve, same rake, same payouts
             </div>
           )}
-          {/* Your own money. The three checks above prove the round was honest;
-              this one proves the number you were actually paid is the number
-              that round produced for your plate. */}
           {h.payoutOk !== null && (
             <div
               style={{ color: h.payoutOk ? "var(--color-profit)" : "var(--color-danger)" }}

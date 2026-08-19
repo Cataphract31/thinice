@@ -2,17 +2,10 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import type { Snapshot } from "@/game/client";
 import { CharArt } from "./Chars";
 
-/** The one thing the panel needs from the client. */
 export interface Talker {
   sendChat(text: string): void;
 }
 
-/**
- * Table talk. This is what makes the room feel occupied: the roster proves
- * other people exist, chat proves they are present. Kept deliberately flat —
- * avatar, name, line — because the lattice is the show and this is the crowd
- * noise around it.
- */
 export function ChatPanel({
   snap,
   client,
@@ -21,18 +14,11 @@ export function ChatPanel({
 }: {
   snap: Snapshot;
   client: Talker;
-  /** Inside the mobile tab panel, which already owns the surface and padding. */
   bare?: boolean;
-  /** Opens a speaker's plate profile, same as clicking them on the roster. */
   onSelect?: (id: number) => void;
 }): JSX.Element {
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
-  /**
-   * Stick to the newest line only while the reader is already at the bottom.
-   * Yanking the view down while someone is reading scrollback is how chat
-   * panels teach people not to scroll up.
-   */
   const stick = useRef(true);
 
   useEffect(() => {
@@ -68,11 +54,6 @@ export function ChatPanel({
             </div>
           ) : (
             <div key={m.id} className="flex items-start gap-1.5 px-1 py-0.5">
-              {/* Speaker opens their plate profile, exactly like the roster —
-                  when they hold a plate this round. A speaker who is only
-                  spectating has no plate to profile, so the click is a no-op
-                  rather than an error. Cosmetic lookup by display name is
-                  fine here; nothing money-bearing hangs off it. */}
               <button
                 type="button"
                 onClick={() => {
@@ -133,8 +114,6 @@ export function ChatPanel({
   if (bare) return <div className="flex h-full min-h-0 flex-col">{body}</div>;
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Scored off the tabbed panel above it, same hairline as the tab row:
-          the rail reads as one surface divided into regions, not a stack. */}
       <div className="flex shrink-0 items-baseline justify-between border-t border-[var(--color-line)] px-2 pt-1.5">
         <span className="label">chat</span>
         <span className="label tnum">{snap.online} online</span>

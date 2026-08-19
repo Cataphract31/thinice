@@ -1,26 +1,3 @@
-/*
- * THE ROUND ITSELF, WHICH HAD NO TEST AT ALL.
- *
- * `game.ts` is where the money decisions are: who is seated, what is held,
- * what is settled, and what happens to any of it when the ledger is slow, the
- * round rolls over, or the tick loop throws. Every other file on this server
- * had a suite and this one did not, which is why a whole family of bugs sat
- * here green for months. They share one shape:
- *
- *   EVERY GUARD IN THIS FILE READS STATE THAT IS WRITTEN AFTER AN AWAIT.
- *
- * A stake moves over HTTP. A seat is recorded when the answer comes back. So
- * for one network round trip the server's honest answer to "how many plates
- * does this wallet hold" was zero, and every cap, every step-off and every
- * auto-buy decision read that zero. The tests below are written against the
- * WINDOW rather than against the functions: they inject latency and then do
- * the thing a real client does inside it.
- *
- * Nothing here touches a socket, a real database file or a real ledger. The
- * fake ledger records what it was asked, answers when told to, and can be made
- * slow or broken on demand -- which is the only way to write down "250ms of
- * ledger latency charged this player five times".
- */
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -33,28 +10,17 @@ import { LedgerError, type ArcadeLedger } from "../src/arcade.ts";
 const STAKE = toLamports(DEFAULT_CONFIG.entry);
 const RULES = rulesHashOf(DEFAULT_CONFIG);
 
-/** Lets an in-flight promise chain run without inventing a wall-clock wait. */
 const settleAll = async (): Promise<void> => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 };
 
-/** Wait for real timers -- only for the fake ledger's injected latency. */
 const after = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** Latency plus the microtasks behind it: everything in the air has landed. */
 const flush = async (ms = 80): Promise<void> => {
   await after(ms);
   await settleAll();
 };
 
-/*
- * A LEDGER THAT ANSWERS WHEN IT IS TOLD TO.
- *
- * `latencyMs` is the whole point of this harness: the arcade's books are one
- * SQLite IMMEDIATE transaction shared with every other game on the box, so a
- * couple of hundred milliseconds under contention is ordinary rather than
- * exotic, and it is exactly the window the bugs below live in.
- */
 function fakeLedger() {
   const holds: { wallet: string; roundId: number; seat: number; amount: number }[] = [];
   const settles: { roundId: number; seat: number; payout: number }[] = [];
@@ -63,12 +29,9 @@ function fakeLedger() {
   const exposureReleases: number[] = [];
   const state = {
     latencyMs: 0,
-    /** Refuse every hold with this code, as the real client would report it. */
     holdError: null as string | null,
-    /** Refuse every settle: the books briefly unreachable. */
     settleError: null as string | null,
     releaseError: null as string | null,
-    /** Answer the next hold with an EXISTING hold rather than a new one. */
     replayNext: false,
     sweeps: 0,
     exposureSweeps: 0,
@@ -132,7 +95,6 @@ function fakeLedger() {
   return { ledger: ledger as unknown as ArcadeLedger, holds, settles, releases, reserves, exposureReleases, state };
 }
 
-/** A connected human, as the socket layer would present one. */
 function fakeSession(wallet: string, guest = false): Session & { last: unknown } {
   return {
     wallet,
@@ -147,15 +109,6 @@ function fakeSession(wallet: string, guest = false): Session & { last: unknown }
   } as Session & { last: unknown };
 }
 
-/*
- * THE LIFECYCLE HANDLES THE SOCKET LAYER DOES NOT HAVE.
- *
- * `seal`, `tick`, `openLobby` and `abortRound` are private because no message
- * may reach them: they are the clock, and the clock belongs to the server.
- * A test has to be able to stand where the clock stands -- the alternative is
- * ten-second lobbies and real crashes -- so it reaches in here, deliberately
- * and in one place, rather than the game exposing them to everybody.
- */
 interface Inner {
   phase: "lobby" | "live" | "result";
   roundId: number;
@@ -178,7 +131,6 @@ interface Inner {
 }
 const inner = (g: GameServer): Inner => g as unknown as Inner;
 
-/** A game in an open lobby with its clock stopped, so tests own the timing. */
 function table(opts: { latencyMs?: number } = {}) {
   const db = new Database(":memory:");
   const fake = fakeLedger();
@@ -189,15 +141,7 @@ function table(opts: { latencyMs?: number } = {}) {
   return { db, game, g: inner(game), ...fake };
 }
 
-/* ---- the window between a stake moving and a seat being recorded ---- */
-
 test("ten bond presses in one tick buy five plates, not ten", async () => {
-  /*
-   * The cap read `seatsOf`, which is written after the hold returns, so every
-   * one of ten concurrent joins saw an empty list and sent its own hold. The
-   * client dispatches with no busy guard and the server with `void handle()`,
-   * so this is a real client hammering a button, not a synthetic race.
-   */
   const t = table({ latencyMs: 20 });
   const s = fakeSession("WalletA");
   t.game.attach(s);
@@ -208,27 +152,17 @@ test("ten bond presses in one tick buy five plates, not ten", async () => {
   assert.equal(answers.filter((a) => a === null).length, CONFIG.maxPlatesPerWallet);
   assert.equal(t.g.seatsOf.get("WalletA")?.length, CONFIG.maxPlatesPerWallet);
   assert.equal(t.g.seats.size, CONFIG.maxPlatesPerWallet, "and no plate is orphaned");
-  // Every refusal names the cap rather than blaming the books.
   for (const a of answers.filter((x) => x !== null)) assert.match(String(a), /plate limit/);
   t.db.close();
 });
 
 test("stepping off while the stake is moving is honoured, not silently ignored", async () => {
-  /*
-   * THE WORST OF THE SET. `unjoin` looked in `seatsOf`, found nothing because
-   * the holds were still in the air, and returned null -- which index.ts
-   * reports as success and shows the player nothing. The holds then landed.
-   * The player pressed step off, was told nothing was wrong, and was bonded
-   * three plates deep in a round they had explicitly left; timed at the last
-   * second of the lobby, sealed into it.
-   */
   const t = table({ latencyMs: 20 });
   const s = fakeSession("WalletA");
   t.game.attach(s);
   t.db.setAuto("WalletA", true, 2, 1);
 
   const joins = [t.game.join(s), t.game.join(s), t.game.join(s)];
-  // Inside the window, exactly as a real press would land.
   const off = await t.game.unjoin(s);
   const answers = await Promise.all(joins);
   await flush();
@@ -248,21 +182,12 @@ test("stepping off while the stake is moving is honoured, not silently ignored",
 });
 
 test("auto play under a slow ledger buys what was configured and not the cap", async () => {
-  /*
-   * `autoEnter` runs off the 50ms loop and skipped a wallet only once
-   * `seatsOf` had it. With a 250ms ledger that is five independent auto-buys
-   * before the first records anything, each of which passed a post-await
-   * re-check that enforced the GLOBAL cap and never the caller's own target.
-   * A player with auto on and one plate configured was charged 0.5 SOL a
-   * round, every round, without touching anything.
-   */
   const t = table({ latencyMs: 30 });
   const s = fakeSession("WalletA");
   t.game.attach(s);
   t.db.player("WalletA");
   t.db.setAuto("WalletA", true, 2, 1);
 
-  // Ten passes of the lobby loop inside one hold.
   for (let i = 0; i < 10; i++) t.g.autoEnter();
   await after(120);
   await settleAll();
@@ -292,13 +217,6 @@ test("auto play with three plates configured buys exactly three", async () => {
 });
 
 test("a round that rolls over during a hold does not seat anybody in the next one", async () => {
-  /*
-   * `openLobby` resets seat numbering to 1. A stake held for round R and
-   * written into round R+1 lands on a seat id that round may have already
-   * sold: the entry row collides and `seats.set` overwrites a stranger's seat
-   * outright, redirecting their payout. Three seconds of timing margin, held
-   * by config values in two different repositories, was the whole defence.
-   */
   const t = table({ latencyMs: 30 });
   const s = fakeSession("WalletA");
   t.game.attach(s);
@@ -317,9 +235,6 @@ test("a round that rolls over during a hold does not seat anybody in the next on
 });
 
 test("a hold the books answer with an EXISTING hold does not sell a seat", async () => {
-  // Refs are idempotent, so a 200 does not by itself mean this stake just
-  // moved. Seating on a replayed ref is a plate nobody paid for -- and the
-  // hold that came back belongs to whoever made it, so it is not released.
   const t = table();
   const s = fakeSession("WalletA");
   t.game.attach(s);
@@ -333,12 +248,6 @@ test("a hold the books answer with an EXISTING hold does not sell a seat", async
 });
 
 test("a hold whose answer is lost is released rather than declared untouched", async () => {
-  /*
-   * The old message said "your money has not been touched", which this code
-   * cannot know: the 5s abort is OURS, so a request that arrived and lost only
-   * its response leaves a real hold under this exact ref. The player watches
-   * the balance move while being told it did not.
-   */
   const t = table();
   const s = fakeSession("WalletA");
   t.game.attach(s);
@@ -354,9 +263,6 @@ test("a hold whose answer is lost is released rather than declared untouched", a
 });
 
 test("a guest is turned away before the arcade's books are ever asked", () => {
-  // `{t:"guest"}` needs no signature, and a wallet that never gets a seat
-  // never trips a cap -- so every message was a free POST against the SQLite
-  // file every game on this box shares.
   const t = table();
   const s = fakeSession("guest:aaaaaaaa", true);
   t.game.attach(s);
@@ -368,17 +274,7 @@ test("a guest is turned away before the arcade's books are ever asked", () => {
   });
 });
 
-/* ---- settlement, and what a seat number is worth as an identity ---- */
-
 test("a pending payout survives the same seat number coming round again", async () => {
-  /*
-   * Seat ids restart at 1 every lobby, and the pending set held only the
-   * number. Round R seat 3 wins 8x and its settle fails; round R+1's seat 3
-   * dies, settles fine, and its `.then()` deleted round R's entry. The winner
-   * was then never paid: their hold stayed open until a restart, at which
-   * point the startup sweep RELEASED it -- handing back a 0.1 SOL stake in
-   * place of 0.8 SOL of winnings.
-   */
   const t = table();
   t.db.player("Winner");
   t.db.takeEntry(t.g.roundId, "Winner", STAKE, 3);
@@ -389,9 +285,6 @@ test("a pending payout survives the same seat number coming round again", async 
   await settleAll();
   assert.ok(t.g.unsettled.has(`r${roundOne}:s3`), "round R's seat 3 is owed money");
 
-  // A new round, a different player, the same seat number, and it settles.
-  // The lobby's own reconcile pass runs first and is still refused, which is
-  // what leaves round R's entry standing to be collided with.
   t.g.openLobby();
   await settleAll();
   t.state.settleError = null;
@@ -416,10 +309,6 @@ test("a pending payout survives the same seat number coming round again", async 
 });
 
 test("a release the books refuse is queued and asked again", async () => {
-  // Settlement had a durable retry and release had nothing but the startup
-  // sweep -- so a player who stepped off watched their stake sit in escrow for
-  // as long as the process happened to stay up, with the local row already
-  // gone and nothing pointing at it.
   const t = table();
   const s = fakeSession("WalletA");
   t.game.attach(s);
@@ -437,16 +326,7 @@ test("a release the books refuse is queued and asked again", async () => {
   t.db.close();
 });
 
-/* ---- the seed, and what the commitment covers ---- */
-
 test("no seed exists while the lobby is open, and the commitment still does", async () => {
-  /*
-   * Elimination consumes one draw per live player in join order and the hazard
-   * curve reads live/total, so a seed known during the lobby makes who dies a
-   * pure function of join order and entrant count -- both of which the server
-   * decides, after seeing it. No grinding required, and the replay verifies
-   * perfectly because the record honestly states the order that was used.
-   */
   const t = table();
   assert.equal(t.g.seedHex, "", "there is nothing to steer with");
   assert.equal(t.g.sealNonce, "");
@@ -491,9 +371,6 @@ test("sealing reserves the round's worst case against the arcade's house", async
   t.g.seal();
   await settleAll();
 
-  // Self-funding in the ordinary case; the exposure is what the recovery paths
-  // could cost, which is one seat banking the whole pot while every other
-  // stake is released: pot minus that seat's own entry.
   const pot = 2 * DEFAULT_CONFIG.entry * (1 - totalRake(DEFAULT_CONFIG));
   assert.deepEqual(t.reserves, [
     { roundId: round, amount: toLamports(pot) - toLamports(DEFAULT_CONFIG.entry) },
@@ -502,9 +379,6 @@ test("sealing reserves the round's worst case against the arcade's house", async
 });
 
 test("an arcade with no exposure register does not stop the round", async () => {
-  // The reservation is a backstop. Refusing to seal a table whose payouts are
-  // already fully funded by held stakes, because a backstop is unreachable,
-  // would be strictly worse for every player at it.
   const t = table();
   t.state.exposureError = new LedgerError("NOT_FOUND", "no such route", 404);
   const a = fakeSession("WalletA");
@@ -521,12 +395,7 @@ test("an arcade with no exposure register does not stop the round", async () => 
   t.db.close();
 });
 
-/* ---- extraction, and the rule the HUD used to own alone ---- */
-
 test("extraction during grace is refused by the server, not just hidden", async () => {
-  // The HUD hides the button; a scripted client sent the message anyway and
-  // banked 0.98x, below the stake it had just paid. A rule the server does not
-  // hold is not a rule, and this one is inside the rules hash.
   const t = table();
   const a = fakeSession("WalletA");
   const b = fakeSession("WalletB");
@@ -548,17 +417,7 @@ test("extraction during grace is refused by the server, not just hidden", async 
   t.db.close();
 });
 
-/* ---- the tick loop throwing ---- */
-
 test("an aborted round rolls back BOTH halves and stays verifiable", async () => {
-  /*
-   * `abortRound` did the local half and not the ledger half, while its comment
-   * claimed it rolled back "exactly like the startup sweep would". The startup
-   * path does two things; this did one. So every stake stayed in arcade escrow
-   * -- reading `held` rather than `free` in every game on the box -- while the
-   * local rows said 'refunded', and the round itself was never closed, which
-   * made it a round that took real money and can never be proved.
-   */
   const t = table();
   const a = fakeSession("WalletA");
   const b = fakeSession("WalletB");
@@ -595,13 +454,6 @@ test("an aborted round rolls back BOTH halves and stays verifiable", async () =>
 });
 
 test("a round aborted mid-flight leaves a settled seat's payout alone", async () => {
-  /*
-   * The other half of the same failure: `refundOpenEntries` selected every row
-   * that was not already 'refunded', which includes seats that had cashed. It
-   * rewrote a real payout to `returned = staked` and decremented the player's
-   * lifetime total by the difference, while the sweep handed every other stake
-   * back -- and `~house` covered the gap with `overdraft: true`.
-   */
   const t = table();
   const a = fakeSession("WalletA");
   const b = fakeSession("WalletB");
@@ -615,9 +467,6 @@ test("a round aborted mid-flight leaves a settled seat's payout alone", async ()
   const round = t.g.roundId;
   t.g.seal();
 
-  // Booked directly at 8x rather than played to it: what matters here is a row
-  // that has genuinely settled while its neighbours are still open, and
-  // waiting for the dice to produce one would make the test a coin flip.
   t.g.settleExit("WalletA", 1, DEFAULT_CONFIG.entry * 8, 14, "cashed");
   await settleAll();
   const paid = t.db.owedFor(round, 1);
@@ -652,13 +501,6 @@ test("the state a player sees after an abort does not claim they are still in", 
 });
 
 test("a clean shutdown closes the open round instead of only stopping the clock", async () => {
-  /*
-   * `stop()` cancelled the timer and nothing else, so a deploy restart left
-   * exactly what a crash leaves: entries still open, and a published
-   * commitment with no reveal that `historyFor` excludes forever. The startup
-   * sweep rescues the money either way; it cannot rescue the proof, and a
-   * shutdown we chose should not need rescuing at all.
-   */
   const t = table();
   const a = fakeSession("WalletA");
   const b = fakeSession("WalletB");

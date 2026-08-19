@@ -3,13 +3,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { PlayerView, Snapshot } from "@/game/client";
 import { CharHead } from "@/ui/Chars";
 
-/**
- * Who is still in, who got out, who did not. Sorted so the action is on top.
- *
- * This replaced a separate event feed — the roster already carries the same
- * information as live state rather than as scrolling history, and one dense
- * panel beats two half-height ones.
- */
 export function Roster({
   snap,
   onSelect,
@@ -18,11 +11,6 @@ export function Roster({
   onSelect?: (id: number) => void;
 }): JSX.Element {
   const parentRef = useRef<HTMLDivElement>(null);
-  // One row per OWNER, not per plate: a five-plate wallet showed as five
-  // identical lines. The row wears a ×k badge instead, and represents the
-  // stack by its best-standing plate: live plates all share one multiple
-  // (engine invariant), so a stack with anything still on the ice reads as
-  // "in" at the live number; otherwise its best extraction; otherwise dead.
   const rank = (p: PlayerView): number =>
     p.you ? 0 : p.outcome === "in" ? 1 : p.outcome === "cashed" ? 2 : 3;
   const byOwner = new Map<string, { rep: PlayerView; count: number }>();
@@ -47,8 +35,6 @@ export function Roster({
     getScrollElement: () => parentRef.current,
     estimateSize: () => 24,
     overscan: 10,
-    // Clears the scroll container's top fade, so the first row is never
-    // half-swallowed by it under the tab header.
     paddingStart: 12,
   });
 
@@ -66,9 +52,6 @@ export function Roster({
                   ? "var(--color-cyan)"
                   : "var(--color-text)";
           return (
-            /* A real button, not a clickable div: this is the only way to open
-               a player card, and as a bare div it was unreachable by keyboard
-               and invisible to a screen reader. */
             <button
               key={p.id}
               type="button"

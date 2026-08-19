@@ -1,20 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
-/**
- * The last line. A render error anywhere in the tree would otherwise unmount
- * the whole application: React tears everything down and the player is left
- * staring at a blank page with, as far as they know, money on the table.
- *
- * This cannot happen to a gambling product. The boundary catches the throw
- * and puts up an honest screen with the one action that always works. It
- * deliberately renders from nothing — no Snapshot, no client, no styles.css
- * classes beyond what inline styles restate — because whatever broke the tree
- * must not be able to break the screen that reports it.
- *
- * The socket and the round are unharmed: the game client lives outside React
- * and the server settles a vanished player by its own rules (auto cash-out on
- * disconnect, refunds on abort). Reloading rejoins the same session.
- */
 export class CrashScreen extends Component<
   { children: ReactNode },
   { error: Error | null }
@@ -26,7 +11,6 @@ export class CrashScreen extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    // The console is the bug report channel; there is no telemetry to send to.
     console.error("render crash:", error, info.componentStack);
   }
 

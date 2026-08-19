@@ -1,22 +1,8 @@
 import { useEffect, type JSX, type ReactNode } from "react";
 import { DEFAULT_CONFIG, totalRake } from "@zinc/engine";
 
-/**
- * Rules and odds, in as few words as they can be said.
- *
- * Every number on this page is read out of the live game config rather than
- * typed in — the rake moved mid-build once and four hardcoded copies went
- * stale silently. A rules page that disagrees with the engine reads as either
- * incompetence or a lie, and this is a product asking people for money.
- */
-
 const C = DEFAULT_CONFIG;
 const RAKE = totalRake(C);
-/**
- * Every lamport of the pot leaves via a player, so the return IS the pot.
- * Nothing is pooled, streamed or held back, which is why this page has one
- * number on it instead of three that have to be added up.
- */
 const RTP = 1 - RAKE;
 const pc = (x: number, dp = 0): string => `${(x * 100).toFixed(dp)}%`;
 

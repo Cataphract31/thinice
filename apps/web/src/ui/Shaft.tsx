@@ -3,7 +3,6 @@ import { LatticeRenderer } from "@/render/lattice";
 import type { Snapshot } from "@/game/client";
 import type { CellState } from "@/render/cells";
 
-/** Canvas host. React owns nothing inside here — the renderer runs its own loop. */
 export function Shaft({
   snap,
   onSelectCell,
@@ -19,14 +18,9 @@ export function Shaft({
     if (!canvas) return;
     const r = new LatticeRenderer(canvas);
     renderer.current = r;
-    // Value flows up out of the lattice toward the multiplier sitting above it.
     r.setSinkPoint(0.5, -0.08);
     r.start();
 
-    // Hand the renderer the observed content box rather than letting it
-    // measure itself: contentRect is transform-free and fractional, where a
-    // self-measurement can only be integral and, done with a client rect,
-    // can be caught mid-animation by the between-rounds TV transform.
     const ro = new ResizeObserver((entries) => {
       const box = entries[entries.length - 1]?.contentRect;
       r.resize(box ? { width: box.width, height: box.height } : undefined);
@@ -50,23 +44,8 @@ export function Shaft({
   useEffect(() => {
     const r = renderer.current;
     if (!r) return;
-    // The layout clusters spatially by `group`, so array order carries no
-    // meaning here any more — the renderer grows each owner a contiguous
-    // blob of hexes itself, with yours pinned to the centre.
-    //
-    // Rim colours come from a palette ORDERED FOR CONTRAST, not from a name
-    // hash: the first clusters get far-apart colours (red, then green, then
-    // gold, then violet...), never neighbouring shades, so two stacks side
-    // by side cannot wear lookalike rims. Assignment is by each cluster's
-    // lowest plate id — stable for the whole round, reshuffled naturally
-    // between rounds by join order. No light blues or cyans anywhere: the
-    // ice itself is pale blue and cyan is YOU. No black either; the pit
-    // behind the lattice is near-black and the rim would vanish into it.
-    // Overflow past the palette walks the golden angle, skipping that band.
     const counts = new Map<string, number>();
     for (const p of snap.players) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
-    // Orange sits near the back: it is only 22 degrees from gold, and with
-    // both near the front a busy board wore the palette's one weak pair.
     const PALETTE = [348, 130, 48, 270, 224, 312, 26, 84];
     const firstId = new Map<string, number>();
     for (const p of snap.players) {
@@ -93,14 +72,7 @@ export function Shaft({
         group: p.name,
         charId: p.charId,
         hue: hueByGroup.get(p.name),
-        // Only exits carry their banked multiple onto the board; the state
-        // mapping below keeps a last-stander out of "cashed", so the print
-        // lands on leavers alone.
         multiple: p.outcome === "cashed" ? p.multiple : undefined,
-        // "Cashed" states two different endings: LEAVING mid-round, or being
-        // auto-banked as the one who outlasted everyone. The board must not
-        // conflate them — on the end screen the leavers ghost out and the
-        // stander keeps standing, so the picture matches the verdict.
         state: (p.outcome === "dead"
           ? "dying"
           : p.outcome === "cashed"

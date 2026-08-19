@@ -1,26 +1,3 @@
-/*
- * The arcade's books, reached over HTTP — and the three ways that goes wrong.
- *
- * This game may hold a stake, settle it, and give it back. It cannot credit,
- * debit or mint, and it holds no key material, so the worst bug reachable from
- * this file is a mispriced round rather than a signed transfer. What is left
- * is still worth guarding closely, because all three failure modes are silent:
- *
- *   THE KEY LEAVING THE BOX. LEDGER_KEY is the whole authority to move
- *   anybody's money on this machine. Pointed at a public origin it would be
- *   posted to a stranger, and the mistake would look like a config typo.
- *
- *   FAILING OPEN. If the ledger cannot be reached, the stake was NOT taken.
- *   Seating a player anyway is how a game ends up owing a settlement it never
- *   took payment for -- and it would only show up in a solvency sweep.
- *
- *   PAYING TWICE. Every mutating call carries a ref the caller chooses, and
- *   asking twice with the same ref returns the first answer instead of moving
- *   money again. That ref is what makes retries and crash replays safe, so its
- *   shape is load-bearing rather than cosmetic.
- *
- * Everything here runs against an injected `fetchImpl`. No server, no sockets.
- */
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -33,7 +10,6 @@ interface Call {
   body: unknown;
 }
 
-/** A fake ledger that records what it was asked and answers however told. */
 function fakeFetch(reply: { status?: number; body?: unknown; text?: string } = {}) {
   const calls: Call[] = [];
   const impl = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -63,8 +39,6 @@ const ledgerWith = (reply?: Parameters<typeof fakeFetch>[0], opts: Record<string
   };
 };
 
-/* ---- the key never leaves the loopback ---- */
-
 test("a service key is refused any destination that is not the loopback", () => {
   for (const url of [
     "https://voidsolana.com",
@@ -85,8 +59,6 @@ test("the loopback spellings a config file actually uses are all accepted", () =
 });
 
 test("with no key there is nothing to leak, so the destination is not policed", () => {
-  // A box with no LEDGER_KEY cannot take stakes at all -- see below -- so the
-  // guard has nothing to protect and must not block a dev pointing elsewhere.
   assert.doesNotThrow(() => createArcadeLedger({ url: "https://example.com", key: "" }));
   assert.equal(createArcadeLedger({ url: "https://example.com", key: "" }).enabled, false);
 });
@@ -113,8 +85,6 @@ test("the key travels in the header, on every route, and never in the URL", () =
   });
 });
 
-/* ---- a box that cannot take money says so ---- */
-
 test("without a key every money call fails closed", async () => {
   const ledger = createArcadeLedger({ url: "http://127.0.0.1:8080", key: "" });
   assert.equal(ledger.enabled, false);
@@ -133,7 +103,6 @@ test("without a key every money call fails closed", async () => {
 });
 
 test("an unreachable ledger does not sell the seat", async () => {
-  // The bargain this refuses is "seat now, reconcile later".
   const impl = (async () => {
     throw new Error("connect ECONNREFUSED");
   }) as typeof globalThis.fetch;
@@ -145,8 +114,6 @@ test("an unreachable ledger does not sell the seat", async () => {
 });
 
 test("a ledger answering with something that is not JSON is an error, not an empty result", async () => {
-  // An HTML error page from a proxy parses as nothing. Reading that as `{}`
-  // would turn a failed hold into a successful one with an undefined ref.
   const { ledger } = ledgerWith({ status: 502, text: "<html>Bad Gateway</html>" });
   const err = await ledger.hold("w", 100, 1, 1).then(() => null, (e: LedgerError) => e);
   assert.equal(err?.code, "LEDGER_GARBAGE");
@@ -162,7 +129,6 @@ test("the ledger's own refusal is passed through with its code and status", asyn
   assert.equal(err?.code, "INSUFFICIENT_FUNDS");
   assert.equal(err?.status, 402);
   assert.equal(err?.message, "wallet is short");
-  // The one failure a caller acts on differently: a normal answer, not a fault.
   assert.equal(err?.isBroke, true);
 });
 
@@ -170,21 +136,15 @@ test("any other refusal is not mistaken for the player being broke", async () =>
   const { ledger } = ledgerWith({ status: 500, body: { error: { code: "LEDGER_BUG", message: "boom" } } });
   const err = await ledger.hold("w", 100, 1, 1).then(() => null, (e: LedgerError) => e);
   assert.equal(err?.isBroke, false);
-  // A refusal with no code at all still becomes a refusal, not a success.
   const bare = ledgerWith({ status: 400, body: {} });
   const err2 = await bare.ledger.hold("w", 1, 1, 1).then(() => null, (e: LedgerError) => e);
   assert.equal(err2?.code, "LEDGER_REFUSED");
   assert.equal(err2?.isBroke, false);
 });
 
-/* ---- the ref is what makes retries safe ---- */
-
 test("one seat's money has one ref, forever", () => {
   const { ledger } = ledgerWith();
   assert.equal(ledger.refFor(12, 3), "thin-ice:r12:s3");
-  // Round and seat both have to be in it, and they must not run together: with
-  // a plain concatenation, round 1 seat 23 and round 12 seat 3 are one ref, and
-  // the second stake silently replays the first.
   assert.notEqual(ledger.refFor(1, 23), ledger.refFor(12, 3));
   assert.equal(ledger.refFor(12, 3), ledger.refFor(12, 3), "stable across calls");
 });
@@ -196,8 +156,6 @@ test("hold, settle and release all name the same ref for the same seat", async (
   await ledger.release(7, 2);
   const refs = calls.map((c) => (c.body as { ref: string }).ref);
   assert.deepEqual(refs, ["thin-ice:r7:s2", "thin-ice:r7:s2", "thin-ice:r7:s2"]);
-  // A retry of the settle is the same request, which is what makes the deferred
-  // flush at round close safe to run as many times as it takes.
   await ledger.settle(7, 2, 250);
   assert.deepEqual(calls[3]!.body, calls[1]!.body);
 });
@@ -220,14 +178,11 @@ test("a hold names the game and the amount it is taking", async () => {
 });
 
 test("a replayed hold is reported as replayed rather than as a fresh stake", async () => {
-  // What a crash-and-retry looks like from here. The money did not move again.
   const { ledger } = ledgerWith({ body: { ref: "r", amount: 100, state: "held", replayed: true } });
   assert.equal((await ledger.hold("w", 100, 1, 1)).replayed, true);
 });
 
 test("a total loss settles at zero instead of releasing the stake", async () => {
-  // A payout of 0 means "played and lost", and the books should say so. A
-  // release would say the round never happened and hand the stake back.
   const { ledger, calls } = ledgerWith();
   await ledger.settle(3, 1, 0);
   assert.match(calls[0]!.url, /\/settle$/);
@@ -244,9 +199,6 @@ test("a release says why, for whoever reads the books later", async () => {
 });
 
 test("the crash sweep asks only for this game's holds", async () => {
-  // Holds outlive the process that made them -- that is the point of holds --
-  // and money in flight is the only money a crash can lose. It must not
-  // release another game's.
   const { ledger, calls } = ledgerWith({ body: { released: 4 } });
   assert.equal(await ledger.sweep(), 4);
   assert.deepEqual(calls[0]!.body, { game: "thin-ice" });
@@ -255,9 +207,6 @@ test("the crash sweep asks only for this game's holds", async () => {
 });
 
 test("a balance is read for the screen and coerced to numbers", async () => {
-  // Nothing decides anything from this -- `hold` is the check, atomically,
-  // where the money is. It still must not hand the state frame a string or
-  // undefined, which would render as NaN in front of a player.
   const { ledger, calls } = ledgerWith({ body: { balance: "900", held: "100" } });
   assert.deepEqual(await ledger.balanceOf("w"), { freeLamports: 900, heldLamports: 100 });
   assert.match(calls[0]!.url, /\/balance\?wallet=w$/);
@@ -273,18 +222,7 @@ test("a trailing slash in the configured URL does not double up in the path", as
   assert.equal(f.calls[0]!.url, "http://127.0.0.1:8080/api/ledger/sweep");
 });
 
-/* ---- the box-wide exposure register, which is a second door on the same arcade ---- */
-
 test("a reservation goes to the exposure register, not the ledger", async () => {
-  /*
-   * Thin Ice is self-funding -- the pot is the entrants' own stakes less rake
-   * -- so for the ordinary round the house is promised nothing. It stops being
-   * true on the recovery paths: holds released while a payout has already been
-   * made leave `ledger.settle` funding the difference from `~house` with
-   * `overdraft: true`. That is real house exposure and the operator's "is a
-   * payout still owed" decision reads exactly this total, so the round has to
-   * be in it.
-   */
   const { ledger, calls } = ledgerWith({ body: { reserved: "1", key: "thin-ice:7" } });
   await ledger.exposure.reserve(7, 2_450_000_000);
   assert.match(calls[0]!.url, /\/api\/exposure\/reserve$/);
@@ -292,16 +230,11 @@ test("a reservation goes to the exposure register, not the ledger", async () => 
   assert.deepEqual(calls[0]!.body, {
     game: "thin-ice",
     round: "7",
-    // A STRING. It is BigInt lamports on the arcade's side and JSON has no
-    // BigInt, so a number here is a rounding mode waiting to happen.
     amount: "2450000000",
   });
 });
 
 test("a reservation refused by the arcade arrives as something a caller can act on", async () => {
-  // The ceiling is enforced there and not here: two games asking at the same
-  // moment would both pass their own check, so the question and the answer
-  // have to happen in one call on the side that can see everybody.
   const { ledger } = ledgerWith({
     status: 409,
     body: { error: { code: "OVER_ARCADE_EXPOSURE", message: "the whole arcade is full" } },
@@ -315,11 +248,6 @@ test("a reservation refused by the arcade arrives as something a caller can act 
 });
 
 test("an arcade with no register at all is distinguishable from one that failed", async () => {
-  // This client and the register's routes deploy from repositories that are
-  // pulled separately, so a server can be newer than the arcade beside it. A
-  // 404 turns the backstop off and says so; anything else is a failure. The
-  // status has to survive even when the body is not JSON, which is exactly
-  // what a fallback 404 handler tends to write.
   const { ledger } = ledgerWith({ status: 404, text: "Not Found" });
   await assert.rejects(ledger.exposure.sweep(), (err: unknown) => {
     assert.ok(err instanceof LedgerError);

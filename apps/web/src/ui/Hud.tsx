@@ -15,7 +15,6 @@ import {
 } from "@/audio/sound";
 import { crtOn, setCrt } from "./fx";
 
-/** Flat icon button shared by the top bar's controls. */
 function IconButton({
   label,
   onClick,
@@ -36,25 +35,11 @@ function IconButton({
   );
 }
 
-/**
- * Volume behind a popover instead of an always-visible slider.
- *
- * The inline slider was the thing pushing the top bar past the viewport on
- * mobile. The popover holds both controls — mute is one tap once it is open,
- * and the slider is still there so a player who finds the game slightly too
- * loud has a better option than silence. Both persist.
- */
 export function VolumePopover(): JSX.Element {
   const [open, setOpen] = useState(false);
-  // Load the stored preferences BEFORE reading the level: initializers run
-  // in order, and the old order captured the 0.7 default one line before
-  // the saved volume was actually loaded into the module.
   const [muteFlag, setMuteFlag] = useState(() => loadMutePreference());
   const [level, setLevel] = useState(() => getVolume());
   const [crtFlag, setCrtFlag] = useState(() => crtOn());
-  // One definition of "silent", used by the icon, the label and the toggle.
-  // These were three different expressions, so the button could read "Unmute"
-  // and mute, or show 🔊 over a game whose volume was zero.
   const silent = muteFlag || level === 0;
 
   return (
@@ -71,16 +56,12 @@ export function VolumePopover(): JSX.Element {
 
       {open && (
         <>
-          {/* Click-away layer. Sits under the popover, over everything else. */}
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full z-50 mt-1.5 w-[196px] rounded-sm bg-[var(--color-panel2)] p-3 shadow-[0_8px_30px_rgba(0,0,0,0.55)]">
             <div className="flex items-center gap-2.5">
               <button
                 onClick={() => {
                   if (silent) {
-                    // Restore audibility whichever way it was lost — flipping
-                    // only the mute flag on a zero volume leaves the icon
-                    // claiming sound while the game stays silent.
                     setMuted(false);
                     setMuteFlag(false);
                     if (level === 0) {
@@ -108,8 +89,6 @@ export function VolumePopover(): JSX.Element {
                   const v = Number(e.target.value);
                   setVolume(v);
                   setLevel(v);
-                  // Dragging above zero is an unmute in every product that has
-                  // ever had a volume slider.
                   if (v > 0 && isMuted()) {
                     setMuted(false);
                     setMuteFlag(false);
@@ -118,9 +97,6 @@ export function VolumePopover(): JSX.Element {
                 className="w-full accent-[var(--color-cyan)]"
               />
             </div>
-            {/* Screen effects ride in the sound popover: it is the de facto
-                settings surface, and one more icon in the top bar is chrome
-                the design does not want. */}
             <div className="mt-3 flex items-center justify-between border-t border-[var(--color-line)] pt-2.5">
               <span className="label">crt screen</span>
               <button
@@ -144,7 +120,6 @@ export function VolumePopover(): JSX.Element {
   );
 }
 
-/** The slice of Phantom's injected API this button needs. */
 type PhantomProvider = {
   isPhantom?: boolean;
   connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey: { toString(): string } }>;
@@ -160,86 +135,17 @@ function phantom(): PhantomProvider | null {
   return p?.isPhantom ? p : null;
 }
 
-/**
- * Real Phantom connect, no wallet library: the extension injects its API into
- * the page.
- *
- * In networked play the label renders the SEAT the server reported, never
- * Phantom's connect state — the two can disagree, and when they did the
- * button showed a cyan address over a session the server had expired down to
- * a guest ledger. That mismatch now renders as an explicit "re-sign" state
- * whose click runs the signature ceremony again.
- */
-/**
- * ONE SIGNATURE FOR THE WHOLE BUILDING, AND WHY THIS BUTTON HAD TO CHANGE.
- *
- * This used to be `phantom().connect()` and nothing else. Connecting is not
- * proving -- the extension hands back a public key, which is a claim -- so the
- * seat still had to be bought with a signature, and the socket bought it with
- * THIS GAME'S ceremony: sign `THIN ICE login`, take a token this server minted.
- *
- * That token seats a player at the table and it cannot do one other thing:
- * read their balance at the custody edge. The bank answers to a token the
- * ARCADE minted, from its own issuer, over its own sentence -- so a player who
- * pressed connect here, got seated, and then opened the wallet panel was asked
- * to connect a SECOND time, for a second signature, for the wallet they had
- * just connected. That is not a security step; from the outside it is the site
- * not remembering what it just did, on the screen where trust matters most.
- *
- * So the signature is given to the ARCADE instead, and the table takes the
- * token that comes out of it -- the socket has had `t: "arcade"` for exactly
- * this since the portal learnt the same lesson (see authenticate() in
- * game/net.ts, and the long note at the top of portal/wallet.js in the arcade).
- * One prompt, both seats, and the bank is already signed in when it opens.
- *
- * AND IF THE ARCADE CANNOT ANSWER, NOTHING IS LOST. An issuer that is
- * unreachable, or a wallet that will not sign a message, falls back to exactly
- * what this did before: the table's own signature, on the table's own token.
- * The player is never prompted twice by the fallback -- the wallet is already
- * connected by then, so the retry is silent.
- */
 export function WalletButton({
   seat,
   onChange,
 }: {
-  /** The server-reported seat identity; undefined in the local demo. */
   seat?: { guest: boolean; address: string };
-  /**
-   * Called with true after an explicit connect, false after a disconnect.
-   *
-   * `arcadeSeated` says whether the arcade's own session was minted. When it
-   * was, the socket must NOT be told to want a signature: it has a token that
-   * proves the same wallet, and asking would be the second prompt this whole
-   * path exists to remove.
-   */
   onChange?: (connected: boolean, arcadeSeated?: boolean) => void;
 }): JSX.Element {
   const [addr, setAddr] = useState<string | null>(null);
-  /** A wallet prompt is open. The press must not be repeatable while it is. */
   const [busy, setBusy] = useState(false);
-  /* The way out is ASKED FOR, not offered. Disconnecting used to be a second
-     press on the chip carrying your own address, which is a thing you have to
-     be told; now that press reveals an explicit exit beside it, and pressing
-     the address again puts it away. */
   const [showExit, setShowExit] = useState(false);
 
-  /*
-   * Reconnect silently ONLY for players who explicitly connected before.
-   * Merely having Phantom installed must never start a wallet conversation:
-   * everyone is a guest until they press this button.
-   *
-   * AND ONLY WITH AN ARCADE SESSION BEHIND IT. `shown` falls back to this
-   * address until the socket answers, so without the check the chip wore a
-   * player's own address for every second of a connection that was going to
-   * seat them as a guest -- and, if they had no session at all, for good. The
-   * wallet trusting this origin and the arcade knowing who you are are
-   * different facts, and only the second one lets you play. Reported from the
-   * other end: "it makes me think its all fine and good but then i still need
-   * to do the whole ritual".
-   *
-   * No signature is asked for here -- this runs on load. The button falls to
-   * its connect wording, which is true, and one press repairs it.
-   */
   useEffect(() => {
     if (!walletOptedIn() || !arcadeToken()) return;
     phantom()
@@ -248,19 +154,9 @@ export function WalletButton({
       .catch(() => {});
   }, []);
 
-  // The seat is the truth when there is one; the demo falls back to Phantom.
   const seatAddr = seat && !seat.guest ? seat.address : null;
   const shown = seat ? seatAddr : addr;
-  // Held a seat here, and the server seated a guest anyway: that session's
-  // token died and the wallet needs one fresh signature to get its ledger
-  // back. It asks walletSeated and NOT walletOptedIn, because a wallet
-  // connected at some other table on this domain has never had a seat here to
-  // lose -- telling that player to "re-sign" claims something expired when
-  // nothing ever existed.
   const expired = seat !== undefined && seat.guest && walletSeated();
-  // Known to the arcade but never seated here: this is a first sign-in, not a
-  // repair, and saying so is the difference between a button that reads as
-  // broken and one that reads as a step.
   const known = !shown && !expired && Boolean(walletCarried());
 
   const click = async (): Promise<void> => {
@@ -271,49 +167,12 @@ export function WalletButton({
     if (busy) return;
     setBusy(true);
     try {
-      /*
-       * THE ARCADE'S OWN SIGN-IN, WHICH IS ALSO THE WALLET LOOKUP.
-       *
-       * Not guarded by a "is there a wallet here" check of our own, and that
-       * matters most on a phone, where the honest answer to that question is
-       * NO and the right thing to do about it is not the download page: there
-       * is nothing to inject a provider into mobile Safari, so the shared
-       * handshake offers the wallet APPS and navigates to one. A pre-check
-       * here would have sent every phone to install a wallet they already
-       * have. It also returns without any prompt at all when this browser is
-       * already carrying a live arcade session, which is what makes RE-SIGN
-       * after a lapsed seat free.
-       */
       const address = await arcadeSignIn();
-      // The address goes with the opt-in: every other world on this domain
-      // reads it and is spared asking who you are all over again.
       setWalletOptIn(true, address);
       setAddr(address);
-      /*
-       * AND WHETHER A SESSION WAS ACTUALLY MINTED IS READ, NOT ASSUMED. The
-       * handshake resolves with an address even when the issuer refused or was
-       * unreachable, so trusting the resolve would tell the socket "you have a
-       * token" when there is none -- and the socket, asked not to prompt,
-       * would quietly seat a guest. The cookie is the fact.
-       */
       onChange?.(true, Boolean(arcadeToken()));
     } catch (err) {
       const e = err as ArcadeError;
-      /*
-       * No wallet at all, ON A MACHINE WHERE ONE COULD BE INSTALLED. Anything
-       * else is a decline or a wallet that could not sign, and asking again in
-       * a different sentence is not a fallback, it is nagging.
-       *
-       * THE PLATFORM TEST IS LOAD-BEARING, and leaving it out is the exact
-       * failure the phone route was built to end. On a phone NO_WALLET does
-       * NOT mean there is no wallet: the arcade offers the wallet APPS first
-       * -- a sheet, one tap, straight into Phantom or Solflare -- and only
-       * refuses once that sheet has been dismissed. Opening phantom.app after
-       * it sends somebody who is holding Phantom to a page whose main button
-       * says DOWNLOAD, which is what "install an extension" looks like on a
-       * device that cannot have one. See docs/MOBILE_WALLETS.md in GIELINOR:
-       * that page is why two rebuilds of this route failed identically.
-       */
       if (e.code === "NO_WALLET" && walletRoute() === "desktop") {
         window.open("https://phantom.app", "_blank", "noopener");
       }
@@ -325,16 +184,11 @@ export function WalletButton({
   const exit = async (): Promise<void> => {
     setShowExit(false);
     await phantom()?.disconnect().catch(() => {});
-    // Disconnecting here disconnects everywhere: the seat and the opt-in both go.
     setWalletOptIn(false);
     setAddr(null);
     onChange?.(false);
   };
 
-  // Connected and re-sign stay dark chips — they are status, not a call to
-  // action. The one that IS a call to action is inverted to near-white, the
-  // house treatment: crash.zinc.cash puts its only solid light element on
-  // "CONNECT + SIGN IN" and nothing else on the page competes with it.
   const cta = !shown && !expired;
   return (
     <>
@@ -395,7 +249,6 @@ function Stat({
   label: string;
   value: string;
   color?: string;
-  /** Sits after the number, in its own colour. The wallet's money door uses it. */
   suffix?: JSX.Element;
 }): JSX.Element {
   return (
@@ -415,25 +268,9 @@ export function Stats({
   onBank,
 }: {
   snap: Snapshot;
-  /**
-   * The phone top row carries only what has nowhere better to live: the
-   * wallet, with its money float. Session P/L moved into the stats tab —
-   * "focus on gameplay" means the chrome above the lattice stays thin.
-   */
   mobile?: boolean;
-  /**
-   * Opens the money panel. Given only for a seated wallet: a guest's balance
-   * is house chips and there is nothing behind the press.
-   *
-   * The balance IS the door, which is the shortest possible route from "I am
-   * out of money" to doing something about it. It was the alternative to a
-   * second control in a corner nobody looks at, which is what the arcade's own
-   * bank tab was.
-   */
   onBank?: () => void;
 }): JSX.Element {
-  // The round's own result floats over the wallet in the game's own colours,
-  // profit green or danger red, once the round settles.
   const lastResultRound = useRef(0);
   const [gain, setGain] = useState<{ amt: number; key: number; color: string } | null>(null);
   useEffect(() => {
@@ -501,11 +338,6 @@ export function Stats({
   );
 }
 
-/**
- * Two jobs, two rows on mobile: identity and controls on the first, money on
- * the second. On desktop everything fits one row. The old single-row layout
- * overflowed a phone screen sideways and left dead space under the spill.
- */
 export function TopBar({
   snap,
   onShowInfo,
@@ -515,19 +347,11 @@ export function TopBar({
   snap: Snapshot;
   onShowInfo: () => void;
   onShowChars: () => void;
-  /** Networked play authenticates at socket open, so a wallet that connects
-      after that needs the handshake re-run or it stays seated as a guest.
-      True = the player just connected (run the signature ceremony once). */
   onWalletChange?: (connected: boolean) => void;
 }): JSX.Element {
   return (
     <div className="border-b border-[var(--color-line)] px-3 py-2.5">
       <div className="flex items-center gap-3">
-        {/* The house lockup: a filled tile carrying the product glyph, then
-            the wordmark. crash.zinc.cash opens with exactly this shape, and
-            two zinc.cash games that start their headers the same way are
-            visibly the same company. The glyph is ours — a hex plate, not
-            their crash ring. */}
         <span className="flex items-center gap-2">
           <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
             <rect width="24" height="24" rx="6" fill="var(--color-cyan)" />
@@ -543,11 +367,8 @@ export function TopBar({
             THIN<span className="text-[var(--color-cyan)]">ICE</span>
           </span>
         </span>
-        {/* Round 0 does not exist — the counter increments before the first
-            lobby opens — so it must not be shown while still connecting. */}
         <div className="label">{snap.roundId > 0 ? `#${snap.roundId}` : "-"}</div>
 
-        {/* Desktop: stats inline. */}
         <div className="ml-auto hidden items-center gap-4 sm:flex">
           <Stats snap={snap} />
         </div>
@@ -561,10 +382,6 @@ export function TopBar({
             <CharArt charId={snap.charId} pose="head" size={22} />
           </button>
           <WalletButton seat={snap.seat} onChange={onWalletChange} />
-          {/* An outlined RULES chip, the house affordance, instead of a bare
-              glyph. A lone ⓘ in a row of six controls is the least-pressed
-              thing on the page, and this is the screen that explains the
-              odds. The word drops on phones, where the row cannot spare it. */}
           <button
             onClick={onShowInfo}
             aria-label="How it works"
@@ -581,7 +398,6 @@ export function TopBar({
         </div>
       </div>
 
-      {/* Mobile: one thin money row. */}
       <div className="mt-1.5 flex items-center justify-between gap-3 sm:hidden">
         <Stats snap={snap} mobile />
       </div>
@@ -589,11 +405,6 @@ export function TopBar({
   );
 }
 
-/**
- * Bustabit-style auto play: enter every round, extract at a target multiple.
- * The exit fires the tick the multiple crosses the target, banking whatever
- * the crossing value actually is: never under the target, sometimes above.
- */
 export function AutoPanel({
   snap,
   onChange,
@@ -603,26 +414,11 @@ export function AutoPanel({
 }): JSX.Element {
   const on = snap.auto.enabled;
 
-  /*
-   * The highest multiple this room can actually produce.
-   *
-   * The number only climbs when somebody DIES and their stake is released to
-   * whoever is left; a voluntary exit takes its money out of the game. So the
-   * ceiling is whatever is still in the pot, and in a quiet lobby it can sit
-   * below the exit target — the shipped default of 2.00x is unreachable in a
-   * four plate room, which does not fail loudly. Auto simply waits forever for
-   * a number the round cannot reach, and rides every one of them into the ice.
-   * Say so rather than let a player discover it a stake at a time.
-   */
   const ceiling =
     snap.potInPlay > 0
       ? snap.potInPlay / snap.entry
       : snap.totalCount * (1 - totalRake(DEFAULT_CONFIG));
   const unreachable = ceiling > 0 && snap.auto.target > ceiling;
-  // Typed text is held locally and only committed on blur or Enter. Feeding
-  // every keystroke through a clamped round trip fought the keyboard: typing
-  // "1.5" clamped "1" to 1.05 mid-entry and produced "1.055", and clearing the
-  // field snapped it straight back.
   const [draft, setDraft] = useState<string | null>(null);
   const commit = (): void => {
     if (draft === null) return;
@@ -660,8 +456,6 @@ export function AutoPanel({
         className="field tnum w-[64px] px-1.5 py-1 text-right text-[13px] font-semibold text-[var(--color-text)]"
       />
       <span className="label">×</span>
-      {/* How many plates each auto round buys. A select, not a stepper: five
-          discrete values, and the whole range must be visible in one tap. */}
       <select
         value={snap.auto.plates}
         onChange={(e) => onChange({ plates: Number(e.target.value) })}
@@ -694,9 +488,7 @@ export function ActionBar({
   snap: Snapshot;
   onJoin: () => void;
   onWalkOut: () => void;
-  /** Lobby-only: refunds every plate and stands the player down. */
   onStepOff?: () => void;
-  /** In-column placement (desktop) instead of the full-width bottom bar. */
   inline?: boolean;
 }): JSX.Element {
   const secs = Math.ceil(snap.msToPhaseEnd / 1000);
@@ -704,9 +496,6 @@ export function ActionBar({
   let action: (() => void) | null = null;
   let tone = "idle";
 
-  // A dropped socket silently discards every intent, so an enabled button here
-  // takes the player's tap and does nothing at all — the worst possible
-  // behaviour for the control that extracts their money.
   if (!snap.connected) {
     return wrap(
       <button
@@ -723,10 +512,6 @@ export function ActionBar({
   if (snap.phase === "lobby") {
     if (!snap.you.joined) {
       if (snap.wallet < snap.entry) {
-        // Both clients drop a join they cannot fund, and the server's refusal
-        // reaches the browser as a console warning nobody sees. A full-colour
-        // primary CTA that silently does nothing is the worst thing the money
-        // button can do, so it says why instead.
         label = "Not enough balance";
       } else {
         label = `Bond in · ${snap.entry.toFixed(3)} ◎`;
@@ -734,8 +519,6 @@ export function ActionBar({
         tone = "go";
       }
     } else if (k < snap.you.plates.max && snap.wallet >= snap.entry) {
-      // Multi-betting: the same button buys the next plate. EV per plate is
-      // identical however many you hold — this buys breadth, not odds.
       label = `Bond another · ${snap.entry.toFixed(3)} ◎ (${k} in)`;
       action = onJoin;
       tone = "go";
@@ -745,15 +528,6 @@ export function ActionBar({
   } else if (snap.phase === "live") {
     if (snap.you.outcome === "in") {
       if (snap.grace) {
-        // This same button was "bond another" half a second ago, so a player
-        // still hammering it would extract at 0.95× before they can read.
-        // Nothing can shatter during grace, so keeping extraction shut for
-        // those ticks costs the player exactly nothing.
-        //
-        // THE SERVER REFUSES IT TOO, and this is only the affordance. It was
-        // this check alone for a while, which made the rule a suggestion: a
-        // scripted client sent `cashout` on tick 0 and banked below its own
-        // stake. See `cashOut` in game.ts, which draws the same boundary.
         const s = Math.max(
           1,
           Math.ceil((snap.graceRemaining * DEFAULT_CONFIG.timing.tickMs) / 1000),
@@ -761,9 +535,6 @@ export function ActionBar({
         label = `Extract unlocks in ${s}s`;
         tone = "lock";
       } else {
-        // One press extracts every live plate at the shared multiple. The
-        // multiple shown is blended across ALL your plates (dead ones count as
-        // zero), so the button never advertises more than pressing it banks.
         label =
           k > 1
             ? `Extract ×${snap.you.plates.alive} · ${snap.you.multiple.toFixed(2)}×`
@@ -791,11 +562,6 @@ export function ActionBar({
           ? "text-[var(--color-profit)]"
           : "text-[var(--color-dim)]";
 
-  // The way out. A bonded player whose lobby never fills would otherwise be
-  // locked in with no exit — nothing between "wait indefinitely" and closing
-  // the tab. Refunds every plate, as if never bought. Sized and lit as a real
-  // button: this is the un-bet control, and at label size in dim-on-panel it
-  // read as a caption pinned to the screen edge, not a thing thumbs can hit.
   const stepOff =
     snap.phase === "lobby" && snap.you.joined && snap.connected && onStepOff ? (
       <button
@@ -821,12 +587,8 @@ export function ActionBar({
   );
 }
 
-/** Bottom bar on mobile, bare button in the desktop column. */
 function wrap(button: JSX.Element, inline: boolean): JSX.Element {
   if (inline) return button;
-  // Bottom padding clears the gesture bar on phones (safe-area inset when the
-  // browser reports one, a floor of 14px when it does not) so the last button
-  // never sits flush against the screen edge.
   return (
     <div className="bg-[var(--color-pit)]/95 px-3 pt-2.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] backdrop-blur">
       {button}

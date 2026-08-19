@@ -16,19 +16,6 @@ import {
 } from "../audio/sound";
 import { arcadeToken, onArcadeDomain, SHARED_DOMAIN } from "./arcade";
 
-/**
- * The networked client.
- *
- * In this mode the browser decides nothing. It sends intents ("I want in",
- * "get me out") and renders whatever the server says is true. Everything that
- * used to be simulated locally — the rounds, the rolls, the balances, the
- * ledgers — now lives on the server, and this class exists only to turn the
- * wire format back into the exact same `Snapshot` the UI already renders.
- *
- * That is the whole point of having built the UI against a snapshot: not one
- * component knows or cares which of the two clients produced it.
- */
-
 interface NetStats {
   roundsPlayed: number;
   roundsWon: number;
@@ -37,7 +24,6 @@ interface NetStats {
   bestMultiple: number;
 }
 
-/** Extra fields the local demo client has no equivalent for. */
 export interface NetExtras {
   connected: boolean;
   online: number;
@@ -54,15 +40,6 @@ const EMPTY_STATS: NetStats = {
   bestMultiple: 0,
 };
 
-/**
- * A stable local id so a guest keeps their balance across refreshes.
- *
- * Storage can throw outright — blocked cookies, private-mode webviews — and an
- * exception here used to escape into the message handler's floating promise
- * and leave the client permanently unauthenticated with no retry. A session
- * that loses its balance on refresh is a far better failure than one that
- * never connects.
- */
 let memoryGuestId = "";
 function guestId(): string {
   const KEY = "zinc.guest.v1";
@@ -73,9 +50,6 @@ function guestId(): string {
   };
   try {
     const stored = localStorage.getItem(KEY);
-    // Validated against the server's own rule, not merely trusted: a legacy
-    // or hand-edited value that fails it is rejected outright by the server,
-    // and that rejection arrives as an error the socket never recovers from.
     if (stored && /^[a-zA-Z0-9_-]{8,40}$/.test(stored)) return stored;
     const id = fresh();
     localStorage.setItem(KEY, id);
@@ -93,79 +67,17 @@ type PhantomProvider = {
   signMessage(msg: Uint8Array, encoding?: string): Promise<{ signature: Uint8Array }>;
 };
 
-/**
- * Wallet auth is OPT-IN, remembered per browser. Without this the handshake
- * ran at every socket open, so anyone with Phantom installed got a signature
- * popup before they had seen the game at all. Everyone starts as a guest;
- * clicking connect sets the flag, disconnecting clears it.
- */
 const WALLET_OPTIN_KEY = "zinc.walletOptIn";
-/** {wallet, token} minted by the server on a successful signature. */
 const WALLET_SESSION_KEY = "zinc.walletSession";
 
-/*
- * THE SAME SESSION, SHARED WITH THE REST OF THE ARCADE.
- *
- * This game now lives at thinice.voidsolana.com, beside cursors., thinline.
- * and the portal on www. -- and that is the whole point of those hosts:
- * localStorage is scoped to one origin and can never be handed between them,
- * but a cookie may be scoped to the registrable domain they share. So the
- * resume credential is mirrored into one.
- *
- * The effect is that a player who connected on the portal -- which does this
- * exact ceremony there, signs this exact challenge, and is handed this exact
- * token by this server -- walks in already seated. No second wallet picker,
- * no second signature. It is `resume` doing what `resume` was written for,
- * with the token arriving by a road that crosses hosts.
- *
- * SAME TRUST LEVEL AS BEFORE, DELIBERATELY. This token is already a bearer
- * credential kept in web storage; a Lax, Secure, domain-scoped cookie is not
- * a weaker place to keep it, and the wallets it seats hold play money (see
- * the note beside `resume` in the server's protocol). It is not the
- * signature and it cannot produce one.
- */
 const SHARED_COOKIE = "zinc_ice";
 
-/*
- * AND THE OPT-IN ITSELF, WHICH IS NOT THE SEAT.
- *
- * `zinc_ice` above is a SEAT -- a bearer token this server minted -- and only
- * this game can use one. `zinc_wallet` is a far smaller thing: the fact that
- * the player has connected a wallet somewhere on this domain, and which
- * address it was. Every other world in the arcade reads it (the portal, the
- * four tables, the desktop, the map) and every one of them writes it, so that
- * connecting ANYWHERE means being known everywhere. This game was the last one
- * only reading -- it wrote the seat and not the opt-in, so a player who
- * connected here first walked out to a portal that had never heard of them.
- *
- * Its VALUE is a claim and never a credential. No world seats anybody because
- * a cookie names them; each one still puts the question to the wallet itself
- * through onlyIfTrusted, and this only says the question is worth asking.
- */
 const NAME_COOKIE = "zinc_wallet";
-
-/**
- * THE ARCADE'S SESSION, which is the one that ends the second signature.
- *
- * `zinc_ice` is a seat this server minted and only this game can use.
- * `zinc_session` is a seat the ARCADE minted, and every game on this domain
- * verifies it against the one issuer that made it. A player who signed in
- * anywhere walks in here already proven, with no Phantom prompt at all -- see
- * the `arcade` message in the server's protocol.
- *
- * That cookie, and the two questions asked of it, are IMPORTED rather than
- * written here now. They lived here first because a seat was the only thing
- * this game ever wanted from the arcade; the bank wants the same session for a
- * different reason, and one definition of "am I signed in to the arcade" is
- * the only safe number of definitions. See game/arcade.ts.
- */
 
 function readShared(): { wallet: string; token: string } | null {
   try {
     const m = document.cookie.match(new RegExp("(?:^|; )" + SHARED_COOKIE + "=([^;]*)"));
     if (!m) return null;
-    // `<wallet>.<token>`: base58 and hex, so the separator can never occur
-    // inside either half.
     const raw = m[1] ?? "";
     const cut = decodeURIComponent(raw).indexOf(".");
     if (cut <= 0) return null;
@@ -179,9 +91,6 @@ function readShared(): { wallet: string; token: string } | null {
 }
 
 function writeShared(wallet: string, token: string): void {
-  // Off the arcade's own domain a Domain attribute naming it is silently
-  // discarded, so there is nothing to write and pretending otherwise would
-  // make a dev build behave differently from production for no reason.
   if (!onArcadeDomain()) return;
   const v = encodeURIComponent(`${wallet}.${token}`);
   document.cookie =
@@ -194,7 +103,6 @@ function clearShared(): void {
     `${SHARED_COOKIE}=; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=0; SameSite=Lax; Secure`;
 }
 
-/** Leave the opt-in where the rest of the arcade can find it, or take it back. */
 function writeName(address: string | null): void {
   if (!onArcadeDomain()) return;
   const v = address ? encodeURIComponent(address) : "";
@@ -202,7 +110,6 @@ function writeName(address: string | null): void {
     `${NAME_COOKIE}=${v}; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=${address ? 60 * 60 * 24 * 30 : 0}; SameSite=Lax; Secure`;
 }
 
-/** Has the player connected a wallet anywhere on this domain? */
 function nameCarried(): boolean {
   try {
     const m = document.cookie.match(new RegExp("(?:^|; )" + NAME_COOKIE + "=([^;]*)"));
@@ -213,14 +120,8 @@ function nameCarried(): boolean {
 }
 
 export function walletOptedIn(): boolean {
-  // A session carried in from another world on this domain IS an opt-in:
-  // the player connected a wallet deliberately, just not on this page.
   if (readShared()) return true;
-  // So is a bare connection made at a table or on the desktop, which mints no
-  // seat here but is still the player saying yes to a wallet on this domain.
   if (nameCarried()) return true;
-  // And an arcade sign-in is the strongest of the three: a signature was
-  // actually given, just not on this page.
   if (arcadeToken()) return true;
   try {
     return localStorage.getItem(WALLET_OPTIN_KEY) === "1";
@@ -229,27 +130,8 @@ export function walletOptedIn(): boolean {
   }
 }
 
-/**
- * Did this player ever hold a SEAT here, as opposed to merely connecting a
- * wallet somewhere in the arcade?
- *
- * TWO QUESTIONS THAT LOOK LIKE ONE, and answering both with `walletOptedIn`
- * is a bug the moment that function learns about `zinc_wallet`:
- *
- *   "may I reconnect the wallet without a popup?"  -- a wallet connected at
- *      any table on this domain is a perfectly good yes.
- *   "did a seat this player HAD just die?"          -- only a seat can answer
- *      that, and a name cookie knows nothing about seats.
- *
- * Conflating them made the button say "re-sign" to anybody who had connected
- * a wallet anywhere in the arcade and simply never played here -- an alarming
- * word for a first visit, and a claim that something had expired when nothing
- * ever existed. `expired` asks this one.
- */
 export function walletSeated(): boolean {
   if (readShared()) return true;
-  // An arcade session IS a seat -- it was bought with a signature, and this
-  // server accepts it. A player holding one has not "expired" anything.
   if (arcadeToken()) return true;
   try {
     return Boolean(localStorage.getItem(WALLET_SESSION_KEY));
@@ -258,7 +140,6 @@ export function walletSeated(): boolean {
   }
 }
 
-/** The address the arcade last carried, if any -- a name, never a credential. */
 export function walletCarried(): string | null {
   try {
     const m = document.cookie.match(new RegExp("(?:^|; )" + NAME_COOKIE + "=([^;]*)"));
@@ -269,40 +150,19 @@ export function walletCarried(): string | null {
 }
 
 export function setWalletOptIn(on: boolean, address?: string | null): void {
-  // Both directions, always: the opt-in is the arcade's, not this origin's.
   writeName(on ? (address ?? null) : null);
   try {
     if (on) localStorage.setItem(WALLET_OPTIN_KEY, "1");
-    // Disconnecting drops the stored session with the flag: staying
-    // resumable after an explicit disconnect would make the button a lie.
     else {
       localStorage.removeItem(WALLET_OPTIN_KEY);
       localStorage.removeItem(WALLET_SESSION_KEY);
-      // Disconnecting here disconnects everywhere; a session that survived in
-      // a shared cookie would seat this wallet again on the next page.
       clearShared();
     }
   } catch {
-    /* session-only opt-in still works via the fresh handshake */
   }
 }
 
 function walletSession(): { wallet: string; token: string } | null {
-  /*
-   * THE SHARED SEAT WINS, AND THAT ORDER IS THE WHOLE FIX.
-   *
-   * Reading our own copy first looks like the polite thing to do and is
-   * exactly wrong: the server keeps ONE token per wallet and replaces it on
-   * every fresh signature, so the moment a player signs somewhere else --
-   * the portal, another tab -- the copy in this origin's localStorage is
-   * dead. Preferring it meant resuming on a token the server had already
-   * rotated, being told the session was expired, and asking the player to
-   * sign again. Which is precisely the "I connected on the site and Thin Ice
-   * still made me re-sign" this was built to stop.
-   *
-   * The cookie is written by whoever minted last, so it is never staler than
-   * the local copy, and this file writes both together at every mint.
-   */
   const shared = readShared();
   if (shared) return shared;
   try {
@@ -314,20 +174,15 @@ function walletSession(): { wallet: string; token: string } | null {
       }
     }
   } catch {
-    /* no local copy either; a signature it is */
   }
   return null;
 }
 
 function saveWalletSession(wallet: string, token: string): void {
-  // Both, always: the cookie is what carries this seat to the other worlds,
-  // and rotating the token without updating it would leave them resuming on
-  // a token this server has already replaced.
   writeShared(wallet, token);
   try {
     localStorage.setItem(WALLET_SESSION_KEY, JSON.stringify({ wallet, token }));
   } catch {
-    /* resumes fall back to a signature next visit */
   }
 }
 
@@ -336,7 +191,6 @@ function clearWalletSession(): void {
   try {
     localStorage.removeItem(WALLET_SESSION_KEY);
   } catch {
-    /* nothing to clear */
   }
 }
 
@@ -402,55 +256,19 @@ export class NetClient {
   private retry = 0;
   private reconnectTimer: number | null = null;
   private closed = false;
-  /** One-shot: the next challenge runs the Phantom signature ceremony. Set
-      only by the connect button — nothing else may summon the popup. */
   private signatureWanted = false;
-  /*
-   * This token has already been refused on this page load, so stop offering it.
-   * Not persisted and not a cookie: it is a fact about one socket's
-   * conversation, and the credential itself belongs to the arcade. See the
-   * "arcade session rejected" branch for why this replaced clearArcade().
-   */
   private arcadeRefused = false;
-  /** Local deadline for the current phase, so countdowns run between pushes. */
   private phaseEndAt = 0;
   private clock: number | null = null;
-  /**
-   * roundId -> the commitment this client saw WHILE that round was forming.
-   *
-   * Without this, "verification" is the server handing over a seed and a hash
-   * in the same message and the client checking they agree — which any
-   * operator can satisfy by picking the seed after the round and computing the
-   * hash to match. Pinning what was actually on screen before the seal is what
-   * makes the ceremony mean anything. Persisted, so a refresh does not quietly
-   * downgrade every later check.
-   */
   private commits = new Map<number, string>();
-  /** Verification verdicts survive the server replacing the history array. */
   private receipts = new Map<number, Partial<HistoryEntry>>();
-  /**
-   * Plates asked for whose answer has not arrived yet, and the round they
-   * were asked in.
-   *
-   * Bonding is a message, and the server's reply is a state frame that cannot
-   * arrive until the arcade's books have answered -- an HTTP call away. With
-   * no local record of what has already been asked for, ten impatient presses
-   * were ten messages and, before the server learned to count in-flight
-   * stakes, ten stakes. The server owns the rule now; this stops the browser
-   * from asking for something it has already asked for, which is the
-   * difference between one refusal and five error toasts.
-   */
   private pendingJoins = 0;
   private pendingRound = 0;
-  /** The room's talk. Server-relayed; the sender's echo is the receipt. */
   private chat: ChatMsg[] = [];
 
   constructor(private url: string) {
     this.loadCommits();
     this.connect();
-    // The server pushes state on its own cadence; without a local clock the
-    // "seals in 7s" countdown sits frozen between pushes and the game looks
-    // hung. Purely cosmetic interpolation — the server still owns the clock.
     this.clock = window.setInterval(() => {
       if (this.snap.phase === undefined || !this.snap.connected) return;
       const left = Math.max(0, this.phaseEndAt - Date.now());
@@ -471,16 +289,11 @@ export class NetClient {
         if (/^\d+$/.test(k) && typeof v === "string") this.commits.set(Number(k), v);
       }
     } catch {
-      /* an unreadable store just means older rounds cannot be pinned */
     }
   }
 
-  /** Remembers the commitment for a forming round, keeping the last 200. */
   private pinCommit(roundId: number, commit: string): void {
     if (roundId <= 0 || !commit || this.commits.get(roundId) === commit) return;
-    // First observation wins. A commitment that CHANGES for a round already
-    // seen is exactly the tampering this map exists to catch, so it must not
-    // be allowed to overwrite the honest value it is being compared against.
     if (this.commits.has(roundId)) return;
     this.commits.set(roundId, commit);
     try {
@@ -490,7 +303,6 @@ export class NetClient {
       this.commits = new Map(ids.map((id) => [id, obj[id]!]));
       localStorage.setItem(NetClient.COMMIT_KEY, JSON.stringify(obj));
     } catch {
-      /* in-memory pinning still works for this session */
     }
   }
 
@@ -498,13 +310,6 @@ export class NetClient {
     if (this.closed) return;
     const ws = new WebSocket(this.url);
     this.ws = ws;
-
-    // No onopen handler on purpose — and specifically no backoff reset
-    // there. A "server full" rejection and a persistent server-side seating
-    // error both close AFTER a successful handshake, so resetting on raw
-    // open turned exponential backoff into a permanent 500ms retry storm
-    // aimed at a server that is already at its limit. The reset lives in
-    // the `ready` handler: the first moment the connection is actually usable.
 
     ws.onmessage = (ev) => {
       let m: Record<string, unknown>;
@@ -518,13 +323,8 @@ export class NetClient {
 
     ws.onclose = () => {
       this.extras = { ...this.extras, connected: false };
-      // Into the snapshot too — the snapshot is the only thing the UI reads,
-      // and a stale `connected: true` there means the player is never told
-      // their cash-out button stopped doing anything.
       this.snap = { ...this.snap, connected: false };
       this.emit();
-      // Exponential backoff, capped: a server restart should be a blip, and a
-      // server that is down should not become a denial of service against it.
       if (this.closed) return;
       const wait = Math.min(8000, 500 * 2 ** this.retry++);
       this.reconnectTimer = window.setTimeout(() => this.connect(), wait);
@@ -547,17 +347,11 @@ export class NetClient {
           guest: Boolean(m.guest),
           address: String(m.wallet),
         };
-        // A fresh signature minted a session token: store it, and every
-        // later connection resumes silently instead of prompting Phantom.
         if (typeof m.token === "string" && m.token) {
           saveWalletSession(String(m.wallet), m.token);
         }
         this.snap = {
           ...this.snap,
-          // WHO is actually seated, straight from the server. The wallet
-          // button renders THIS, not Phantom's connect state — the two can
-          // disagree (expired session seats a guest while Phantom still
-          // shows the address), and the seat is the one that holds money.
           seat: { guest: Boolean(m.guest), address: String(m.wallet) },
         };
         this.emit();
@@ -567,15 +361,11 @@ export class NetClient {
         const s = m.state as Record<string, unknown> & Snapshot & { stats: NetStats };
         this.extras = { ...this.extras, online: Number(s.online ?? 0), stats: s.stats };
         const prev = this.snap;
-        // Pin the commitment while the round is still forming — the whole
-        // point is to capture it BEFORE the outcome exists.
         this.pinCommit(Number(s.roundId ?? 0), String(s.nextCommit ?? ""));
         this.phaseEndAt = Date.now() + Number(s.msToPhaseEnd ?? 0);
         this.snap = {
           ...IDLE,
           ...s,
-          // Carried locally, not part of the state push — without these the
-          // spread of IDLE wipes them back to empty on every server tick.
           chat: this.chat,
           history: this.history,
           connected: true,
@@ -583,9 +373,6 @@ export class NetClient {
             ? { guest: this.extras.guest, address: this.extras.address }
             : undefined,
         };
-        // A plate that has landed is no longer pending. Counted as a delta so
-        // a frame that arrives for some other reason does not clear a request
-        // still in the air.
         if (this.snap.roundId !== this.pendingRound) {
           this.pendingRound = this.snap.roundId;
           this.pendingJoins = 0;
@@ -600,9 +387,6 @@ export class NetClient {
 
       case "history": {
         const rows = (m.history ?? []) as Record<string, unknown>[];
-        // Carry verdicts across the rebuild. The server re-pushes the whole
-        // history to everyone at every round end, so without this every
-        // "✓ fair" a player earned is wiped roughly once a minute.
         this.history = rows.map((r) => {
           const h = this.toHistory(r);
           const kept = this.receipts.get(h.roundId);
@@ -633,42 +417,8 @@ export class NetClient {
       case "error": {
         const message = String(m.message ?? "");
         console.warn("server:", message);
-        // Some request was refused, and a refusal never moves the plate count
-        // — so without this the pending tally would only ever come back down
-        // at the next round, wedging the bond button for the rest of a lobby
-        // over one "not enough balance".
         if (this.pendingJoins > 0) this.pendingJoins--;
-        /*
-         * A REFUSED ARCADE SESSION IS NOT THIS GAME'S TO DELETE.
-         *
-         * This used to call clearArcade(), which drops `zinc_session` with
-         * Domain=.voidsolana.com -- the ONE session the whole arcade shares.
-         * So a refusal here signed the player out of the portal, all five OSRS
-         * tables, cursors and thin-line, from inside a game they had merely
-         * opened. Reported from the other end and visible in the order of the
-         * report: thin-ice asked for a sign-in, and then cursors -- which had
-         * been fine a minute earlier -- asked for one too.
-         *
-         * AND "REFUSED" DOES NOT MEAN "DEAD". arcadeWallet() on the server
-         * returns null for an issuer that is slow or briefly unreachable just
-         * as it does for a token nobody holds -- its own comment says so -- and
-         * both arrive here as this one string. Destroying a domain-wide
-         * credential on a three-second timeout is not a fallback, it is an
-         * outage this game inflicts on five others.
-         *
-         * WHO DOES OWN IT: the arcade. Its balance poll runs on every page
-         * carrying the chrome, sees the 401 the issuer itself gives, and drops
-         * the cookie there -- one owner, one rule, applied where the answer
-         * actually came from. See forgetSession() in arcade/web/wallet.js.
-         *
-         * What this game keeps is the part that was genuinely its own: STOP
-         * OFFERING THE SAME TOKEN. The flag makes the next connect fall through
-         * to this table's own ceremony instead of looping on a refusal, which
-         * is what the old comment was really reaching for.
-         */
         if (message === "arcade session rejected") this.arcadeRefused = true;
-        // Chat rejections belong in the chat feed, where the person who
-        // triggered one is actually looking — not in a console nobody reads.
         if (message.startsWith("chat:")) {
           this.pushChat({
             id: -Date.now(),
@@ -683,12 +433,7 @@ export class NetClient {
           this.emit();
           return;
         }
-        // A dead session token must not loop forever: clear it so the next
-        // cycle seats us as a guest, exactly the pre-wallet experience.
         if (message === "session expired") clearWalletSession();
-        // An auth-phase rejection leaves the socket open, so `onclose` never
-        // fires and nothing ever retries: the player sits on "Reconnecting…"
-        // forever while nothing is reconnecting. Force the cycle.
         if (!this.extras.connected && !this.closed) {
           this.ws?.close();
         }
@@ -697,34 +442,16 @@ export class NetClient {
     }
   }
 
-  /**
-   * Prove who you are, if you can. A connected Phantom signs the server's
-   * nonce, which is what stops anyone from simply claiming to be an address
-   * and spending its balance. Without a wallet you play as a local guest.
-   */
   private async authenticate(nonce: string): Promise<void> {
-    // The nonce belongs to the socket that issued it. Signing is async (a
-    // Phantom prompt the user may sit on), and if the socket is replaced
-    // meanwhile, sending this signature over the new one gets it rejected —
-    // the wallet holder silently ends up seated as a guest.
     const origin = this.ws;
     const stillOurs = (): boolean => this.ws === origin && origin?.readyState === WebSocket.OPEN;
 
-    // Silent first: a stored session token resumes the wallet with no
-    // Phantom involvement at all — across reloads, reconnects and server
-    // restarts. Phantom is only ever spoken to on the turn the player
-    // explicitly presses connect (the one-shot flag below).
     const stored = walletSession();
     if (stored && !this.signatureWanted) {
       this.send({ t: "resume", wallet: stored.wallet, token: stored.token });
       return;
     }
 
-    // Then the arcade's own session, which is the whole point of there being
-    // one issuer: the player signed once, somewhere in the building, and this
-    // table takes that as proof rather than asking them to sign again. The
-    // server checks it with the issuer before seating anybody -- a cookie is
-    // a claim, and this one is no exception.
     const carried = this.signatureWanted || this.arcadeRefused ? null : arcadeToken();
     if (carried) {
       this.send({ t: "arcade", token: carried });
@@ -740,30 +467,20 @@ export class NetClient {
         if (pubkey) {
           const msg = new TextEncoder().encode(`THIN ICE login\nnonce: ${nonce}`);
           const { signature } = await p.signMessage(msg, "utf8");
-          if (!stillOurs()) return; // a new socket will issue its own challenge
+          if (!stillOurs()) return;
           const sig = btoa(String.fromCharCode(...signature));
           this.send({ t: "auth", wallet: pubkey.toString(), sig });
           return;
         }
       } catch {
-        // Declined or unavailable: fall through to guest.
       }
     }
     if (!stillOurs()) return;
     this.send({ t: "guest", id: guestId() });
   }
 
-  /**
-   * Sound, driven by what changed between two server states.
-   *
-   * The local client fires its cues from inside the functions that cause them.
-   * Nothing here causes anything, so the cues have to be recovered by diffing
-   * successive snapshots instead — otherwise pointing the build at a server
-   * ships a completely silent game with a fully working volume control, which
-   * is exactly the state this was in.
-   */
   private cue(a: Snapshot, b: Snapshot): void {
-    if (b.roundId !== a.roundId) return; // fresh round, nothing to compare
+    if (b.roundId !== a.roundId) return;
     if (a.phase === "lobby" && b.phase === "live") sfxSeal();
     if (!a.you.joined && b.you.joined && b.phase === "lobby") sfxJoin();
 
@@ -779,9 +496,6 @@ export class NetClient {
 
   private toHistory(r: Record<string, unknown>): HistoryEntry {
     let record: RoundRecord = { entrantIds: [], cashOuts: [] };
-    // A row that cannot be parsed is UNVERIFIABLE — not fraudulent. Replaying
-    // the empty stand-in would fail every check and paint "✗ mismatch" on a
-    // round nothing is actually known to be wrong with.
     let unavailable = false;
     try {
       record = JSON.parse(String(r.record ?? "")) as RoundRecord;
@@ -823,7 +537,6 @@ export class NetClient {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 
-  /** Appends one line, deduplicating a reconnect's replayed backlog by id. */
   private pushChat(m: ChatMsg): void {
     if (m.id > 0 && this.chat.some((x) => x.id === m.id)) return;
     this.chat.push(m);
@@ -833,8 +546,6 @@ export class NetClient {
   private emit(): void {
     for (const fn of this.listeners) fn(this.snap);
   }
-
-  // ------------------------------------------------------------------ public
 
   subscribe(fn: (s: Snapshot) => void): () => void {
     this.listeners.add(fn);
@@ -850,14 +561,6 @@ export class NetClient {
     return this.extras;
   }
 
-  /**
-   * Buy a plate — at most as many as the round allows, counting the ones
-   * already asked for and not yet answered.
-   *
-   * The count is reset whenever the round changes or the server's own plate
-   * total catches up, so a dropped message costs one press rather than
-   * wedging the button for the rest of the lobby.
-   */
   join(): void {
     const snap = this.snap;
     if (snap.roundId !== this.pendingRound) {
@@ -870,20 +573,6 @@ export class NetClient {
     this.send({ t: "join" });
   }
 
-  /**
-   * "Go and read the books again."
-   *
-   * This game does not hold anybody's balance; it shows what the arcade's
-   * ledger last said, and it re-reads that when something here moves money.
-   * A deposit does not move money HERE, so without this the wallet on screen
-   * stays a round or so behind the money that has already landed, which is
-   * exactly the wrong number to be stale on the one screen where somebody is
-   * watching for it.
-   *
-   * Sent, never awaited: the answer arrives as an ordinary state frame. A
-   * server too old to know the word ignores it, and the number simply catches
-   * up at the end of the round the way it did before.
-   */
   sync(): void {
     this.send({ t: "sync" });
   }
@@ -892,47 +581,24 @@ export class NetClient {
     this.send({ t: "cashout" });
   }
 
-  /** Steps off during the lobby: full refund, and auto play switches off. */
   stepOff(): void {
-    // Anything still in the air is no longer wanted. The server withdraws the
-    // same consent on its side the moment this message lands, so a hold that
-    // is still moving comes back instead of seating somebody who has left.
     this.pendingJoins = 0;
     this.snap = { ...this.snap, auto: { ...this.snap.auto, enabled: false } };
     this.emit();
     this.send({ t: "unjoin" });
   }
 
-  /**
-   * Give up the seat itself, not just this connection.
-   *
-   * The resume token is a bearer credential for a wallet's seat, and a seat
-   * can bond that wallet's plates. Disconnecting used to clear the browser's
-   * copy and leave the server's row valid forever, which made "disconnect" a
-   * statement about one device. This revokes it, then reconnects as nobody.
-   */
   logout(): void {
     this.send({ t: "logout" });
     this.reauth(false);
   }
 
-  /**
-   * A line for the room. No local echo: the server relays it back to every
-   * session including this one, so your own message appearing IS the receipt
-   * that the room actually heard it.
-   */
   sendChat(text: string): void {
     const t = text.trim().slice(0, 160);
     if (!t) return;
     this.send({ t: "chat", text: t });
   }
 
-  /**
-   * Re-runs the login handshake on the live server connection. The HUD calls
-   * this after the player connects or disconnects Phantom: authentication
-   * happens at socket open, so without a fresh handshake the player who just
-   * approved their wallet would remain seated as a guest until they reloaded.
-   */
   reauth(wantSignature = false): void {
     this.signatureWanted = wantSignature;
     this.retry = 0;
@@ -947,8 +613,6 @@ export class NetClient {
     next.plates = Number.isFinite(next.plates)
       ? Math.min(cap, Math.max(1, Math.round(next.plates)))
       : 1;
-    // Optimistic locally so the control answers instantly; the server's next
-    // state message is what actually settles it.
     this.snap = { ...this.snap, auto: next };
     this.emit();
     this.send({ t: "setAuto", enabled: next.enabled, target: next.target, plates: next.plates });
@@ -960,12 +624,6 @@ export class NetClient {
     this.send({ t: "setChar", charId: id });
   }
 
-  /**
-   * Re-runs a finished round from its revealed seed, right here, and checks
-   * the replay, the commitment, and the rules it was played under. The server
-   * is not asked to confirm anything — that is the entire point. Identical
-   * code to the local client's check, deliberately.
-   */
   async verifyRound(roundId: number): Promise<void> {
     const h = this.history.find((x) => x.roundId === roundId);
     if (!h) return;
@@ -979,9 +637,6 @@ export class NetClient {
       unavailable: h.unavailable,
     };
     this.receipts.set(roundId, receipt);
-    // Re-find rather than trusting the captured object: a history push during
-    // the awaited hashing replaces the whole array with fresh objects, and
-    // mutating the orphan would drop the verdict the player just asked for.
     const live = this.history.find((x) => x.roundId === roundId);
     if (live && live !== h) Object.assign(live, receipt);
     this.snap = { ...this.snap, history: [...this.history] };

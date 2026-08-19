@@ -1,36 +1,13 @@
-/*
- * The book of record: entries, rounds, and what survives a crash.
- *
- * The money itself lives in the arcade's double-entry ledger, not here. What
- * this file stores is the game's own account of what happened -- who bought
- * which plate, what it returned, and the seed and replay record that let a
- * player check it. Three things about that are worth defending.
- *
- * MULTI-PLATE ENTRIES ARE KEYED ON THE SEAT. One wallet can hold several
- * plates in one round, so "the wallet's row" is not a row. Settling by wallet
- * would land one plate's payout on whichever row SQLite happened to find
- * first, and the other plates would keep the stale figures.
- *
- * THE CRASH SWEEP MUST BE ABLE TO FIND THE STAKE. Anything left in a round
- * that never ended is refunded at startup, and it can only refund what it can
- * see -- which is why the entry row and the stats move in one transaction.
- *
- * A SETTLED SEAT REMEMBERS WHAT IT WAS OWED. `owedFor` reads back from the
- * row rather than from anything held in memory, so a settlement the ledger
- * missed is retried with the number that was actually recorded.
- */
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { Database } from "../src/db.ts";
 import { CHARS } from "../src/config.ts";
 
-/** A private database per test. Nothing here touches the real file. */
 const fresh = (): Database => new Database(":memory:");
 
-const STAKE = 100_000_000; // 0.1 SOL
+const STAKE = 100_000_000;
 
-/** Buys `seats` plates for one wallet in a round that has been opened. */
 function enter(db: Database, roundId: number, wallet: string, seats: number[]): void {
   db.player(wallet);
   for (const seat of seats) db.takeEntry(roundId, wallet, STAKE, seat);
@@ -44,7 +21,6 @@ test("a new wallet is created on first sight, with a face from the roster", () =
   assert.equal(p.roundsPlayed, 0);
   assert.equal(p.wagered, 0);
   assert.equal(p.returned, 0);
-  // Seen again is the same row, not a second one.
   assert.equal(db.player("WalletA").createdAt, p.createdAt);
   db.close();
 });
@@ -71,8 +47,6 @@ test("buying a plate records the entry and the stake together", () => {
 });
 
 test("settlement is keyed on the seat, so one plate cannot overwrite another", () => {
-  // The failure this prevents: a three-plate wallet where one plate cashed at
-  // 3x and two died, settled by wallet, reporting 3x on all three.
   const db = fresh();
   db.openRound(1, "c", Date.now());
   enter(db, 1, "WalletA", [1, 2, 3]);
@@ -95,8 +69,6 @@ test("a total loss settles at zero and is still a settlement", () => {
   db.openRound(1, "c", Date.now());
   enter(db, 1, "WalletA", [1]);
   db.settleEntry(1, "WalletA", 1, 0, 0, 4, "dead", false);
-  // Zero, not null: null means "still in", and the retry path treats the two
-  // completely differently.
   assert.equal(db.owedFor(1, 1), 0);
   assert.notEqual(db.owedFor(1, 1), null);
   assert.equal(db.player("WalletA").roundsWon, 0);
@@ -104,17 +76,6 @@ test("a total loss settles at zero and is still a settlement", () => {
 });
 
 test("a seat settles once, however many times it is told to", () => {
-  /*
-   * The money is protected by the ledger's ref, which makes paying twice
-   * impossible. The STATS were not: `returned` and `roundsWon` accumulate, so a
-   * second call would pay once and count twice -- and nothing downstream would
-   * notice, because the ledger and the entry row would both still read right
-   * while the lifetime totals ran ahead of them.
-   *
-   * The only thing preventing it was GameServer's in-memory `settled` set,
-   * which is cleared every round and does not survive a restart. Now the row's
-   * own move out of 'in' is what gates the stats.
-   */
   const db = fresh();
   db.openRound(1, "c", Date.now());
   enter(db, 1, "WalletA", [1]);
@@ -130,8 +91,6 @@ test("a seat settles once, however many times it is told to", () => {
   assert.equal(twice.bestMultiple, after.bestMultiple, "a repeat wrote a new personal best");
   assert.equal(db.owedFor(1, 1), 250_000_000, "the second call rewrote what was owed");
 
-  // And a refunded seat is not a settleable one either: the crash sweep has
-  // already un-counted it, and booking it now would put the stats back.
   db.openRound(2, "c", Date.now());
   enter(db, 2, "WalletB", [1]);
   db.refundOpenEntries();
@@ -167,14 +126,11 @@ test("the best multiple only ever climbs", () => {
   db.close();
 });
 
-/* ---- what a crash leaves behind ---- */
-
 test("a round that never ended is refunded at startup, plate by plate", () => {
   const db = fresh();
   db.openRound(1, "c", Date.now());
   enter(db, 1, "WalletA", [1, 2]);
   enter(db, 1, "WalletB", [3]);
-  // The process dies here: the round has no endedAt.
   const before = db.player("WalletA");
   assert.equal(before.roundsPlayed, 2);
   assert.equal(before.wagered, STAKE * 2);
@@ -184,35 +140,12 @@ test("a round that never ended is refunded at startup, plate by plate", () => {
   assert.equal(a.roundsPlayed, 0, "the rounds were un-counted");
   assert.equal(a.wagered, 0, "and so was the stake");
   assert.equal(db.player("WalletB").roundsPlayed, 0);
-  // Running it again finds nothing: refunded rows are excluded, so a restart
-  // loop cannot refund the same stake twice.
   assert.equal(db.refundOpenEntries(), 0);
   assert.equal(db.player("WalletA").roundsPlayed, 0, "and the stats did not go negative");
   db.close();
 });
 
 test("the sweep leaves a seat that had already settled completely alone", () => {
-  /*
-   * THIS TEST USED TO ASSERT THE OPPOSITE, AND THE OPPOSITE WAS THE BUG.
-   *
-   * It required the sweep to reverse a payout that had already been made --
-   * `returned` back to zero, the win un-counted -- on the reasoning that a
-   * round being rolled back should leave the wallet holding nothing from it.
-   * That reasoning belongs to the deleted `players.balance` column, where the
-   * same row held the payout and the sweep could genuinely take it back.
-   *
-   * It cannot now, and pretending otherwise cost the house real money. The
-   * seat's hold was closed against an idempotent ref and the player WAS paid;
-   * nothing in this file can debit them. Rewriting the row to
-   * `outcome='refunded', returned=staked` only made the game's own books lie
-   * about it -- and `ledger.sweep()` then released every still-open hold, so a
-   * round where A cashed at 8x out of B, C and D's stakes handed B, C and D
-   * their stakes back in full and left `~house` covering the difference with
-   * `overdraft: true`. No crash is needed to reach it: a deploy restart timed
-   * after a large extraction does it.
-   *
-   * A settled seat is settled. Only what is still 'in' is rolled back.
-   */
   const db = fresh();
   db.openRound(1, "c", Date.now());
   enter(db, 1, "WalletA", [1]);
@@ -228,9 +161,6 @@ test("the sweep leaves a seat that had already settled completely alone", () => 
 });
 
 test("a mix of settled and open seats rolls back only the open ones", () => {
-  // The shape of a real crash: one plate cashed, one died, one still standing.
-  // Only the standing one still has money in escrow, and only it is the
-  // sweep's to touch.
   const db = fresh();
   db.openRound(1, "c", Date.now());
   enter(db, 1, "WalletA", [1, 2, 3]);
@@ -247,12 +177,6 @@ test("a mix of settled and open seats rolls back only the open ones", () => {
 });
 
 test("an interrupted round is closed and revealed rather than hidden", () => {
-  /*
-   * A round that never reached `closeRound` kept a NULL endedAt and an empty
-   * seed forever, and `historyFor` excludes those -- so a round that published
-   * a commitment, ran, and moved real SOL became one nobody could ever ask the
-   * operator to prove. Every crash and every deploy restart minted one.
-   */
   const db = fresh();
   db.openRound(7, "the-commitment", Date.now());
   enter(db, 7, "WalletA", [1]);
@@ -269,7 +193,6 @@ test("an interrupted round is closed and revealed rather than hidden", () => {
   assert.equal(rows[0]!.staked, STAKE);
   assert.equal(rows[0]!.returned, STAKE, "a rolled-back plate came back at 1x");
 
-  // And it can never bury a round that genuinely finished.
   db.openRound(8, "c8", Date.now());
   enter(db, 8, "WalletA", [1]);
   db.settleEntry(8, "WalletA", 1, STAKE * 2, 2, 9, "cashed", true);
@@ -293,15 +216,6 @@ test("a closed round is left alone by the sweep", () => {
 });
 
 test("a round the process died inside is revealed by the process that replaces it", () => {
-  /*
-   * `closeInterrupted` covers the round a running server aborts itself. This
-   * is the other two ways a round ends without closing, which are the common
-   * ones: the box dies, or a deploy restarts the service. Both left a
-   * published commitment with no reveal, excluded from history forever -- and
-   * the secret behind it lived only in the memory of the process that just
-   * died, so nothing could ever answer for it afterwards. It is written down
-   * at lobby open for exactly this moment.
-   */
   const db = fresh();
   const derive = (secret: string, nonce: string, ids: number[]): string =>
     `seed(${secret}/${nonce}/${ids.join("-")})`;
@@ -310,7 +224,6 @@ test("a round the process died inside is revealed by the process that replaces i
   enter(db, 4, "WalletA", [1, 2]);
   enter(db, 4, "WalletB", [3]);
   db.sealRound(4, "nonce-4");
-  // The process dies here.
 
   assert.equal(db.refundOpenEntries(), 3);
   assert.equal(db.revealInterrupted({ entry: 0.1 }, derive), 1);
@@ -332,8 +245,6 @@ test("a round the process died inside is revealed by the process that replaces i
 });
 
 test("a round interrupted before it sealed reveals a secret and no seed", () => {
-  // Honest rather than tidy: no seed was ever drawn for that round, so the
-  // record must not imply one. The commitment is still answerable.
   const db = fresh();
   db.openRound(5, "commit-5", Date.now(), "secret-5");
   enter(db, 5, "WalletA", [1]);
@@ -347,8 +258,6 @@ test("a round interrupted before it sealed reveals a secret and no seed", () => 
 });
 
 test("a lobby entry pulled before the round seals is erased, not refunded", () => {
-  // Different path, different meaning: the plate was never bought. It must
-  // leave no entry row behind for the crash sweep to find later.
   const db = fresh();
   db.openRound(1, "c", Date.now());
   enter(db, 1, "WalletA", [1, 2]);
@@ -360,8 +269,6 @@ test("a lobby entry pulled before the round seals is erased, not refunded", () =
   assert.equal(db.refundLobbyEntry(1, "Nobody", 9), false);
   db.close();
 });
-
-/* ---- rounds ---- */
 
 test("closing a round records what a player needs to verify it", () => {
   const db = fresh();
@@ -393,13 +300,11 @@ test("history aggregates a wallet's plates into one row per round", () => {
   assert.equal(rows[0]!.staked, STAKE * 3);
   assert.equal(rows[0]!.returned, STAKE * 3);
   assert.equal(rows[0]!.anyBanked, 1);
-  // Every seat, so the client can check each plate against the replay.
   assert.deepEqual(rows[0]!.seats.split(",").map(Number).sort(), [1, 2, 3]);
   db.close();
 });
 
 test("an unfinished round stays out of history until it is closed", () => {
-  // A player must not be shown a round with no seed as if it were verifiable.
   const db = fresh();
   db.openRound(1, "c", Date.now());
   enter(db, 1, "WalletA", [1]);
@@ -433,7 +338,6 @@ test("the round id picks up where the last one left off", () => {
 });
 
 test("re-opening a round id replaces its commitment rather than duplicating it", () => {
-  // A restart mid-lobby re-draws the seed for a round that never sealed.
   const db = fresh();
   db.openRound(1, "first-commit", Date.now());
   db.openRound(1, "second-commit", Date.now());
@@ -459,8 +363,6 @@ test("the team tally counts winners and ignores rounds with none", () => {
   db.close();
 });
 
-/* ---- session tokens ---- */
-
 test("a wallet's session token is stored and rotated, never duplicated", () => {
   const db = fresh();
   db.player("WalletA");
@@ -474,21 +376,11 @@ test("a wallet's session token is stored and rotated, never duplicated", () => {
 });
 
 test("a session token can be revoked, and revoking it takes the row with it", () => {
-  /*
-   * There was no revocation at all. Disconnecting a wallet cleared the
-   * BROWSER's copy, so the row here stayed valid forever -- and that token is
-   * a bearer credential for a seat, which is a money primitive: whoever holds
-   * one can bond the victim's five plates, sit in the same lobby under their
-   * own wallet, extract theirs and let the victim's die. It rides in a cookie
-   * scoped to the whole arcade domain, so any XSS in any world on it lifted a
-   * permanent seat.
-   */
   const db = fresh();
   db.player("WalletA");
   db.setAuthToken("WalletA", "token-one");
   db.clearAuthToken("WalletA");
   assert.equal(db.authTokenOf("WalletA"), null, "the seat is gone, not merely forgotten locally");
-  // Revoking one wallet is not revoking another's, and revoking twice is fine.
   db.setAuthToken("WalletB", "token-two");
   db.clearAuthToken("WalletA");
   assert.equal(db.authTokenOf("WalletB"), "token-two");

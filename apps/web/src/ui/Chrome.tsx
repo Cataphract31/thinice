@@ -3,14 +3,6 @@ import type { Snapshot } from "@/game/client";
 import { CharArt } from "@/ui/Chars";
 import { Stats, VolumePopover, WalletButton } from "@/ui/Hud";
 
-/**
- * The house family, with the accent each arena wears on the lobby.
- *
- * crash.zinc.cash colours every game and then repeats that colour on the
- * card, the play dot and the enter strip. Carrying the same dots here is what
- * turns four links into a navbar: a player reads "four tables, I am on the
- * cyan one" before reading a single word.
- */
 const ARENAS = [
   { name: "classic", href: "https://crash.zinc.cash/play/classic", dot: "#c9e84f" },
   {
@@ -31,22 +23,6 @@ function Dot({ color }: { color: string }): JSX.Element {
   );
 }
 
-/**
- * Row one: who we are, which table you are at, and your account. Nothing that
- * changes tick to tick lives here, which is the whole reason it can be read
- * at a glance and then ignored for an hour.
- */
-/**
- * The money door, in the corner the arcade's own BANK tab used to occupy.
- *
- * Two states, and the difference is the whole point of it being here. A player
- * who cannot cover the entry is one press from being able to, so it is filled
- * and loud; a player with money on the books gets a quiet chip, because at
- * that moment the loudest thing on the page should be the ice.
- *
- * Guests never see it: their balance is house chips and there is nothing
- * behind the press.
- */
 function FundsButton({ snap, onOpen }: { snap: Snapshot; onOpen: () => void }): JSX.Element | null {
   if (!snap.seat || snap.seat.guest) return null;
   const broke = snap.wallet < snap.entry;
@@ -87,8 +63,6 @@ export function TopNav({
   onShowInfo: () => void;
   onShowChars: () => void;
   onShowBank: () => void;
-  /** `arcadeSeated` is true when the connect also minted an arcade session,
-      which is proof enough for the socket and means no second signature. */
   onWalletChange?: (connected: boolean, arcadeSeated?: boolean) => void;
 }): JSX.Element {
   return (
@@ -137,8 +111,6 @@ export function TopNav({
       </div>
     </div>
 
-      {/* Phones have no room for a state band, so the money keeps its thin
-          row here, exactly as before. */}
       <div className="mt-1.5 flex items-center justify-between gap-3 sm:hidden">
         <Stats snap={snap} mobile onBank={seated(snap) ? onShowBank : undefined} />
       </div>
@@ -146,16 +118,6 @@ export function TopNav({
   );
 }
 
-/**
- * Row two: the state display, as one instrument instead of four scattered
- * readouts. Everything the house owes you at this moment, the round you are
- * in, what you hold, what the session has done, reads left to right on a
- * single baseline, scored by hairlines the way the lobby scores its arena
- * cards. The old layout printed the same facts in three different bands, in
- * three different alignments, at the same type size as the footer's legal
- * links.
- */
-/** A real wallet on the books, as opposed to a guest playing house chips. */
 const seated = (snap: Snapshot): boolean => Boolean(snap.seat && !snap.seat.guest);
 
 export function StateBar({
@@ -175,8 +137,6 @@ export function StateBar({
           </div>
         </div>
 
-        {/* Wallet and session keep their own component: the wallet float
-            animation lives inside it. */}
         <div className="ml-auto flex items-center gap-5 border-l border-[var(--color-line-soft)] px-4 py-1.5">
           <Stats snap={snap} onBank={seated(snap) ? onShowBank : undefined} />
         </div>
@@ -185,13 +145,6 @@ export function StateBar({
   );
 }
 
-/**
- * The family bar stays in the footer, where crash.zinc.cash carries its own,
- * but it stops being indistinguishable from the legal links beside it. Each
- * arena wears the colour the lobby gives it, and the table you are standing
- * on is not a link at all: it is the lit one. A row of coloured dots reads as
- * a switcher at a glance; four grey words in a row of grey words did not.
- */
 export function SlimFooter({ onShowInfo }: { onShowInfo: () => void }): JSX.Element {
   return (
     <footer className="relative hidden shrink-0 items-center justify-between border-t border-[var(--color-line)] px-3 py-2 lg:flex">
@@ -235,16 +188,6 @@ export function SlimFooter({ onShowInfo }: { onShowInfo: () => void }): JSX.Elem
   );
 }
 
-/**
- * Connection lost, said once and plainly.
- *
- * The only tell used to be the word "Reconnecting" on a disabled button at the
- * very bottom of the screen, while everything above it kept rendering the last
- * snapshot: a multiplier, a bonded count, a seal countdown, a wallet balance.
- * All of it stale, none of it labelled as such. On a product where people have
- * money on the table, "is this frozen or is my stake gone" is the one question
- * the screen must never leave open.
- */
 export function OfflineBar({ snap }: { snap: Snapshot }): JSX.Element | null {
   if (snap.connected) return null;
   return (
