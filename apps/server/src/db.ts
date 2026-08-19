@@ -415,17 +415,39 @@ export class Database {
     // then stamped the row 'refunded', hiding minted money from every later
     // reconciliation. An idempotent ref is a stronger fix than a transaction
     // was, because it survives the process dying between the two systems.
+    //
+    // THE REF PROTECTS THE MONEY. IT DOES NOT PROTECT THE STATS.
+    //
+    // The `players` update below accumulates -- `returned + ?`, `roundsWon + ?`
+    // -- so a seat booked twice pays once and counts twice, which no later
+    // reconciliation would catch because the ledger and the entry row would
+    // both read correctly while the lifetime totals quietly ran ahead. Nothing
+    // calls this twice today: `GameServer.settled` is checked on every path
+    // into it. But that guard is a Set in memory, cleared every round, and it
+    // is the only thing standing between a second call and inflated stats --
+    // a weaker promise than the durable ref the money gets, for no reason
+    // other than that nobody wrote the other half.
+    //
+    // So the guard is written where it survives a restart: the row moves out
+    // of 'in' exactly once, and the stats ride on that transition rather than
+    // on the caller having remembered.
     this.db.exec("BEGIN");
     try {
       // Keyed on the seat: with multi-plate entries a wallet has several rows
       // in one round, and settling "the wallet's row" would settle one plate's
       // money onto whichever row SQLite found first.
-      this.db
+      const moved = this.db
         .prepare(
           `UPDATE entries SET returned = ?, multiple = ?, ticks = ?, outcome = ?
-           WHERE roundId = ? AND wallet = ? AND seat = ?`,
+           WHERE roundId = ? AND wallet = ? AND seat = ? AND outcome = 'in'`,
         )
         .run(returnedLamports, multiple, ticks, outcome, roundId, wallet, seat);
+      // Already settled, already refunded, or no such seat. Either way this
+      // call has nothing left to book, and booking it would be the bug.
+      if (Number(moved.changes) === 0) {
+        this.db.exec("ROLLBACK");
+        return;
+      }
       this.db
         .prepare(
           `UPDATE players

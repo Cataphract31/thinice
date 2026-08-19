@@ -103,6 +103,48 @@ test("a total loss settles at zero and is still a settlement", () => {
   db.close();
 });
 
+test("a seat settles once, however many times it is told to", () => {
+  /*
+   * The money is protected by the ledger's ref, which makes paying twice
+   * impossible. The STATS were not: `returned` and `roundsWon` accumulate, so a
+   * second call would pay once and count twice -- and nothing downstream would
+   * notice, because the ledger and the entry row would both still read right
+   * while the lifetime totals ran ahead of them.
+   *
+   * The only thing preventing it was GameServer's in-memory `settled` set,
+   * which is cleared every round and does not survive a restart. Now the row's
+   * own move out of 'in' is what gates the stats.
+   */
+  const db = fresh();
+  db.openRound(1, "c", Date.now());
+  enter(db, 1, "WalletA", [1]);
+  db.settleEntry(1, "WalletA", 1, 250_000_000, 2.5, 9, "cashed", true);
+  const after = db.player("WalletA");
+
+  db.settleEntry(1, "WalletA", 1, 250_000_000, 2.5, 9, "cashed", true);
+  db.settleEntry(1, "WalletA", 1, 999_000_000, 9.99, 40, "cashed", true);
+  const twice = db.player("WalletA");
+
+  assert.equal(twice.returned, after.returned, "lifetime returns counted twice");
+  assert.equal(twice.roundsWon, after.roundsWon, "one round, counted as two wins");
+  assert.equal(twice.bestMultiple, after.bestMultiple, "a repeat wrote a new personal best");
+  assert.equal(db.owedFor(1, 1), 250_000_000, "the second call rewrote what was owed");
+
+  // And a refunded seat is not a settleable one either: the crash sweep has
+  // already un-counted it, and booking it now would put the stats back.
+  db.openRound(2, "c", Date.now());
+  enter(db, 2, "WalletB", [1]);
+  db.refundOpenEntries();
+  const swept = db.player("WalletB");
+  db.settleEntry(2, "WalletB", 1, 500_000_000, 5, 20, "cashed", true);
+  assert.deepEqual(
+    { r: db.player("WalletB").returned, w: db.player("WalletB").roundsWon },
+    { r: swept.returned, w: swept.roundsWon },
+    "a refunded seat was settled on top of its refund",
+  );
+  db.close();
+});
+
 test("owedFor reads back what was recorded, for a settlement the ledger missed", () => {
   const db = fresh();
   db.openRound(1, "c", Date.now());
