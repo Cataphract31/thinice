@@ -13,3 +13,4 @@
 # whatever it had.
 apps/web/src/arcade/** text eol=lf
 apps/web/scripts/sync-arcade.mjs text eol=lf
+apps/server/vendor/** text eol=lf
