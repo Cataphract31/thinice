@@ -48,6 +48,32 @@ export default function App(): JSX.Element {
   const [crt, setCrtState] = useState(() => crtOn());
   useEffect(() => onCrtChange(setCrtState), []);
 
+  /*
+   * THE BOOKS MOVED, AND THIS GAME WAS NOT THE ONE THAT MOVED THEM.
+   *
+   * `onBalanceMoved` below already does this -- but only while the BankOverlay
+   * is mounted, because the panel's poll is what notices. Closing it takes the
+   * only eye on the ledger off it. So a deposit made here, then dismissed, and
+   * then a minute at the lattice, left the wallet on screen showing what it
+   * showed before the money landed; and a deposit made in ANOTHER TAB was
+   * never seen at all.
+   *
+   * `zinc:balance` is the arcade's own watch, running on every page that
+   * carries the chrome, on a poll that outlives any one panel. See
+   * arcade/web/balance.js in GIELINOR.
+   *
+   * SYNC RATHER THAN PAINT. Every number on this screen comes off a server
+   * snapshot -- the wallet included -- and drawing the arcade's figure over it
+   * would put two authorities on one line. `sync` asks the game's own server
+   * to go and read the books again, and the answer arrives as an ordinary
+   * state frame the way every other number here does.
+   */
+  useEffect(() => {
+    const moved = (): void => client.sync();
+    window.addEventListener("zinc:balance", moved);
+    return () => window.removeEventListener("zinc:balance", moved);
+  }, [client]);
+
   // The TV power cycle: when the result screen gives way to the next lobby,
   // the picture collapses to a line and snaps back open on fresh ice.
   const [tv, setTv] = useState<"off" | "on" | null>(null);
