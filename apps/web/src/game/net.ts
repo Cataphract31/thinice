@@ -14,7 +14,7 @@ import {
   sfxTick,
   sfxYouDied,
 } from "../audio/sound";
-import { arcadeToken, clearArcade, onArcadeDomain, SHARED_DOMAIN } from "./arcade";
+import { arcadeToken, onArcadeDomain, SHARED_DOMAIN } from "./arcade";
 
 /**
  * The networked client.
@@ -405,6 +405,13 @@ export class NetClient {
   /** One-shot: the next challenge runs the Phantom signature ceremony. Set
       only by the connect button — nothing else may summon the popup. */
   private signatureWanted = false;
+  /*
+   * This token has already been refused on this page load, so stop offering it.
+   * Not persisted and not a cookie: it is a fact about one socket's
+   * conversation, and the credential itself belongs to the arcade. See the
+   * "arcade session rejected" branch for why this replaced clearArcade().
+   */
+  private arcadeRefused = false;
   /** Local deadline for the current phase, so countdowns run between pushes. */
   private phaseEndAt = 0;
   private clock: number | null = null;
@@ -631,12 +638,35 @@ export class NetClient {
         // at the next round, wedging the bond button for the rest of a lobby
         // over one "not enough balance".
         if (this.pendingJoins > 0) this.pendingJoins--;
-        // A refused arcade session is a DEAD arcade session, and keeping the
-        // cookie would make every reconnection offer the same dead token
-        // forever, silently, while the player sits as a guest wondering why
-        // signing in did nothing. Drop it and the next socket falls through to
-        // this game's own ceremony.
-        if (message === "arcade session rejected") clearArcade();
+        /*
+         * A REFUSED ARCADE SESSION IS NOT THIS GAME'S TO DELETE.
+         *
+         * This used to call clearArcade(), which drops `zinc_session` with
+         * Domain=.voidsolana.com -- the ONE session the whole arcade shares.
+         * So a refusal here signed the player out of the portal, all five OSRS
+         * tables, cursors and thin-line, from inside a game they had merely
+         * opened. Reported from the other end and visible in the order of the
+         * report: thin-ice asked for a sign-in, and then cursors -- which had
+         * been fine a minute earlier -- asked for one too.
+         *
+         * AND "REFUSED" DOES NOT MEAN "DEAD". arcadeWallet() on the server
+         * returns null for an issuer that is slow or briefly unreachable just
+         * as it does for a token nobody holds -- its own comment says so -- and
+         * both arrive here as this one string. Destroying a domain-wide
+         * credential on a three-second timeout is not a fallback, it is an
+         * outage this game inflicts on five others.
+         *
+         * WHO DOES OWN IT: the arcade. Its balance poll runs on every page
+         * carrying the chrome, sees the 401 the issuer itself gives, and drops
+         * the cookie there -- one owner, one rule, applied where the answer
+         * actually came from. See forgetSession() in arcade/web/wallet.js.
+         *
+         * What this game keeps is the part that was genuinely its own: STOP
+         * OFFERING THE SAME TOKEN. The flag makes the next connect fall through
+         * to this table's own ceremony instead of looping on a refusal, which
+         * is what the old comment was really reaching for.
+         */
+        if (message === "arcade session rejected") this.arcadeRefused = true;
         // Chat rejections belong in the chat feed, where the person who
         // triggered one is actually looking — not in a console nobody reads.
         if (message.startsWith("chat:")) {
@@ -695,7 +725,7 @@ export class NetClient {
     // table takes that as proof rather than asking them to sign again. The
     // server checks it with the issuer before seating anybody -- a cookie is
     // a claim, and this one is no exception.
-    const carried = this.signatureWanted ? null : arcadeToken();
+    const carried = this.signatureWanted || this.arcadeRefused ? null : arcadeToken();
     if (carried) {
       this.send({ t: "arcade", token: carried });
       return;

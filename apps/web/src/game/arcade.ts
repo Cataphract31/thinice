@@ -93,12 +93,25 @@ export function arcadeToken(): string | null {
   return /^[0-9a-f]{64}$/.test(raw) ? raw : null;
 }
 
-/** Forget a rejected arcade session, everywhere it is read. */
-export function clearArcade(): void {
-  if (!onArcadeDomain()) return;
-  document.cookie =
-    `${SESSION_COOKIE}=; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=0; SameSite=Lax; Secure`;
-}
+/*
+ * clearArcade() USED TO LIVE HERE AND IS DELIBERATELY GONE.
+ *
+ * It wrote `zinc_session` away with Domain=.voidsolana.com -- the ONE session
+ * the whole arcade shares -- and its only caller was net.ts dropping it when
+ * this game's server could not validate a token. That signed the player out of
+ * the portal, five OSRS tables, cursors and thin-line, from inside a game they
+ * had merely opened, on nothing worse than a three-second timeout.
+ *
+ * A credential this game did not mint is not this game's to destroy. The
+ * arcade retires its own: its balance poll sees the issuer's 401 and drops the
+ * cookie there, and a player who actually wants out presses disconnect in the
+ * arcade's own chrome, which retires the token AT THE BOX rather than merely
+ * hiding it from this browser.
+ *
+ * If this game ever needs to end an arcade session on purpose, the shared
+ * signOut() is the one to call -- it is already declared in
+ * src/types/arcade.d.ts. Do not bring this function back.
+ */
 
 
 /**
