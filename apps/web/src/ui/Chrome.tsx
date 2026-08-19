@@ -87,7 +87,9 @@ export function TopNav({
   onShowInfo: () => void;
   onShowChars: () => void;
   onShowBank: () => void;
-  onWalletChange?: (connected: boolean) => void;
+  /** `arcadeSeated` is true when the connect also minted an arcade session,
+      which is proof enough for the socket and means no second signature. */
+  onWalletChange?: (connected: boolean, arcadeSeated?: boolean) => void;
 }): JSX.Element {
   return (
     <div className="shrink-0 border-b border-[var(--color-line)] px-3 py-2">

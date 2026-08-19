@@ -1,0 +1,15 @@
+# THE SYNCED COPY OF THE ARCADE'S WALLET IS COMPARED BYTE FOR BYTE.
+#
+# scripts/sync-arcade.mjs checks apps/web/src/arcade/ against
+# C:\GIELINOR\arcade\web\ as BYTES, deliberately -- its header explains that a
+# copy differing only in line endings is still a copy somebody will one day
+# diff and be confused by. GIELINOR pins those files to LF (its own
+# .gitattributes: "it deploys to Linux").
+#
+# This repo has no such pin and core.autocrlf is true on Windows, so a fresh
+# checkout would rewrite every one of them to CRLF -- and `npm run build`,
+# which runs the check first, would then fail on a tree nobody had touched.
+# Pinning the synced directory is the whole fix; the rest of the repo keeps
+# whatever it had.
+apps/web/src/arcade/** text eol=lf
+apps/web/scripts/sync-arcade.mjs text eol=lf

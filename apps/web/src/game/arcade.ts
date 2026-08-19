@@ -25,9 +25,47 @@
 /** The session the arcade minted, shared across every world on this domain. */
 const SESSION_COOKIE = "zinc_session";
 /** The family of hosts this arcade lives on. */
+import {
+  connect as arcadeConnect,
+  ensureProvider,
+  findProvider,
+  type ArcadeProvider,
+  type FoundProvider,
+} from "@/arcade/wallet.js";
+
+/*
+ * THE HANDSHAKE IS NOT WRITTEN HERE ANY MORE.
+ *
+ * Provider discovery, the sign-in ceremony and everything a phone needs to
+ * reach a wallet app live once, in src/arcade/wallet.js -- a verbatim copy of
+ * the arcade's own, fetched by scripts/sync-arcade.mjs. What was here was a
+ * sixth hand-written copy of the same four steps, and the cost was not
+ * tidiness: this game looked for an INJECTED provider and nothing else, so a
+ * player in Safari or Chrome on a phone was told to install an extension that
+ * cannot exist there. Every other table in the arcade could take their money
+ * and this one could not.
+ *
+ * WHAT STAYS HERE is everything about the BOOKS rather than the wallet:
+ * arcadeApi and its errors, the session cookie this game reads, the ledger
+ * types, and the deposit approval below.
+ */
+export { completeDeeplink, onDepositArrival, walletRoute } from "@/arcade/wallet.js";
+export type { ArcadeProvider, FoundProvider } from "@/arcade/wallet.js";
+
 export const SHARED_DOMAIN = ".voidsolana.com";
 
 export const LAMPORTS = 1_000_000_000;
+
+/**
+ * WHAT THE ARCADE'S BOOKS CALL THIS GAME.
+ *
+ * The same string the server writes into every ledger row it moves (see GAME
+ * in apps/server/src/arcade.ts). It is spelled here too because the panel asks
+ * the books a question about ONE game and the name is the question: a
+ * near-miss would answer with somebody else's table rather than with nothing,
+ * which is the failure that looks like data.
+ */
+export const GAME = "thin-ice";
 
 export function onArcadeDomain(): boolean {
   const h = location.hostname;
@@ -62,20 +100,6 @@ export function clearArcade(): void {
     `${SESSION_COOKIE}=; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=0; SameSite=Lax; Secure`;
 }
 
-/** Write a cookie for every world on this domain. */
-function carry(name: string, value: string, days = 30): void {
-  // Off the arcade's own domain a Domain attribute naming it is silently
-  // discarded rather than refused, which is worse than an error because it
-  // looks like it worked.
-  if (!onArcadeDomain()) return;
-  try {
-    document.cookie =
-      `${name}=${encodeURIComponent(value)}; Domain=${SHARED_DOMAIN}; Path=/; ` +
-      `Max-Age=${60 * 60 * 24 * days}; SameSite=Lax; Secure`;
-  } catch {
-    /* no cookie jar; this browser simply cannot stay signed in */
-  }
-}
 
 /**
  * WHERE THE ARCADE'S API IS, FROM HERE.
@@ -128,48 +152,89 @@ export function arcadeUrl(path: string): string {
 export class ArcadeError extends Error {
   code: string;
   status: number;
-  constructor(message: string, code = "ARCADE_ERROR", status = 0) {
+  /**
+   * WHETHER AN ANSWER WAS RECEIVED AND UNDERSTOOD. False means the request may
+   * or may not have been carried out, and no caller may claim otherwise. See
+   * UNTOUCHED in Bank.tsx, which is what this exists for.
+   */
+  answered: boolean;
+  constructor(message: string, code = "ARCADE_ERROR", status = 0, answered = false) {
     super(message);
     this.name = "ArcadeError";
     this.code = code;
     this.status = status;
+    this.answered = answered;
   }
 }
+
+/*
+ * HOW LONG A CALL WAITS. fetch() has no deadline of its own, and without one
+ * there is no moment at which a panel HAS to admit it does not know what
+ * happened. Two numbers: a read is repeated by the poll and may give up
+ * quickly, while a withdrawal waits on a signer on another machine whose own
+ * worst case is over a minute.
+ */
+export const READ_MS = 15_000;
+export const MOVE_MS = 60_000;
 
 /** One call to the arcade, with the session attached if there is one. */
 export async function arcadeApi<T>(
   path: string,
-  opts: RequestInit = {},
+  opts: RequestInit & { timeoutMs?: number } = {},
 ): Promise<T> {
+  const { timeoutMs = READ_MS, ...init } = opts;
   const token = arcadeToken();
+  /* AbortController rather than AbortSignal.timeout(): the timer is cleared on
+     the way out, so a panel left open is not also leaving a pending timeout
+     behind for every poll it ever ran. */
+  const stop = new AbortController();
+  const bell = setTimeout(() => stop.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(arcadeUrl(path), {
-      ...opts,
+      ...init,
+      signal: stop.signal,
       headers: {
-        ...(opts.headers ?? {}),
+        ...(init.headers ?? {}),
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
     });
   } catch (err) {
-    // Unreachable, refused, or blocked by the browser's own cross-origin
-    // rules. All three look identical from here and all three mean the same
-    // thing to a player: nothing happened.
+    // Aborted, unreachable, refused, or blocked by the browser's own
+    // cross-origin rules. They look identical from here, and NONE of them says
+    // whether the box acted on the request -- which is why answered stays
+    // false. It is not "nothing happened"; it is "we do not know".
     throw new ArcadeError(
-      `Could not reach the arcade. ${(err as Error).message}`,
-      "UNREACHABLE",
+      stop.signal.aborted
+        ? "The arcade did not answer in time."
+        : `Could not reach the arcade. ${(err as Error).message}`,
+      stop.signal.aborted ? "TIMEOUT" : "UNREACHABLE",
     );
+  } finally {
+    clearTimeout(bell);
   }
-  const text = await res.text();
+
+  /* A BODY IS JSON BECAUSE THE HEADER SAYS SO. Anything else is somebody
+     between the browser and the box -- a proxy's error page, a captive portal,
+     a CDN -- and its contents are not a message from the arcade. */
+  const isJson = /\bapplication\/json\b/i.test(res.headers.get("content-type") ?? "");
   let parsed: unknown = null;
-  try {
-    parsed = text ? JSON.parse(text) : null;
-  } catch {
-    throw new ArcadeError(`The arcade answered with ${res.status}.`, "GARBAGE", res.status);
+  if (isJson) {
+    const text = await res.text();
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = null;
+    }
   }
   if (!res.ok) {
     const e = (parsed as { error?: { code?: string; message?: string } })?.error ?? {};
-    throw new ArcadeError(e.message ?? `The arcade said ${res.status}.`, e.code ?? "REFUSED", res.status);
+    // A status from the box is an answer even when the body was junk; what
+    // makes it useful is the code, and UNTOUCHED checks for that.
+    throw new ArcadeError(e.message ?? `The arcade said ${res.status}.`, e.code ?? "REFUSED", res.status, true);
+  }
+  if (!isJson) {
+    throw new ArcadeError("The arcade answered with something that was not an answer.", "GARBAGE", res.status);
   }
   return parsed as T;
 }
@@ -194,18 +259,21 @@ export interface SolanaProvider {
  * That is deliberate: money is the one place where "this browser has a wallet
  * we do not recognise" should not be the end of the conversation.
  */
-export function walletProvider(): { provider: SolanaProvider; name: string } | null {
-  const w = window as unknown as {
-    phantom?: { solana?: SolanaProvider };
-    solflare?: SolanaProvider;
-    backpack?: SolanaProvider;
-    solana?: SolanaProvider;
-  };
-  if (w.phantom?.solana?.isPhantom) return { provider: w.phantom.solana, name: "Phantom" };
-  if (w.solflare?.isSolflare) return { provider: w.solflare, name: "Solflare" };
-  if (w.backpack?.isBackpack) return { provider: w.backpack, name: "Backpack" };
-  if (w.solana) return { provider: w.solana, name: "your wallet" };
-  return null;
+export function walletProvider(): FoundProvider | null {
+  return findProvider();
+}
+
+/**
+ * THE PROVIDER INCLUDING THE ONE THAT IS NOT IN THE PAGE.
+ *
+ * walletProvider() above is synchronous and therefore injected-only, which is
+ * what a render pass wants -- it answers "what shall I call this wallet" with
+ * no awaiting. Anything about to MOVE MONEY wants this instead: on a phone it
+ * resolves to the wallet app the player already signed in with, and on a
+ * desktop it is the same lookup costing one extra tick.
+ */
+export async function walletNow(): Promise<FoundProvider | null> {
+  return ensureProvider();
 }
 
 /**
@@ -222,56 +290,26 @@ export function walletProvider(): { provider: SolanaProvider; name: string } | n
  * and a signature over slightly different bytes verifies against nothing.
  */
 export async function arcadeSignIn(): Promise<string> {
-  const found = walletProvider();
-  if (!found) {
-    throw new ArcadeError(
-      "No Solana wallet in this browser. Install Phantom, then reload.",
-      "NO_WALLET",
-    );
-  }
-  const { provider } = found;
-  const out = await provider.connect().catch((err: { code?: number }) => {
-    if (err?.code === 4001) throw new ArcadeError("Cancelled.", "CANCELLED");
-    throw err;
+  /*
+   * ONE PRESS, WHATEVER THIS BROWSER IS.
+   *
+   * On a desktop this is the connect popup and a signature. On a phone with
+   * nothing injected it offers the wallet apps and then NAVIGATES: this tab is
+   * replaced, the wallet opens, and the player returns to a fresh load where
+   * completeDeeplink() finishes the job. So this promise may never settle, and
+   * a caller must not read that as a failure -- there is nothing left to fail
+   * on a page that no longer exists.
+   *
+   * The address is recorded by the CALLER, through setWalletOptIn in
+   * game/net.ts, which writes the arcade-wide cookie and this game's own flag
+   * together. Two writers of one cookie is how they drift apart.
+   */
+  const out = await arcadeConnect().catch((err: { code?: string; message?: string }) => {
+    // The shared wallet throws plain Errors carrying the same codes this app
+    // already uses; rewrapping keeps one error type reaching the panel.
+    throw new ArcadeError(err?.message ?? "The wallet did not connect.", err?.code ?? "NO_WALLET");
   });
-  const address = (out?.publicKey ?? provider.publicKey)?.toString();
-  if (!address) throw new ArcadeError("The wallet connected without giving an address.", "NO_ADDRESS");
-  // The address itself is recorded by the CALLER, through setWalletOptIn in
-  // game/net.ts, which writes the same arcade-wide cookie and the game's own
-  // flag together. Two writers of one cookie is how they drift apart.
-  if (arcadeToken()) return address;
-  if (typeof provider.signMessage !== "function") {
-    throw new ArcadeError("This wallet cannot sign a message from a page.", "NO_SIGN");
-  }
-
-  const asked = await arcadeApi<{ nonce: string; statement: string }>("/api/auth/challenge", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ wallet: address }),
-  });
-  if (!asked?.nonce || !asked?.statement) {
-    throw new ArcadeError("The arcade would not issue a challenge.", "NO_CHALLENGE");
-  }
-  const { signature } = await provider
-    .signMessage(new TextEncoder().encode(asked.statement), "utf8")
-    .catch((err: { code?: number }) => {
-      if (err?.code === 4001) throw new ArcadeError("Cancelled.", "CANCELLED");
-      throw err;
-    });
-  const proof = await arcadeApi<{ token: string }>("/api/auth/verify", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      wallet: address,
-      nonce: asked.nonce,
-      signature: btoa(String.fromCharCode(...signature)),
-    }),
-  });
-  if (typeof proof?.token !== "string" || !proof.token) {
-    throw new ArcadeError("The arcade would not accept that signature.", "NO_SESSION");
-  }
-  carry(SESSION_COOKIE, proof.token);
-  return address;
+  return out.address;
 }
 
 /**
@@ -289,36 +327,120 @@ export async function arcadeSignIn(): Promise<string> {
  *      address and `from` is the wallet the session proved. There is no
  *      destination field to poison.
  *
- * ONE METHOD, NO ADAPTER. `request({ method: "signAndSendTransaction" })` with
- * a base58 message is the injected-provider RPC underneath every wallet
- * adapter, and taking it directly is what keeps @solana/web3.js out of a
- * bundle that has two runtime dependencies. A wallet that will not answer it
- * gets NO_TX_API and the panel falls back to showing the address, which is how
- * every deposit in this arcade worked until now.
+ * ONE METHOD, NO ADAPTER. `request({ method: "signAndSendTransaction" })` is
+ * the injected-provider RPC underneath every wallet adapter, and taking it
+ * directly is what keeps @solana/web3.js out of a bundle that has two runtime
+ * dependencies. A wallet that will not answer it gets NO_TX_API and the panel
+ * falls back to showing the address, which is how every deposit in this arcade
+ * worked until now.
+ *
+ * TWO ENCODINGS, TRIED IN ORDER. Phantom deserialises a TRANSACTION from the
+ * parameter its own documentation calls `message`, so sending the documented
+ * base58 message failed a real deposit with "Reached end of buffer
+ * unexpectedly". The box publishes both forms and this tries the transaction
+ * first; `transaction` is absent on an older box, and then this is the
+ * single-form call it always was. See prepareDeposit in the arcade's
+ * custody.js for the bytes and how they were checked.
+ *
+ * A REFUSAL MUST NOT BE RETRIED: a form the wallet cannot deserialise fails
+ * before any dialog appears, so falling back shows the player nothing, but
+ * somebody who said no must not be asked again in another encoding.
  */
 export async function approveTransfer(
-  provider: SolanaProvider | null,
-  message: string,
+  provider: ArcadeProvider | null,
+  prepared: PreparedDeposit | string,
 ): Promise<string> {
+  const prep = typeof prepared === "string" ? ({ message: prepared } as PreparedDeposit) : prepared;
+
+  /*
+   * A PHONE LEAVES THE PAGE HERE, AND DOES NOT COME BACK TO THIS FUNCTION.
+   *
+   * On a phone the wallet is another app reachable only by a link, so
+   * approving is a NAVIGATION: this tab is destroyed, the wallet opens, and
+   * the player returns to a fresh load carrying the signed transaction in its
+   * query string. completeDeeplink() picks it up and hands the outcome to
+   * whoever registered with onDepositArrival, which is the wallet panel.
+   *
+   * So the promise below never settles, on purpose: there is nothing to return
+   * to a caller about to stop existing, and resolving with something falsy
+   * would paint a failure half a second before the page went away.
+   */
+  if (provider?.isDeeplink && typeof provider.deposit === "function") {
+    await provider.deposit(prep);
+    return new Promise<string>(() => {});
+  }
+
   if (typeof provider?.request !== "function") {
     throw new ArcadeError("This wallet cannot send a transaction from a page.", "NO_TX_API");
   }
-  let out: unknown;
-  try {
-    out = await provider.request({ method: "signAndSendTransaction", params: { message } });
-  } catch (err) {
-    const e = err as { code?: number; message?: string };
-    // 4001 is the wallet standard's "user rejected". Not an error worth a red
-    // line: they read what it was going to do and said no, which is the whole
-    // reason they were shown it.
-    if (e?.code === 4001) throw new ArcadeError("Cancelled. Nothing was sent.", "CANCELLED");
-    // -32601 is JSON-RPC "no such method"; some wallets say it in words.
-    // Either way the fallback is the same screen, so it gets the same code.
-    if (e?.code === -32601 || /unsupported|not supported|unknown method/i.test(String(e?.message ?? ""))) {
-      throw new ArcadeError("This wallet cannot send a transaction from a page.", "NO_TX_API");
+
+  /*
+   * THE EXTENSION MAY HAVE MOVED WHILE THE SESSION DID NOT.
+   *
+   * The transfer the box built pays FROM one exact account -- the wallet the
+   * session proved -- so an extension standing on another one produces a
+   * refusal deep inside the wallet that reads to a player as "the game is
+   * broken". Caught here, where there is room to say which of the two moved.
+   */
+  let active = provider.publicKey?.toString?.() ?? null;
+  if (!active) {
+    try {
+      const got = await provider.connect();
+      active = (got?.publicKey ?? provider.publicKey)?.toString?.() ?? null;
+    } catch (err) {
+      if ((err as { code?: number })?.code === 4001) {
+        throw new ArcadeError("Cancelled. Nothing was sent.", "CANCELLED");
+      }
+      throw err;
     }
-    throw err;
   }
+  if (active && prep.from && active !== prep.from) {
+    throw new ArcadeError(
+      `Your wallet is on ${active.slice(0, 4)}..${active.slice(-4)} but the arcade knows you as `
+      + `${prep.from.slice(0, 4)}..${prep.from.slice(-4)}. Switch back in the wallet, or reconnect first.`,
+      "WRONG_ACCOUNT",
+    );
+  }
+
+  /* Which encoding this wallet takes, asked rather than sniffed: a provider
+     that wants raw bytes says so itself, and the box publishes the identical
+     transaction in base64 for it. Nothing sets this yet -- it is what the
+     Android Mobile Wallet Adapter path will set when it lands. */
+  const forms = (provider.arcadeAccepts === "base64"
+    ? [prep.transactionBase64]
+    : [prep.transaction, prep.message]).filter(Boolean) as string[];
+  if (!forms.length) {
+    throw new ArcadeError("The arcade did not send anything to approve.", "NO_TX_API");
+  }
+
+  let out: unknown;
+  let firstError: unknown = null;
+  for (const form of forms) {
+    try {
+      out = await provider.request({ method: "signAndSendTransaction", params: { message: form } });
+      firstError = null;
+      break;
+    } catch (err) {
+      const e = err as { code?: number; message?: string };
+      // 4001 is the number every wallet reuses for "the person said no". Not an
+      // error worth a red line, and not a thing to ask again in another form.
+      if (e?.code === 4001 || /reject|denied|cancel/i.test(String(e?.message ?? ""))) {
+        throw new ArcadeError("Cancelled. Nothing was sent.", "CANCELLED");
+      }
+      // A wallet that does not do this at all will not do it in either form.
+      // -32601 is JSON-RPC "no such method"; some wallets say it in words.
+      if (e?.code === -32601
+        || /unsupported|not supported|unknown method|invalid method/i.test(String(e?.message ?? ""))) {
+        throw new ArcadeError("This wallet cannot send a transaction from a page.", "NO_TX_API");
+      }
+      // Anything else is worth trying the other encoding for. The FIRST failure
+      // is the one reported if both fail, because it is the one about the form
+      // the wallet was most likely to accept.
+      firstError ??= err;
+    }
+  }
+  if (firstError) throw firstError;
+
   const signature = typeof out === "string" ? out : (out as { signature?: string })?.signature;
   if (!signature) throw new ArcadeError("The wallet approved it but gave back no transaction id.", "NO_SIG");
   return String(signature);
@@ -400,9 +522,79 @@ export interface ChainBalance {
   spendable: number;
 }
 
+/** One movement through the custody edge, in either direction. */
+export interface Movement {
+  /** Which way the money went: `in` is a deposit, `out` a withdrawal. */
+  kind: "in" | "out";
+  at: number;
+  amount: number;
+  signature: string | null;
+  /** The signature for a deposit, the withdrawal's ref for a withdrawal. */
+  id: string;
+  /** `confirmed`, `confirming`, `reversed`, or whatever the signer last said. */
+  state: string;
+}
+
+/**
+ * ONE PAGE OF ONE DIRECTION, and the arithmetic that goes above it.
+ *
+ * PAGED BY THE BOX, NOT SLICED HERE. `page`, `pages` and `total` come back
+ * from the server having been clamped there, so the pager draws the numbers it
+ * was GIVEN rather than the ones it asked for and cannot disagree with the
+ * list underneath it.
+ *
+ * `deposits` and `withdrawals` are the shape this panel used to read. They are
+ * still sent by the box and still accepted here, because the two halves of
+ * this site deploy separately: for the length of that gap a page and the
+ * server it is talking to are different versions of the same file, in
+ * whichever direction happens to be ahead, and a money screen that answers a
+ * version skew with an empty panel is the worst possible way to fail.
+ */
 export interface CustodyHistory {
-  deposits: Array<{ at: number; lamports: number; signature: string }>;
-  withdrawals: Array<{ at: number; sent: number; signature: string | null; state: string }>;
+  rows?: Movement[];
+  total?: number;
+  page?: number;
+  pages?: number;
+  perPage?: number;
+  kind?: "in" | "out" | null;
+  /** Balance resting on a deposit the chain has not finalised. */
+  pending?: number;
+  /** The whole WALLET's arithmetic, across every game. Not this game's. */
+  summary?: {
+    deposited: number;
+    withdrawn: number;
+    fees: number;
+    onTable: number;
+    inHouse: number;
+    net: number;
+  };
+  deposits?: Array<{ at: number; lamports: number; signature: string }>;
+  withdrawals?: Array<{ at: number; sent: number; signature: string | null; state: string }>;
+}
+
+/**
+ * WHAT THIS TABLE HAS DONE TO THIS WALLET, AND NOTHING ELSE.
+ *
+ * Every figure is a sum over ledger rows filed under this game's name, for all
+ * time. See positionFor in the arcade's ledger.js, which is where the
+ * arithmetic lives -- there is no honest browser-side version of it, because
+ * the browser holds one page of receipts and the answer is over all of them.
+ */
+export interface GamePosition {
+  wallet: string;
+  game: string;
+  /** Everything ever staked here, including rounds still running. */
+  wagered: number;
+  rounds: number;
+  /** What settled rounds paid back: stake returned plus anything won. */
+  returned: number;
+  /** Stakes handed back because the round never resolved. */
+  refunded: number;
+  /** Staked right now, in a round that has not settled. */
+  inPlay: number;
+  openRounds: number;
+  /** returned + refunded + inPlay - wagered. */
+  net: number;
 }
 
 export interface WithdrawReceipt {
@@ -421,4 +613,12 @@ export interface PreparedDeposit {
   network: string | null;
   /** base58, which is what an injected wallet's signAndSendTransaction takes. */
   message: string;
+  /**
+   * The same transfer as an unsigned TRANSACTION, base58, which is what the
+   * wallets actually want -- see approveTransfer for the deposit that proved
+   * it. Optional because a box older than that change does not send one.
+   */
+  transaction?: string;
+  /** The identical bytes in base64, for a provider that takes raw bytes. */
+  transactionBase64?: string;
 }

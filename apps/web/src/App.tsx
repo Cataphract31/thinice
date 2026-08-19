@@ -146,8 +146,18 @@ export default function App(): JSX.Element {
         /* Disconnecting REVOKES the seat rather than merely re-handshaking.
            Clearing the browser's copy of the token left the server's row valid
            forever, so "disconnect" meant "this device forgot" — and that token
-           rides in a cookie shared with every world on the domain. */
-        onWalletChange={(connected) => (connected ? client.reauth(true) : client.logout())}
+           rides in a cookie shared with every world on the domain.
+
+           AND A WALLET THAT JUST SIGNED IN TO THE ARCADE IS NOT ASKED TO SIGN
+           AGAIN. `reauth(true)` means "run the wallet ceremony on the next
+           challenge", which is right when the connect got us nothing but an
+           address — and wrong when it got us an arcade session, because the
+           socket takes that token as proof (`t: "arcade"`). Forcing a
+           signature here is what made connecting cost two prompts and made the
+           bank ask a freshly-connected player to connect. */
+        onWalletChange={(connected, arcadeSeated) =>
+          connected ? client.reauth(!arcadeSeated) : client.logout()
+        }
       />
       <OfflineBar snap={snap} />
       <StateBar snap={snap} onShowBank={() => setShowBank(true)} />

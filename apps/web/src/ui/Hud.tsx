@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from "react";
 import { DEFAULT_CONFIG, totalRake } from "@zinc/engine";
 import type { AutoSettings, Snapshot } from "@/game/client";
+import { arcadeSignIn, arcadeToken, walletRoute, ArcadeError } from "@/game/arcade";
 import { setWalletOptIn, walletCarried, walletOptedIn, walletSeated } from "@/game/net";
 import { shortAddress } from "@/game/names";
 import { CharArt } from "./Chars";
@@ -169,16 +170,53 @@ function phantom(): PhantomProvider | null {
  * a guest ledger. That mismatch now renders as an explicit "re-sign" state
  * whose click runs the signature ceremony again.
  */
+/**
+ * ONE SIGNATURE FOR THE WHOLE BUILDING, AND WHY THIS BUTTON HAD TO CHANGE.
+ *
+ * This used to be `phantom().connect()` and nothing else. Connecting is not
+ * proving -- the extension hands back a public key, which is a claim -- so the
+ * seat still had to be bought with a signature, and the socket bought it with
+ * THIS GAME'S ceremony: sign `THIN ICE login`, take a token this server minted.
+ *
+ * That token seats a player at the table and it cannot do one other thing:
+ * read their balance at the custody edge. The bank answers to a token the
+ * ARCADE minted, from its own issuer, over its own sentence -- so a player who
+ * pressed connect here, got seated, and then opened the wallet panel was asked
+ * to connect a SECOND time, for a second signature, for the wallet they had
+ * just connected. That is not a security step; from the outside it is the site
+ * not remembering what it just did, on the screen where trust matters most.
+ *
+ * So the signature is given to the ARCADE instead, and the table takes the
+ * token that comes out of it -- the socket has had `t: "arcade"` for exactly
+ * this since the portal learnt the same lesson (see authenticate() in
+ * game/net.ts, and the long note at the top of portal/wallet.js in the arcade).
+ * One prompt, both seats, and the bank is already signed in when it opens.
+ *
+ * AND IF THE ARCADE CANNOT ANSWER, NOTHING IS LOST. An issuer that is
+ * unreachable, or a wallet that will not sign a message, falls back to exactly
+ * what this did before: the table's own signature, on the table's own token.
+ * The player is never prompted twice by the fallback -- the wallet is already
+ * connected by then, so the retry is silent.
+ */
 export function WalletButton({
   seat,
   onChange,
 }: {
   /** The server-reported seat identity; undefined in the local demo. */
   seat?: { guest: boolean; address: string };
-  /** Called with true after an explicit connect, false after a disconnect. */
-  onChange?: (connected: boolean) => void;
+  /**
+   * Called with true after an explicit connect, false after a disconnect.
+   *
+   * `arcadeSeated` says whether the arcade's own session was minted. When it
+   * was, the socket must NOT be told to want a signature: it has a token that
+   * proves the same wallet, and asking would be the second prompt this whole
+   * path exists to remove.
+   */
+  onChange?: (connected: boolean, arcadeSeated?: boolean) => void;
 }): JSX.Element {
   const [addr, setAddr] = useState<string | null>(null);
+  /** A wallet prompt is open. The press must not be repeatable while it is. */
+  const [busy, setBusy] = useState(false);
   /* The way out is ASKED FOR, not offered. Disconnecting used to be a second
      press on the chip carrying your own address, which is a thing you have to
      be told; now that press reveals an explicit exit beside it, and pressing
@@ -212,24 +250,61 @@ export function WalletButton({
   const known = !shown && !expired && Boolean(walletCarried());
 
   const click = async (): Promise<void> => {
-    const p = phantom();
-    if (!p) {
-      window.open("https://phantom.app", "_blank", "noopener");
-      return;
-    }
     if (shown) {
       setShowExit((v) => !v);
       return;
     }
+    if (busy) return;
+    setBusy(true);
     try {
-      const r = await p.connect();
+      /*
+       * THE ARCADE'S OWN SIGN-IN, WHICH IS ALSO THE WALLET LOOKUP.
+       *
+       * Not guarded by a "is there a wallet here" check of our own, and that
+       * matters most on a phone, where the honest answer to that question is
+       * NO and the right thing to do about it is not the download page: there
+       * is nothing to inject a provider into mobile Safari, so the shared
+       * handshake offers the wallet APPS and navigates to one. A pre-check
+       * here would have sent every phone to install a wallet they already
+       * have. It also returns without any prompt at all when this browser is
+       * already carrying a live arcade session, which is what makes RE-SIGN
+       * after a lapsed seat free.
+       */
+      const address = await arcadeSignIn();
       // The address goes with the opt-in: every other world on this domain
       // reads it and is spared asking who you are all over again.
-      setWalletOptIn(true, r.publicKey.toString());
-      setAddr(r.publicKey.toString());
-      onChange?.(true);
-    } catch {
-      // Player closed the Phantom prompt; nothing to do.
+      setWalletOptIn(true, address);
+      setAddr(address);
+      /*
+       * AND WHETHER A SESSION WAS ACTUALLY MINTED IS READ, NOT ASSUMED. The
+       * handshake resolves with an address even when the issuer refused or was
+       * unreachable, so trusting the resolve would tell the socket "you have a
+       * token" when there is none -- and the socket, asked not to prompt,
+       * would quietly seat a guest. The cookie is the fact.
+       */
+      onChange?.(true, Boolean(arcadeToken()));
+    } catch (err) {
+      const e = err as ArcadeError;
+      /*
+       * No wallet at all, ON A MACHINE WHERE ONE COULD BE INSTALLED. Anything
+       * else is a decline or a wallet that could not sign, and asking again in
+       * a different sentence is not a fallback, it is nagging.
+       *
+       * THE PLATFORM TEST IS LOAD-BEARING, and leaving it out is the exact
+       * failure the phone route was built to end. On a phone NO_WALLET does
+       * NOT mean there is no wallet: the arcade offers the wallet APPS first
+       * -- a sheet, one tap, straight into Phantom or Solflare -- and only
+       * refuses once that sheet has been dismissed. Opening phantom.app after
+       * it sends somebody who is holding Phantom to a page whose main button
+       * says DOWNLOAD, which is what "install an extension" looks like on a
+       * device that cannot have one. See docs/MOBILE_WALLETS.md in GIELINOR:
+       * that page is why two rebuilds of this route failed identically.
+       */
+      if (e.code === "NO_WALLET" && walletRoute() === "desktop") {
+        window.open("https://phantom.app", "_blank", "noopener");
+      }
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -273,7 +348,15 @@ export function WalletButton({
           <path d="M10.5 8.25h4" stroke="currentColor" strokeWidth="1.6" />
         </svg>
       )}
-      {shown ? shortAddress(shown) : expired ? "re-sign" : known ? "sign in" : "connect"}
+      {busy
+        ? "check your wallet…"
+        : shown
+          ? shortAddress(shown)
+          : expired
+            ? "re-sign"
+            : known
+              ? "sign in"
+              : "connect"}
     </button>
     {shown && showExit && (
       <button
