@@ -816,6 +816,7 @@ export class Wallet {
 
     this.provider = null;
     this.providerName = null;
+    this.#watching = false;
     this.#bind(findProvider());
   }
 
@@ -841,6 +842,9 @@ export class Wallet {
     this.provider.on?.('disconnect', () => this.#set(null));
     this.provider.on?.('accountChanged', (key) => this.#set(key ? key.toString() : null));
   }
+
+  /** Whether #watchSession has already subscribed. See it for why. */
+  #watching;
 
   /** Whether there is anything here to press. */
   get available() {
@@ -904,11 +908,68 @@ export class Wallet {
     try {
       const out = await this.provider.connect({ onlyIfTrusted: true });
       const key = out?.publicKey ?? this.provider.publicKey;
-      if (key) this.#set(key.toString());
+      /*
+       * AND ONLY IF THERE IS A SESSION BEHIND IT. THIS IS THE HONESTY RULE.
+       *
+       * The wallet answering `onlyIfTrusted` says one thing: this browser has
+       * approved this origin before. It says NOTHING about whether the arcade
+       * knows who you are. Those came apart constantly -- a session retired by
+       * signing in on another device, a lapsed one, a first visit to a world
+       * carrying only the domain-wide `zinc_wallet` claim -- and every screen
+       * in the arcade printed the address anyway.
+       *
+       * What that does to somebody is the whole complaint: the page wears your
+       * address, so you believe you are done, and then the bank asks you to
+       * connect and the table says it keeps no guest balance for you. The
+       * arcade looked broken when it was merely lying, and the lie was on the
+       * one control that was supposed to answer the question.
+       *
+       * So an address on screen now MEANS you can play. When the session is
+       * gone the button says CONNECT, which is true, and pressing it costs one
+       * signature -- the wallet is already trusted, so `connect()` below
+       * resolves without a popup and only the sign-in prompts.
+       *
+       * A SIGNATURE IS STILL NEVER ASKED FOR HERE. This runs on load; the
+       * repair belongs to a press. That rule is older than this one and this
+       * one does not touch it.
+       */
+      if (key && sessionFor(key.toString())) this.#set(key.toString());
     } catch {
       // Not trusted any more, or the wallet is locked. Silence is correct
       // here: this runs on page load and nobody asked for it.
     }
+    this.#watchSession();
+  }
+
+  /**
+   * AND IF THE SESSION DIES WHILE THE PAGE IS OPEN, THE NAME GOES WITH IT.
+   *
+   * resume() gets the state right at load; this keeps it right afterwards. The
+   * box can retire a session at any moment -- signing in on a phone retires the
+   * desktop's, since there is one live session per wallet -- and the first
+   * thing that hears about it is the arcade-wide balance poll, which drops the
+   * cookie and publishes `signedIn: false` (see balance.js). Until now nothing
+   * carried that as far as the button, so a tab left open went on wearing an
+   * address that had stopped meaning anything.
+   *
+   * THE EVENT RATHER THAN AN IMPORT, deliberately. `zinc:balance` is already
+   * the arcade's one signal for this and the vendored worlds listen to it by
+   * name because they cannot import from this repo at all. Importing balance.js
+   * here would also be a cycle: chrome.js starts that poll and the poll reads
+   * this module's session.
+   *
+   * Bound at most once per Wallet, and from resume() rather than the
+   * constructor, because the constructor runs under Node in five test suites
+   * and `addEventListener` is not there.
+   */
+  #watchSession() {
+    if (this.#watching) return;
+    this.#watching = true;
+    try {
+      addEventListener('zinc:balance', (e) => {
+        if (e.detail?.signedIn === false && this.address) this.#set(null);
+      });
+    } catch { /* no window; then nothing here can change under us anyway */ }
   }
 
   /** Ask, with the popup. Throws with something sayable if it does not happen. */

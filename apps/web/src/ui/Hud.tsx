@@ -223,11 +223,25 @@ export function WalletButton({
      the address again puts it away. */
   const [showExit, setShowExit] = useState(false);
 
-  // Reconnect silently ONLY for players who explicitly connected before.
-  // Merely having Phantom installed must never start a wallet conversation:
-  // everyone is a guest until they press this button.
+  /*
+   * Reconnect silently ONLY for players who explicitly connected before.
+   * Merely having Phantom installed must never start a wallet conversation:
+   * everyone is a guest until they press this button.
+   *
+   * AND ONLY WITH AN ARCADE SESSION BEHIND IT. `shown` falls back to this
+   * address until the socket answers, so without the check the chip wore a
+   * player's own address for every second of a connection that was going to
+   * seat them as a guest -- and, if they had no session at all, for good. The
+   * wallet trusting this origin and the arcade knowing who you are are
+   * different facts, and only the second one lets you play. Reported from the
+   * other end: "it makes me think its all fine and good but then i still need
+   * to do the whole ritual".
+   *
+   * No signature is asked for here -- this runs on load. The button falls to
+   * its connect wording, which is true, and one press repairs it.
+   */
   useEffect(() => {
-    if (!walletOptedIn()) return;
+    if (!walletOptedIn() || !arcadeToken()) return;
     phantom()
       ?.connect({ onlyIfTrusted: true })
       .then((r) => setAddr(r.publicKey.toString()))
