@@ -8,6 +8,7 @@
     "apps/*"
   ],
   "scripts": {
+    "test": "node --import tsx --test \"packages/engine/test/*.test.ts\"",
     "dev": "npm run dev --workspace @zinc/web",
     "build": "npm run build --workspace @zinc/web",
     "server": "npm run start --workspace @zinc/server",
