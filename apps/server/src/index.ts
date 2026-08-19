@@ -132,8 +132,45 @@ const NONCE_TTL_MS = 120_000;
  * the loopback for that reason, and an override belongs in the unit file next
  * to the database path, not in a client.
  */
-const ARCADE_AUTH =
-  process.env.ARCADE_AUTH_URL ?? "http://127.0.0.1:8080/api/auth/me";
+const AUTH_PATH = "/api/auth/me";
+
+/*
+ * A BASE URL OR A WHOLE ONE, BECAUSE THE BOX SETS A BASE AND THIS WANTED AN
+ * ENDPOINT -- AND THE DISAGREEMENT COST THIS GAME ITS ARCADE SIGN-IN ENTIRELY.
+ *
+ * /etc/arcade/arcade.env carries the two together:
+ *
+ *     ARCADE_LEDGER_URL=http://127.0.0.1:8080
+ *     ARCADE_AUTH_URL=http://127.0.0.1:8080
+ *
+ * and the first genuinely IS a base -- arcade.ts appends its own paths to it.
+ * This one was read as a complete endpoint, so it fetched the arcade's ROOT,
+ * which answers the portal's HTML with a 200. `res.ok` passed, `res.json()`
+ * threw on `<!doctype html>`, and the throw landed in the catch below whose
+ * comment says "issuer unreachable or slow". It was neither. arcadeWallet()
+ * simply returned null on every call ever made.
+ *
+ * What a player saw: every arcade session refused, a guest seat every time,
+ * and a chip that said RE-SIGN and did nothing when pressed -- no wallet
+ * prompt, because there was nothing wrong with the wallet. Reported as "it
+ * still doesnt get the same session or cookie from main arcade", which is
+ * exactly what was happening.
+ *
+ * So both forms are accepted and the base is the one the box is actually
+ * configured with. A value naming a path is used as given, which keeps the
+ * default above and anything already written down working.
+ */
+const ARCADE_AUTH = (() => {
+  const raw = process.env.ARCADE_AUTH_URL;
+  if (!raw) return `http://127.0.0.1:8080${AUTH_PATH}`;
+  try {
+    const u = new URL(raw);
+    if (u.pathname === "/" || u.pathname === "") return new URL(AUTH_PATH, u).toString();
+    return raw;
+  } catch {
+    return raw;
+  }
+})();
 
 async function arcadeWallet(token: string): Promise<string | null> {
   // Shape-checked before it leaves this process: a token is 64 hex characters
@@ -145,6 +182,22 @@ async function arcadeWallet(token: string): Promise<string | null> {
       signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return null;
+    /*
+     * JSON BECAUSE THE HEADER SAYS SO, and it is worth the two lines. When
+     * this pointed at the arcade's root it got the portal's HTML with a 200:
+     * res.ok passed, res.json() threw, and the throw was reported by the catch
+     * below as an unreachable issuer. A wrong URL wore the costume of a slow
+     * network for as long as nobody looked. Saying which one it is out loud is
+     * the difference between a five-second diagnosis and a field report.
+     */
+    if (!/application\/json/i.test(res.headers.get("content-type") ?? "")) {
+      console.warn(
+        `arcade auth: ${ARCADE_AUTH} answered ${res.status} but not JSON ` +
+          `(content-type: ${res.headers.get("content-type") ?? "none"}). ` +
+          `ARCADE_AUTH_URL should be the arcade's origin, or its ${AUTH_PATH} endpoint.`,
+      );
+      return null;
+    }
     const body = (await res.json()) as { wallet?: unknown };
     const wallet = String(body.wallet ?? "");
     // Base58, 32-44 characters: an address and never a namespaced id. Guests
