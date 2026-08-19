@@ -32,9 +32,9 @@ function serveArcade(): Plugin {
   };
 }
 
-const DEFAULT_BETA = "wss://34.70.75.204.sslip.io";
+const DEFAULT_BETA = "wss://34.60.159.134.sslip.io";
 
-const DEFAULT_ARCADE = "https://gielinor.34-70-75-204.sslip.io";
+const DEFAULT_ARCADE = "https://gielinor.34-60-159-134.sslip.io";
 
 export default defineConfig(({ command }) => {
   const url = process.env.VITE_SERVER_URL ?? (command === "build" ? DEFAULT_BETA : undefined);

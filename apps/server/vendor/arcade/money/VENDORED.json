@@ -1,7 +1,7 @@
 {
   "source": "gielinor arcade/money",
-  "commit": "924be0acbfaae1bc469c0ada85a8ac92e55df3cb",
+  "commit": "bd0cbd11723f091e63a248bf4d5edbc873f62e16",
   "files": {
-    "money.js": "5e8f39bc084963b2a1c563be7adf15c495d4327d8834bcd58b1555d918b37390"
+    "money.js": "2c6b537b25b38419df0c5883b6da24b2e854c7156dc7dd9a75aba2eb51bfcd9b"
   }
 }
