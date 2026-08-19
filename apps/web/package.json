@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/sync-arcade.mjs --check && vite build",
-    "sync-arcade": "node scripts/sync-arcade.mjs",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {

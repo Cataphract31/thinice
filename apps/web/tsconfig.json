@@ -20,7 +20,13 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@zinc/engine": ["../../packages/engine/src/index.ts"]
+      "@zinc/engine": ["../../packages/engine/src/index.ts"],
+      /* The arcade's wallet is fetched from this same site at RUNTIME and is
+         not a file in this repo -- see serveArcade() in vite.config.ts. The
+         compiler still wants a shape for it, and an ambient `declare module`
+         cannot supply one: those match BARE specifiers only, and this is a
+         path. Mapping it here is what makes the URL typecheck. */
+      "/arcade/web/wallet.js": ["./src/types/arcade.d.ts"]
     }
   },
   "include": ["src"]

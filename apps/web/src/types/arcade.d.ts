@@ -1,24 +1,33 @@
 /*
  * TYPES FOR THE ARCADE'S WALLET, WHICH IS PLAIN JAVASCRIPT.
  *
- * WHY THIS FILE EXISTS. Everything in src/arcade/ is a verbatim copy of
- * C:\GIELINOR\arcade\web\, fetched by scripts/sync-arcade.mjs -- see that
- * file's header for why a copy rather than an import. The arcade has no build
- * step and ships JavaScript; this app is `strict: true` TypeScript with
- * `allowJs` off, so without a declaration the import does not typecheck.
+ * WHY THIS FILE EXISTS. `/arcade/web/wallet.js` is fetched from the arcade at
+ * RUNTIME -- a URL on this same site, marked external so the bundler leaves the
+ * import alone. See serveArcade() in vite.config.ts for the mechanism and the
+ * trade. TypeScript cannot resolve a URL specifier, and would not typecheck the
+ * JavaScript behind it if it could: the arcade has no build step, and this app
+ * is `strict: true` with `allowJs` off. So the shape is declared here, against
+ * the exact specifier the code imports -- through a `paths` entry in
+ * tsconfig.json, because an ambient `declare module` only ever matches a BARE
+ * specifier and this one is a path.
  *
  * The alternative was turning `allowJs` on, which would have let the compiler
- * infer types from two and a half thousand lines of vendored JavaScript and
- * quietly widened half of them to `any`. A hand-written declaration loosens
+ * infer types from two and a half thousand lines of somebody else's JavaScript
+ * and quietly widen half of them to `any`. A hand-written declaration loosens
  * nothing: what is not declared here cannot be imported, and anything this app
  * gets wrong about the arcade's shape is a compile error rather than a runtime
  * surprise on somebody's phone.
  *
- * SO IT DECLARES ONLY WHAT THIS APP USES. The module exports more -- the
- * Wallet class a table uses to hold connection state, the session helpers this
- * app already has its own copies of. Adding to this file is how you reach
- * them; inventing a shape that the JavaScript does not have is how you get a
- * green build and a broken deposit, so check the source when you do.
+ * SO IT DECLARES ONLY WHAT THIS APP USES. The module exports more -- the Wallet
+ * class a table uses to hold connection state, the session helpers this app has
+ * its own readers for. Adding to this file is how you reach them; inventing a
+ * shape the JavaScript does not have is how you get a green build and a broken
+ * deposit, so read the source when you do.
+ *
+ * IT IS THIS APP'S OWN READING of that module -- GIELINOR ships no TypeScript
+ * to copy -- and it is the ONLY arcade file left in this repo. The eight that
+ * used to sit beside it are gone. There is one wallet.js in the world now, and
+ * this is a description of it rather than a copy of it.
  */
 
 /** An injected Solana provider, or the phone's stand-in for one. */

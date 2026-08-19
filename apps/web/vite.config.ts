@@ -2,6 +2,65 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import path from "node:path";
+import type { Plugin } from "vite";
+
+/**
+ * THE ARCADE'S WALLET IS FETCHED, NOT COPIED.
+ *
+ * This app used to carry eight files of it in src/arcade/, kept in step by a
+ * sync script. They were byte-identical to C:\GIELINORrcade\web\ by
+ * construction -- that was the point -- and they still cost a sync, a rebuild
+ * and a re-vendor every time a wallet bug was fixed, in three separate repos,
+ * for a fix that was already written.
+ *
+ * The copies existed for one reason and it was never about the wallet: a
+ * bundler in a separate repository cannot resolve `#arcade/web/wallet.js`,
+ * because that import map is the arcade's and the file is not in this tree.
+ * Build-time resolution, nothing else.
+ *
+ * SO IT IS NOT RESOLVED AT BUILD TIME ANY MORE. Every world is served from one
+ * origin -- voidsolana.com/thin-ice/ sits beside voidsolana.com/arcade/web/,
+ * which the arcade's .vercelignore publishes on purpose -- so the specifier is
+ * a real URL on the same site. Marked external below, the import survives into
+ * the output untouched and the browser fetches the one copy the arcade serves,
+ * `must-revalidate`, so a fix lands the moment GIELINOR deploys.
+ *
+ * WHAT THIS TRADES, PLAINLY: no version pinning. A broken wallet.js breaks
+ * every world at once instead of one at a time. Chosen deliberately; the way
+ * back is to import a copy again.
+ *
+ * AND DEV FETCHES IT TOO, from the arcade checkout next door, so `npm run dev`
+ * exercises the real module over a real request rather than a bundled stand-in.
+ * Without a checkout it 404s, which is loud and honest -- the alternative is a
+ * dev build that silently disagrees with production.
+ */
+function serveArcade(): Plugin {
+  const root = path.resolve(
+    fileURLToPath(new URL(".", import.meta.url)),
+    process.env.ARCADE ?? "../../../GIELINOR",
+    "arcade/web",
+  );
+  const handler = (req: any, res: any, next: () => void): void => {
+    if (!req.url || !req.url.startsWith("/arcade/web/")) return next();
+    const rel = decodeURIComponent(req.url.slice("/arcade/web/".length).split("?")[0]);
+    const file = path.resolve(root, rel);
+    if (!file.startsWith(root) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+      res.statusCode = 404;
+      res.end(`no arcade checkout for: ${rel}`);
+      return;
+    }
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+    fs.createReadStream(file).pipe(res);
+  };
+  return {
+    name: "serve-arcade-wallet",
+    configureServer(server) { server.middlewares.use(handler); },
+    configurePreviewServer(server) { server.middlewares.use(handler); },
+  };
+}
 
 /**
  * Which game a build talks to — resolved HERE, in the repo, not in a
@@ -61,7 +120,7 @@ export default defineConfig(({ command }) => {
      * root-relative base would 404 every asset in one of the two homes.
      */
     base: "./",
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), serveArcade()],
     resolve: {
       alias: {
         "@zinc/engine": fileURLToPath(
@@ -70,6 +129,10 @@ export default defineConfig(({ command }) => {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
       },
     },
+    /* The arcade's wallet is a URL on this same site, not a file in this repo.
+       Marked external so the import survives into the output untouched and the
+       browser fetches the one copy the arcade serves. See serveArcade above. */
+    build: { rollupOptions: { external: [/^\/arcade\/web\//] } },
     // Set explicitly so the resolution above is the single authority over
     // what a production bundle connects to.
     define: {

@@ -31,7 +31,7 @@ import {
   findProvider,
   type ArcadeProvider,
   type FoundProvider,
-} from "@/arcade/wallet.js";
+} from "/arcade/web/wallet.js";
 
 /*
  * THE HANDSHAKE IS NOT WRITTEN HERE ANY MORE.
@@ -49,8 +49,8 @@ import {
  * arcadeApi and its errors, the session cookie this game reads, the ledger
  * types, and the deposit approval below.
  */
-export { completeDeeplink, onDepositArrival, walletRoute } from "@/arcade/wallet.js";
-export type { ArcadeProvider, FoundProvider } from "@/arcade/wallet.js";
+export { completeDeeplink, onDepositArrival, walletRoute } from "/arcade/web/wallet.js";
+export type { ArcadeProvider, FoundProvider } from "/arcade/web/wallet.js";
 
 export const SHARED_DOMAIN = ".voidsolana.com";
 
