@@ -27,5 +27,5 @@
       "@zinc/engine": ["../../packages/engine/src/index.ts"]
     }
   },
-  "include": ["src", "vendor"]
+  "include": ["src", "vendor", "test"]
 }

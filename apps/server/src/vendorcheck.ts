@@ -7,12 +7,13 @@
  * silent in the worst way: this server and the verifier page would each be
  * certain about a settlement and disagree about the last lamport of it.
  *
- * THIS RUNS HERE BECAUSE THERE IS NOWHERE ELSE TO PUT IT. Thin Ice has no unit
- * suite; `itest-ledger.mjs` needs two live servers and a websocket, so it is
- * something a person runs deliberately and rarely. The box, meanwhile, has both
- * checkouts sitting side by side and never asks. That is the same gap the same
- * check closed in C:\HOLD, and it closed it after a real drift went unnoticed
- * until somebody happened to run the tests.
+ * THIS RUNS AT BOOT BECAUSE THE BOX IS WHERE THE ANSWER MATTERS. There is a
+ * unit suite now -- apps/server/test/ covers this function too -- but it runs
+ * on whatever machine somebody is developing on, and the copy that decides a
+ * settlement is the one deployed next to the arcade. Only the box has both
+ * checkouts sitting side by side, and until this it never asked. That is the
+ * same gap the same check closed in C:\HOLD, and it closed it after a real
+ * drift went unnoticed until somebody happened to run the tests.
  *
  * IT WARNS AND NEVER REFUSES TO START. A mismatch usually means the arcade was
  * pulled and we have not been yet -- an ordinary five minutes in the middle of

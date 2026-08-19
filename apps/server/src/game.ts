@@ -32,9 +32,26 @@ function sha256Hex(s: string): string {
  * What the published hash is a hash of. The rules hash is in here alongside
  * the seed so the commitment covers the game that was actually played, not
  * just the dice it was played with.
+ *
+ * EXPORTED SO IT CAN BE TESTED, not because anything else calls it. This
+ * string is the whole ceremony: a verifier recomputes it from the revealed
+ * seed and checks it against the hash published before the round sealed. It
+ * used to be private, which meant the only way to cover it was to restate the
+ * format in a test -- a second copy that would keep agreeing with itself long
+ * after the real one moved.
  */
-function commitPreimage(roundId: number, seedHex: string, rulesHash: string): string {
+export function commitPreimage(roundId: number, seedHex: string, rulesHash: string): string {
   return `thinice:${roundId}:${seedHex}:${rulesHash}`;
+}
+
+/** The rules every round is committed under, hashed over their canonical form. */
+export function rulesHashOf(config: GameConfig): string {
+  return sha256Hex(canonicalConfig(config));
+}
+
+/** The hash published before a round seals. Revealed seed + these rules = this. */
+export function commitmentFor(roundId: number, seedHex: string, rulesHash: string): string {
+  return sha256Hex(commitPreimage(roundId, seedHex, rulesHash));
 }
 
 /**
@@ -133,7 +150,7 @@ export class GameServer {
   private unsettled = new Set<number>();
 
   constructor(private db: Database, private ledger: ArcadeLedger) {
-    this.rulesHash = sha256Hex(canonicalConfig(this.config));
+    this.rulesHash = rulesHashOf(this.config);
     this.roundId = db.lastRoundId();
     this.teamWins = db.teamWins();
   }
@@ -298,7 +315,7 @@ export class GameServer {
     // 128 bits, not 32. A 32-bit seed makes the published commitment an oracle
     // an attacker can simply enumerate during the lobby — see rngFromSeedHex.
     this.seedHex = randomBytes(16).toString("hex");
-    this.commit = sha256Hex(commitPreimage(this.roundId, this.seedHex, this.rulesHash));
+    this.commit = commitmentFor(this.roundId, this.seedHex, this.rulesHash);
     this.db.openRound(this.roundId, this.commit, Date.now());
 
 
