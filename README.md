@@ -163,17 +163,26 @@ number.
 
 ## Provable fairness
 
-Before a round seals, the server publishes
+When a lobby opens, the server draws a 128-bit **secret** from the OS CSPRNG
+and publishes
 
 ```
-sha256("thinice:" + roundId + ":" + seedHex + ":" + rulesHash)
+sha256("thinice:2" + ":" + roundId + ":" + secret + ":" + rulesHash)
 ```
 
-The seed is 128 bits from the OS CSPRNG. It is revealed when the round ends,
-and the browser then replays the entire round locally and shows five receipts:
+When the lobby seals — entrant list final, before the first roll — it draws a
+second 128-bit **seal nonce**, and the seed the round actually runs on is
 
-1. the revealed seed hashes to the commitment published **before** the round
-2. the round replays tick-for-tick to the same outcome
+```
+sha256("thinice-seed:" + secret + ":" + sealNonce + ":" + entrantIds.join(","))
+```
+
+Both are revealed when the round ends, and the browser then rebuilds the seed,
+replays the entire round locally, and shows four receipts:
+
+1. the revealed secret hashes to the commitment published **before** the round
+2. the round replays tick-for-tick to the same outcome, from a seed rebuilt
+   from the entrant list the record claims
 3. it ran under the rules this build advertises (the rules are in the hash)
 4. your own plate in the replay paid exactly what you were credited
 
@@ -187,17 +196,37 @@ Some non-obvious things that are load-bearing. Do not "simplify" them:
   know every elimination before the round starts. The commitment intended to
   prove fairness becomes the thing that breaks it. `rngFromSeedHex` refuses a
   short seed at the source.
+- **The seed is not drawn until the lobby seals, and the entrant list is inside
+  it.** Elimination consumes one draw per live player in join order and the
+  hazard curve reads `live/total`, so a seed known during the lobby makes who
+  dies a pure function of join order and entrant count — both of which the
+  server decides, after seeing it. No grinding needed: one honest seed and a
+  free choice of ordering picks the winner, and the replay verifies perfectly
+  because the record honestly states the order that was used. Deriving the seed
+  at the seal means there is nothing to steer with while the lobby is open, and
+  binding the entrant ids means changing, adding, dropping or reordering one of
+  them changes the seed to something nobody chose.
+- **The ceremony version is inside the commitment.** Without it an operator
+  could commit under the ceremony above and then ship a record shaped like the
+  one that predates it; the verifier would fall back to the older chain, whose
+  hash it can still compute, and the downgrade would render green.
 - **Player strategies must never draw from the round's RNG.** The draw count is
   what makes replay work. Bots run on a separate stream for this reason.
 - **The client pins the commitment it saw during the lobby** and refuses a
   finished round whose commitment differs. Checking a server-supplied seed
   against a server-supplied hash that arrived in the same message proves only
   that the server can run sha256.
-- **The replayed seed and the revealed seed must be the same seed.** They are
-  two fields; if they are allowed to differ, an operator can commit to one seed,
-  play on another, and still show three green ticks.
+- **The replayed seed and the revealed secret must be one hash apart, checked.**
+  They are two fields; if they are allowed to drift, an operator commits to one
+  draw, plays on another, and still shows green ticks.
+- **A round nobody finished is still revealed.** A crash, a deploy restart or a
+  throw in the tick loop closes the round as `interrupted` and publishes its
+  secret, because a round that published a commitment and moved real SOL must
+  never become one the operator cannot be asked about. Such a round has no
+  outcome to replay against, and the panel says exactly that rather than
+  reporting a mismatch it has not found.
 
-All three are enforced by `verifyEntry` in `apps/web/src/game/client.ts` — the
+All of it is enforced by `verifyEntry` in `apps/web/src/game/client.ts` — the
 same code path a player's own browser runs, not a separate certifier that could
 drift from it.
 

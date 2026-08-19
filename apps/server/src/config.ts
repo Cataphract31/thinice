@@ -56,6 +56,27 @@ export const CONFIG = {
    * promise that auto keeps while you cannot act, and it is untouched here.
    */
   autoLapseMs: num("AUTO_LAPSE_MIN", 10, 0, 1440) * 60_000,
+  /**
+   * How long a resume token stays good for, in days.
+   *
+   * A resume token converts "holds these bytes" into "is this wallet", which
+   * is a seat, which is a money primitive: whoever holds one can bond the
+   * victim's plates, sit in the same lobby under their own wallet, extract
+   * theirs and let the victim's die. It used to last forever and could not be
+   * revoked. 30 days matches the arcade's own sessions, so a player who signs
+   * in once anywhere on the domain gets one answer to "how long am I signed
+   * in" rather than two. 0 disables expiry and is for local development only.
+   */
+  tokenTtlMs: num("TOKEN_TTL_DAYS", 30, 0, 365) * 86_400_000,
+  /**
+   * Resume attempts allowed per IP address, per minute.
+   *
+   * `resume` is the one message that turns a bearer string into a seat, so it
+   * is the one worth guessing at. 192 bits is not guessable, but a bucket
+   * costs nothing and is what stops a machine from finding out how fast this
+   * box can answer a timing comparison.
+   */
+  resumeTriesPerMin: num("RESUME_TRIES_PER_MIN", 10, 1, 1000),
 } as const;
 
 

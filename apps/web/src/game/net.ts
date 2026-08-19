@@ -421,6 +421,20 @@ export class NetClient {
   private commits = new Map<number, string>();
   /** Verification verdicts survive the server replacing the history array. */
   private receipts = new Map<number, Partial<HistoryEntry>>();
+  /**
+   * Plates asked for whose answer has not arrived yet, and the round they
+   * were asked in.
+   *
+   * Bonding is a message, and the server's reply is a state frame that cannot
+   * arrive until the arcade's books have answered -- an HTTP call away. With
+   * no local record of what has already been asked for, ten impatient presses
+   * were ten messages and, before the server learned to count in-flight
+   * stakes, ten stakes. The server owns the rule now; this stops the browser
+   * from asking for something it has already asked for, which is the
+   * difference between one refusal and five error toasts.
+   */
+  private pendingJoins = 0;
+  private pendingRound = 0;
   /** The room's talk. Server-relayed; the sender's echo is the receipt. */
   private chat: ChatMsg[] = [];
 
@@ -562,6 +576,16 @@ export class NetClient {
             ? { guest: this.extras.guest, address: this.extras.address }
             : undefined,
         };
+        // A plate that has landed is no longer pending. Counted as a delta so
+        // a frame that arrives for some other reason does not clear a request
+        // still in the air.
+        if (this.snap.roundId !== this.pendingRound) {
+          this.pendingRound = this.snap.roundId;
+          this.pendingJoins = 0;
+        } else {
+          const landed = this.snap.you.plates.total - prev.you.plates.total;
+          if (landed > 0) this.pendingJoins = Math.max(0, this.pendingJoins - landed);
+        }
         this.cue(prev, this.snap);
         this.emit();
         return;
@@ -602,6 +626,11 @@ export class NetClient {
       case "error": {
         const message = String(m.message ?? "");
         console.warn("server:", message);
+        // Some request was refused, and a refusal never moves the plate count
+        // — so without this the pending tally would only ever come back down
+        // at the next round, wedging the bond button for the rest of a lobby
+        // over one "not enough balance".
+        if (this.pendingJoins > 0) this.pendingJoins--;
         // A refused arcade session is a DEAD arcade session, and keeping the
         // cookie would make every reconnection offer the same dead token
         // forever, silently, while the player sits as a guest wondering why
@@ -791,7 +820,23 @@ export class NetClient {
     return this.extras;
   }
 
+  /**
+   * Buy a plate — at most as many as the round allows, counting the ones
+   * already asked for and not yet answered.
+   *
+   * The count is reset whenever the round changes or the server's own plate
+   * total catches up, so a dropped message costs one press rather than
+   * wedging the button for the rest of the lobby.
+   */
   join(): void {
+    const snap = this.snap;
+    if (snap.roundId !== this.pendingRound) {
+      this.pendingRound = snap.roundId;
+      this.pendingJoins = 0;
+    }
+    const held = snap.you.plates.total + this.pendingJoins;
+    if (held >= (snap.you.plates.max || 5)) return;
+    this.pendingJoins++;
     this.send({ t: "join" });
   }
 
@@ -819,9 +864,26 @@ export class NetClient {
 
   /** Steps off during the lobby: full refund, and auto play switches off. */
   stepOff(): void {
+    // Anything still in the air is no longer wanted. The server withdraws the
+    // same consent on its side the moment this message lands, so a hold that
+    // is still moving comes back instead of seating somebody who has left.
+    this.pendingJoins = 0;
     this.snap = { ...this.snap, auto: { ...this.snap.auto, enabled: false } };
     this.emit();
     this.send({ t: "unjoin" });
+  }
+
+  /**
+   * Give up the seat itself, not just this connection.
+   *
+   * The resume token is a bearer credential for a wallet's seat, and a seat
+   * can bond that wallet's plates. Disconnecting used to clear the browser's
+   * copy and leave the server's row valid forever, which made "disconnect" a
+   * statement about one device. This revokes it, then reconnects as nobody.
+   */
+  logout(): void {
+    this.send({ t: "logout" });
+    this.reauth(false);
   }
 
   /**

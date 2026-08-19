@@ -272,3 +272,68 @@ test("a trailing slash in the configured URL does not double up in the path", as
   await ledger.sweep();
   assert.equal(f.calls[0]!.url, "http://127.0.0.1:8080/api/ledger/sweep");
 });
+
+/* ---- the box-wide exposure register, which is a second door on the same arcade ---- */
+
+test("a reservation goes to the exposure register, not the ledger", async () => {
+  /*
+   * Thin Ice is self-funding -- the pot is the entrants' own stakes less rake
+   * -- so for the ordinary round the house is promised nothing. It stops being
+   * true on the recovery paths: holds released while a payout has already been
+   * made leave `ledger.settle` funding the difference from `~house` with
+   * `overdraft: true`. That is real house exposure and the operator's "is a
+   * payout still owed" decision reads exactly this total, so the round has to
+   * be in it.
+   */
+  const { ledger, calls } = ledgerWith({ body: { reserved: "1", key: "thin-ice:7" } });
+  await ledger.exposure.reserve(7, 2_450_000_000);
+  assert.match(calls[0]!.url, /\/api\/exposure\/reserve$/);
+  assert.equal(calls[0]!.method, "POST");
+  assert.deepEqual(calls[0]!.body, {
+    game: "thin-ice",
+    round: "7",
+    // A STRING. It is BigInt lamports on the arcade's side and JSON has no
+    // BigInt, so a number here is a rounding mode waiting to happen.
+    amount: "2450000000",
+  });
+});
+
+test("a reservation refused by the arcade arrives as something a caller can act on", async () => {
+  // The ceiling is enforced there and not here: two games asking at the same
+  // moment would both pass their own check, so the question and the answer
+  // have to happen in one call on the side that can see everybody.
+  const { ledger } = ledgerWith({
+    status: 409,
+    body: { error: { code: "OVER_ARCADE_EXPOSURE", message: "the whole arcade is full" } },
+  });
+  await assert.rejects(ledger.exposure.reserve(7, 1), (err: unknown) => {
+    assert.ok(err instanceof LedgerError);
+    assert.equal(err.code, "OVER_ARCADE_EXPOSURE");
+    assert.equal(err.status, 409);
+    return true;
+  });
+});
+
+test("an arcade with no register at all is distinguishable from one that failed", async () => {
+  // This client and the register's routes deploy from repositories that are
+  // pulled separately, so a server can be newer than the arcade beside it. A
+  // 404 turns the backstop off and says so; anything else is a failure. The
+  // status has to survive even when the body is not JSON, which is exactly
+  // what a fallback 404 handler tends to write.
+  const { ledger } = ledgerWith({ status: 404, text: "Not Found" });
+  await assert.rejects(ledger.exposure.sweep(), (err: unknown) => {
+    assert.ok(err instanceof LedgerError);
+    assert.equal(err.status, 404, "not flattened into a generic 502");
+    return true;
+  });
+});
+
+test("releasing and sweeping the register name this game and only this game", async () => {
+  const { ledger, calls } = ledgerWith({ body: { released: "1", dropped: 3 } });
+  await ledger.exposure.release(7);
+  assert.match(calls[0]!.url, /\/api\/exposure\/release$/);
+  assert.deepEqual(calls[0]!.body, { game: "thin-ice", round: "7" });
+  assert.equal(await ledger.exposure.sweep(), 3);
+  assert.match(calls[1]!.url, /\/api\/exposure\/sweep$/);
+  assert.deepEqual(calls[1]!.body, { game: "thin-ice" });
+});

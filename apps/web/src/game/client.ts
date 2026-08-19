@@ -2,6 +2,7 @@ import {
   canonicalConfig,
   outcomeDigest,
   replayRound,
+  roundSeedPreimage,
   type GameConfig,
   type RoundRecord,
 } from "@zinc/engine";
@@ -185,8 +186,25 @@ export async function sha256Hex(s: string): Promise<string | null> {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function commitPreimage(roundId: number, seedHex: string, rulesHash: string): string {
-  return `thinice:${roundId}:${seedHex}:${rulesHash}`;
+/**
+ * The commitment preimage, rebuilt here rather than taken from the server.
+ *
+ * `ceremony` is WHICH PROMISE the round was published under. Rounds from
+ * before the entrant set was bound into the draw carry no version and are
+ * checked against the string they were actually committed with -- the same
+ * courtesy `RoundRecord.config` extends to the rules. A round carrying a
+ * `sealNonce` claims the stronger ceremony and is checked against the stronger
+ * string, and that is what stops an operator committing under one and then
+ * shipping a record shaped like the other.
+ */
+export function commitPreimage(
+  roundId: number,
+  secretHex: string,
+  rulesHash: string,
+  ceremony = 2,
+): string {
+  const tag = ceremony > 1 ? `thinice:${ceremony}` : "thinice";
+  return `${tag}:${roundId}:${secretHex}:${rulesHash}`;
 }
 
 /*
@@ -220,14 +238,27 @@ export async function verifyEntry(h: HistoryEntry, expected: GameConfig): Promis
     // Replay under the rules recorded with the round, not the ones this build
     // ships: a round played before a config change is still an honest round.
     const rules = h.record.config ?? expected;
-    const replay = replayRound(rules, h.record);
-    h.replayOk = outcomeDigest(replay) === h.digest;
+
+    /*
+     * A ROUND THE SERVER NEVER FINISHED IS UNVERIFIABLE, NOT RIGGED.
+     *
+     * A crash or a throw inside the tick loop ends a round with no outcome:
+     * the seed is revealed and the entrant list is recorded, but there is
+     * nothing to replay it against. Replaying it anyway would run it to a
+     * conclusion it never reached and then call the invention a mismatch —
+     * condemning the operator for the one thing they did right, which is
+     * publishing the round at all instead of leaving it hidden. So the
+     * commitment is checked and the replay is reported as nothing to check.
+     */
+    const interrupted = h.record.interrupted === true;
+    const replay = interrupted ? null : replayRound(rules, h.record);
+    h.replayOk = replay ? outcomeDigest(replay) === h.digest : null;
 
     // Your own money, checked against the round rather than taken on trust.
     // Multi-betting means several seats; the claim is the BLENDED multiple,
     // so the check sums every one of your plates in the replay.
     const seats = h.yourSeats ?? [];
-    if (seats.length === 0) {
+    if (seats.length === 0 || !replay) {
       h.payoutOk = null;
     } else {
       const mine = replay.players.filter((p) => seats.includes(p.id));
@@ -240,14 +271,43 @@ export async function verifyEntry(h: HistoryEntry, expected: GameConfig): Promis
       h.payoutOk = mine.length === seats.length && Math.abs(actual - claimed) < 1e-6;
     }
 
-    // THE binding check. The replay runs on record.seedHex; the commitment is
-    // checked against the row's seedHex. Nothing else forces those to be the
-    // same value, and if they can differ then an operator commits to seed A,
-    // plays the round on seed B, and ships {commit(A), A, record(B)}: the
-    // replay agrees with itself, the hash agrees with itself, and a rigged
-    // round renders three green ticks. The two seeds must be one seed.
-    const seedsAgree =
-      h.record.seedHex !== undefined && h.record.seedHex === h.seedHex;
+    /*
+     * THE BINDING CHECK, AND IT IS THE ONE THAT DOES THE WORK.
+     *
+     * The replay runs on `record.seedHex`; the commitment is checked against
+     * the revealed value on the row. Nothing else forces those two to be
+     * related, and if they can drift apart then an operator commits to seed A,
+     * plays the round on seed B, and ships {commit(A), A, record(B)}: the
+     * replay agrees with itself, the hash agrees with itself, and a rigged
+     * round renders three green ticks.
+     *
+     * UNDER THE CURRENT CEREMONY THEY ARE NOT THE SAME VALUE, they are a hash
+     * apart. The revealed secret is what the lobby's commitment covered; the
+     * seed the round ran on is sha256(secret : sealNonce : entrant list), and
+     * rebuilding it here from the recorded list is what binds the ENTRANT SET
+     * to the draw. Change one id in that list, add one, drop one, or reorder
+     * two, and this recomputes a different seed than the round was played on.
+     *
+     * The old equality is kept for rounds published before the seal nonce
+     * existed, which were committed under the ceremony that did not have it.
+     */
+    const rec = h.record;
+    const ceremony = rec.sealNonce !== undefined ? 2 : 1;
+    let seedsAgree: boolean;
+    if (ceremony === 1) {
+      seedsAgree = rec.seedHex !== undefined && rec.seedHex === h.seedHex;
+    } else if (interrupted && !rec.seedHex) {
+      // Interrupted while the lobby was still open: no seed was ever drawn, so
+      // there is no derivation to check. The commitment over the secret is the
+      // whole of what a round in that state ever promised, and it is checked
+      // below like any other.
+      seedsAgree = true;
+    } else {
+      const derived = await sha256Hex(
+        roundSeedPreimage(h.seedHex, rec.sealNonce ?? "", rec.entrantIds),
+      );
+      seedsAgree = derived !== null && rec.seedHex === derived;
+    }
 
     // Likewise the commitment must be the one this client SAW before the round
     // sealed. Checking a server-supplied seed against a server-supplied hash
@@ -268,13 +328,15 @@ export async function verifyEntry(h: HistoryEntry, expected: GameConfig): Promis
       return;
     }
 
-    const hash = await sha256Hex(commitPreimage(h.roundId, h.seedHex, rulesHash));
+    const hash = await sha256Hex(commitPreimage(h.roundId, h.seedHex, rulesHash, ceremony));
     h.seedOk = seedsAgree && commitPinned && h.commit !== "" && hash === h.commit;
     h.rulesOk = canonical === canonicalConfig(expected);
     // Null receipts are "nothing to check here", not failures — only an
-    // outright false may condemn a round.
+    // outright false may condemn a round. An interrupted round has no replay
+    // and no payout to check, so its verdict rests on the commitment alone,
+    // which is the whole of what such a round ever promised.
     h.verified =
-      h.replayOk === true &&
+      h.replayOk !== false &&
       h.seedOk === true &&
       h.rulesOk === true &&
       h.payoutOk !== false;

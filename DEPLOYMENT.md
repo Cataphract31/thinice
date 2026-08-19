@@ -127,9 +127,19 @@ casinos. Scaling means sharding by table/room or moving the store — a real pie
 of work, not a config change.
 
 **A process supervisor.** systemd, pm2, Docker restart policy, whatever you use.
-The server is crash-safe by design: any round interrupted by a restart is
-refunded in full at startup, and that path was exercised during the beta by
-killing the server mid-round. It should still not be dying regularly.
+The server is crash-safe by design: any round interrupted by a restart has its
+open entries rolled back and its stakes released from arcade escrow at startup,
+and that path was exercised during the beta by killing the server mid-round. It
+should still not be dying regularly.
+
+Startup also *reveals* an interrupted round: it publishes the secret behind the
+commitment that round already showed players, marks it as one that never
+finished, and puts it in history where it can be checked. A round that took
+real SOL and can never be asked about is worse than a round that ended badly,
+so recovery closes the ceremony as well as the books. A clean `SIGTERM` does
+the same without waiting for the next boot. Note that a settled seat is left
+alone by all of this — a player who cashed out before the crash was genuinely
+paid, and this server has no power to take that back.
 
 **No outbound network access at all.** This server talks to its database and to
 the browsers connected to it, and to nothing else. It holds no keypair and

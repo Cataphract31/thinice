@@ -7,7 +7,8 @@ import { CONFIG } from "./config.ts";
 import { Database } from "./db.ts";
 import { createArcadeLedger } from "./arcade.ts";
 import { reportVendoredMoney } from "./vendorcheck.ts";
-import { CHARS, GameServer, type Session } from "./game.ts";
+import { CHARS, GameServer, roundSeedFrom, type Session } from "./game.ts";
+import { DEFAULT_CONFIG } from "@zinc/engine";
 import type { ClientMessage, NetChat, NetHistory, NetState, ServerMessage } from "./protocol.ts";
 
 const db = new Database();
@@ -43,6 +44,17 @@ const moneyRule = reportVendoredMoney();
 
 const refunded = db.refundOpenEntries();
 if (refunded > 0) console.log(`rolled back ${refunded} entries from an unfinished round`);
+/*
+ * AND THE ROUND ITSELF IS REVEALED RATHER THAN LEFT HANGING.
+ *
+ * A round the last process died inside published a commitment, took real SOL,
+ * and then never got a seed written -- and `historyFor` excludes a round with
+ * no `endedAt`, so it became one nobody could ever ask the operator to prove.
+ * Every crash and every deploy restart minted one. The secret was recorded
+ * when the lobby opened for exactly this moment.
+ */
+const revealed = db.revealInterrupted(DEFAULT_CONFIG, roundSeedFrom);
+if (revealed > 0) console.log(`revealed ${revealed} interrupted round(s) so they stay checkable`);
 if (ledger.enabled) {
   try {
     const released = await ledger.sweep();
@@ -52,6 +64,39 @@ if (ledger.enabled) {
     // holds stay open and the next restart sweeps them. Loud, because money
     // sitting in escrow with no round behind it is a thing somebody must see.
     console.error(`COULD NOT SWEEP STRANDED HOLDS: ${(err as Error).message}`);
+  }
+  /*
+   * AND THE ROOM THIS GAME WAS HOLDING IN THE BOX-WIDE REGISTER, AFTER THE
+   * HOLDS AND NEVER BEFORE THEM.
+   *
+   * Our exposure rows sit in the arcade's process, which keeps running when
+   * this one dies, so without this a crash leaves the box believing it owes
+   * payouts for rounds that no longer exist -- shrinking every other table's
+   * headroom with nothing alive to put it back. The arcade refuses this while
+   * a stake of ours is still in escrow (409 ROUNDS_IN_FLIGHT): one shared
+   * service key means no caller can prove who it is, so a live hold stands in
+   * as proof of a live round. Hence the order.
+   */
+  try {
+    const dropped = await ledger.exposure.sweep();
+    if (dropped > 0) console.log(`dropped ${dropped} stale exposure rows`);
+  } catch (err) {
+    const e = err as { status?: number; code?: string; message?: string };
+    if (e.status === 404) {
+      console.warn(
+        "this arcade has no exposure register route, so this table is not in the box-wide total.",
+      );
+    } else if (e.status === 409) {
+      // The hold sweep above did not land, so the arcade still sees a stake of
+      // ours in escrow and reads that as a live round. Worth saying plainly:
+      // the two failures are one failure, and the second is only the symptom.
+      console.error(
+        "EXPOSURE ROWS LEFT STANDING: the arcade still sees stakes of ours in escrow, so the" +
+          " hold sweep above is the thing that failed. Both clear on the next restart.",
+      );
+    } else {
+      console.error(`COULD NOT DROP STALE EXPOSURE ROWS: ${e.message}`);
+    }
   }
 }
 
@@ -165,6 +210,37 @@ const wss = new WebSocketServer({
 const MAX_SOCKETS = 300;
 const MAX_PER_IP = 6;
 const perIp = new Map<string, number>();
+
+/*
+ * RESUME ATTEMPTS PER IP, ACROSS SOCKETS.
+ *
+ * Every other bucket in this file is per socket, which is the right shape for
+ * flood control and the wrong shape for guessing at a credential: a caller
+ * that has used up one socket's budget opens another. `resume` is the message
+ * that turns a bearer string into a seat, and a seat is a money primitive --
+ * so its budget follows the IP, and reconnecting does not refill it.
+ *
+ * Swept on a timer rather than on use, so the map cannot grow with every
+ * address that ever knocked.
+ */
+const resumeTries = new Map<string, { n: number; at: number }>();
+const RESUME_WINDOW_MS = 60_000;
+setInterval(() => {
+  const cutoff = Date.now() - RESUME_WINDOW_MS;
+  for (const [ip, r] of resumeTries) if (r.at < cutoff) resumeTries.delete(ip);
+}, RESUME_WINDOW_MS).unref();
+
+/** True if this address may try `resume` again right now. */
+function mayResume(ip: string): boolean {
+  const now = Date.now();
+  const r = resumeTries.get(ip);
+  if (!r || now - r.at > RESUME_WINDOW_MS) {
+    resumeTries.set(ip, { n: 1, at: now });
+    return true;
+  }
+  r.n++;
+  return r.n <= CONFIG.resumeTriesPerMin;
+}
 
 // A socket-level error with no listener is thrown out of an I/O callback as
 // ERR_UNHANDLED_ERROR and takes the process down. ws emits 'error' on the
@@ -299,6 +375,29 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     syncBudget = Math.min(2, syncBudget + 1);
   }, 3000);
 
+  /*
+   * AND ONE FOR `join`, WHICH COSTS EVERYTHING `sync` COSTS PLUS A WRITE.
+   *
+   * `sync` was given a bucket of its own because it is "the one message in
+   * this protocol that costs an HTTP round trip to the arcade's ledger". That
+   * was true of `join` as well, and `join` also asks the books to WRITE -- a
+   * hold, inside a SQLite IMMEDIATE transaction that every game on this box
+   * shares. It had no bucket at all, so the global budget of 40 with 20/s
+   * refill, times MAX_PER_IP of 6, was roughly 120 ledger writes a second from
+   * one machine, free: `{t:"guest"}` needs no signature, and a caller that
+   * never gets a seat never trips a plate cap, so every message issued a fresh
+   * POST. (`game.join` turns a guest away before the round trip now, which
+   * closes the free half; this bounds the paid half.)
+   *
+   * Six now, one back every two seconds. Bonding five plates in one lobby is
+   * five messages and a round lasts about twenty seconds, so a player at the
+   * cap every single round never reaches this.
+   */
+  let joinBudget = 6;
+  const joinRefill = setInterval(() => {
+    joinBudget = Math.min(6, joinBudget + 1);
+  }, 2000);
+
   ws.on("message", (raw) => {
     // Clamped at zero and reported. Post-decrementing on every message drove
     // the counter unboundedly negative, so a burst muted the socket for
@@ -389,9 +488,15 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
 
       case "resume": {
-        // Bearer resume: same trust level as a guest id. Namespaced wallets
-        // (guests, bots) can never be resumed into — they have no signature
-        // ceremony, so nothing may claim them by token either.
+        // Bearer resume, and the one message that turns a string into a seat.
+        // Namespaced wallets (guests, bots) can never be resumed into — they
+        // have no signature ceremony, so nothing may claim them by token
+        // either. The token itself now expires; see db.authTokenOf.
+        if (session) return;
+        if (!mayResume(ip)) {
+          send({ t: "error", message: "too many attempts" });
+          return;
+        }
         const wallet = String(msg.wallet ?? "");
         const offered = String(msg.token ?? "");
         const stored = wallet.includes(":") ? null : db.authTokenOf(wallet);
@@ -402,6 +507,26 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
           return;
         }
         seat(wallet, false);
+        return;
+      }
+
+      case "logout": {
+        /*
+         * REVOCATION, WHICH THIS PROTOCOL DID NOT HAVE.
+         *
+         * Disconnecting a wallet cleared the browser's copy of the token and
+         * nothing else, so the row on this server stayed valid until the heat
+         * death of the box -- and that row is a seat, and a seat is a money
+         * primitive: whoever holds one can bond the victim's five plates, sit
+         * in the same lobby under their own wallet, extract theirs and let the
+         * victim's die. "Disconnect" has to mean the seat is gone, not that
+         * this device forgot it.
+         *
+         * Only ever the SESSION's own wallet. Taking one from the message
+         * would make this a button for logging strangers out.
+         */
+        if (!session || session.guest) return;
+        db.clearAuthToken(session.wallet);
         return;
       }
 
@@ -434,6 +559,19 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
       case "join": {
         if (!session) return;
+        // Guests have no account in the books, so a join from one can only
+        // ever be refused -- the same guard `sync` has had, for the same
+        // reason, on a message that costs strictly more. `game.join` says so
+        // again on its own side; this stops the message before it is dispatched.
+        if (session.guest) {
+          send({ t: "error", message: "connect a wallet to play for real" });
+          return;
+        }
+        if (joinBudget <= 0) {
+          send({ t: "error", message: "slow down" });
+          return;
+        }
+        joinBudget--;
         // Awaited now: buying a plate moves money, and money is an HTTP call
         // away. The socket handler is already async, so the only change is
         // that the refusal arrives when the books have actually answered.
@@ -535,6 +673,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     clearInterval(refill);
     clearInterval(chatRefill);
     clearInterval(syncRefill);
+    clearInterval(joinRefill);
     const left = (perIp.get(ip) ?? 1) - 1;
     if (left <= 0) perIp.delete(ip);
     else perIp.set(ip, left);
@@ -559,7 +698,10 @@ process.on("unhandledRejection", (err) => console.error("unhandled rejection", e
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
-    game.stop();
+    // Closes the open round rather than only stopping the clock: a deploy
+    // restart otherwise left a published commitment with no reveal, which the
+    // startup sweep can rescue the MONEY from but not the proof.
+    game.shutdown();
     db.close();
     process.exit(0);
   });

@@ -38,6 +38,7 @@ export class Database {
     this.db.exec("PRAGMA foreign_keys = ON");
     this.migrate();
     this.dropLocalBalance();
+    this.addRevealColumns();
   }
 
   private migrate(): void {
@@ -60,6 +61,19 @@ export class Database {
       CREATE TABLE IF NOT EXISTS rounds (
         id        INTEGER PRIMARY KEY,
         commit_   TEXT    NOT NULL,
+        /* The preimage of commit_, written when the lobby opens and NOT
+           published until the round closes.
+
+           WHY IT IS ON DISK AT ALL. It is only ever in memory otherwise, so a
+           round the process died inside could never be revealed by the process
+           that came after -- the commitment was published, real SOL moved, and
+           the one thing that could prove it honest went with the crash. It
+           gives an operator nothing they did not already have (they hold it in
+           memory for the whole lobby either way); what it buys is that a
+           restart can still keep the promise. Same for sealNonce, drawn when
+           the lobby seals. */
+        secret    TEXT    NOT NULL DEFAULT '',
+        sealNonce TEXT    NOT NULL DEFAULT '',
         seedHex   TEXT    NOT NULL DEFAULT '',
         entrants  INTEGER NOT NULL DEFAULT 0,
         ticks     INTEGER NOT NULL DEFAULT 0,
@@ -99,10 +113,19 @@ export class Database {
       );
 
       /* Wallet session tokens, minted on a successful signature and replayed
-         on later connects so Phantom is not asked to sign every socket. A
-         bearer credential with exactly the trust level of a guest id, which
-         is already a bearer credential for its balance: play-money grade.
-         Revisit before real money. */
+         on later connects so Phantom is not asked to sign every socket.
+
+         A BEARER CREDENTIAL FOR A SEAT, AND A SEAT IS A MONEY PRIMITIVE. It
+         used to live forever and could not be revoked: the at column was
+         written and never read, resume compared bytes and asked nothing else,
+         there was no logout in the protocol, and disconnecting a wallet
+         cleared only the browser's copy. The token also rides in a cookie
+         scoped to the whole arcade domain, so any XSS in any world on it
+         lifted a permanent one -- and a lifted seat is not griefing: seat the
+         victim, bond their five plates, enter the same lobby with your own
+         wallet, extract yours and let theirs die. It expires now
+         (CONFIG.tokenTtlMs, matching the arcade's own 30 days) and
+         clearAuthToken is the revocation path. */
       CREATE TABLE IF NOT EXISTS wallet_tokens (
         wallet TEXT PRIMARY KEY,
         token  TEXT NOT NULL,
@@ -135,6 +158,22 @@ export class Database {
    * Existing databases are playtest data with no real money behind them, so
    * whatever the column says is simply dropped rather than reconciled.
    */
+  /**
+   * `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists,
+   * so an installed database never grows a column the schema above gained.
+   * Added here rather than in a migration framework because there are two of
+   * them and both default to empty, which is exactly what a round opened
+   * before this change knows about itself.
+   */
+  private addRevealColumns(): void {
+    const cols = this.db.prepare("PRAGMA table_info(rounds)").all() as { name: string }[];
+    const has = (name: string): boolean => cols.some((c) => c.name === name);
+    if (!has("secret")) this.db.exec("ALTER TABLE rounds ADD COLUMN secret TEXT NOT NULL DEFAULT ''");
+    if (!has("sealNonce")) {
+      this.db.exec("ALTER TABLE rounds ADD COLUMN sealNonce TEXT NOT NULL DEFAULT ''");
+    }
+  }
+
   private dropLocalBalance(): void {
     const cols = this.db.prepare("PRAGMA table_info(players)").all() as { name: string }[];
     if (!cols.some((c) => c.name === "balance")) return;
@@ -209,46 +248,37 @@ export class Database {
   }
 
   /**
-   * Crash recovery, run once at startup before any round opens.
+   * Crash recovery, run at startup before any round opens and again whenever
+   * the tick loop has to abandon a round.
    *
-   * A round that never reached `closeRound` — the process died mid-round or
-   * mid-lobby — is rolled back in full: every entry in it is returned to its
-   * stake and its stats reversed, as if the round had never been played.
+   * A round that never reached `closeRound` is rolled back: every entry still
+   * OPEN in it is marked refunded and its stats un-counted, as if it never
+   * played. The stake itself comes back through `ledger.sweep()`, which
+   * releases the hold; this file only owns the game's own account of it.
    *
-   * "In full" is the part that took a second pass to get right. Refunding only
-   * the entries still marked 'in' looks correct and is not: by then the round
-   * may already have settled deaths and cash-outs, and a dead player's stake
-   * has been redistributed into the surviving balances. Refund only the
-   * survivors' stakes and that redistributed money is simply gone — the house
-   * quietly keeps it. So cash-outs are clawed back and deaths are made whole,
-   * which is the only reading under which the ledger still balances.
+   * IT USED TO REWRITE SETTLED ROWS TOO, AND THE HOUSE PAID FOR IT. The
+   * selection was `outcome <> 'refunded'`, which includes every seat that had
+   * already cashed or died, and each of them was rewritten to
+   * `outcome='refunded', returned=staked, multiple=1` -- decrementing
+   * `players.returned` by a payout the player had genuinely been paid and
+   * declaring a lost stake returned. Combined with the sweep releasing every
+   * still-open hold, one round could pay A 0.8 SOL out of B, C and D's stakes,
+   * hand B, C and D their stakes back in full, and leave `~house` covering the
+   * 0.7 SOL difference with `overdraft: true` and no cap on it. No crash was
+   * needed to trigger that: a deploy restart timed after a large extraction
+   * does it, which makes it something an attacker can wait for rather than
+   * something that happens to them.
    *
-   * The round row keeps its NULL endedAt: it is the audit trail of the crash,
-   * and history queries already exclude it.
-   */
-  /**
-   * Crash recovery, run once at startup before any round opens.
+   * The older comment on this method argued the opposite -- that cash-outs
+   * must be clawed back or the redistributed money is quietly kept -- and it
+   * was right about a single-sided balance column that no longer exists. A
+   * seat that settled settled: its hold was closed against an idempotent ref
+   * and the player was paid, and this game has no power to debit anybody to
+   * take that back. What is left open is exactly what is still owed.
    *
-   * A round that never reached `closeRound` is rolled back: every unsettled
-   * entry is marked refunded and its stats un-counted, as if it never played.
-   *
-   * WHAT CHANGED WHEN THE MONEY LEFT THIS FILE, because the old behaviour was
-   * stranger than it looked. This used to refund the stake AND CLAW BACK any
-   * payout already made in the orphaned round -- cash-outs reversed, deaths
-   * made whole -- on the grounds that refunding only the survivors would let
-   * the house quietly keep the redistributed money. That was the only reading
-   * under which a single-sided balance column still added up.
-   *
-   * It does not apply now and would be wrong if it did. A seat that settled
-   * settled: its hold was closed against an idempotent ref and the player was
-   * paid, and this game has no power to debit anybody to take it back. What is
-   * left open is exactly what is still owed, and `ledger.sweep()` returns it.
-   * A player who cashed out before the crash keeps what they were paid, which
-   * is what anybody would expect and what the old code went out of its way to
-   * undo.
-   *
-   * The round row keeps its NULL endedAt: it is the audit trail of the crash,
-   * and history queries already exclude it.
+   * The round row keeps its NULL endedAt unless the caller closes it: it is
+   * the audit trail of the crash. `closeInterrupted` is how a round that has
+   * been rolled back still gets its seed revealed.
    *
    * @returns the entries rolled back, for the caller to log
    */
@@ -257,7 +287,7 @@ export class Database {
       .prepare(
         `SELECT e.roundId, e.wallet, e.staked, e.returned, e.outcome, e.seat
            FROM entries e JOIN rounds r ON r.id = e.roundId
-          WHERE r.endedAt IS NULL AND e.outcome <> 'refunded'`,
+          WHERE r.endedAt IS NULL AND e.outcome = 'in'`,
       )
       .all() as {
       roundId: number;
@@ -271,23 +301,25 @@ export class Database {
     this.db.exec("BEGIN");
     try {
       for (const o of orphans) {
-        const wonBack = o.outcome === "cashed" && o.returned >= o.staked ? 1 : 0;
+        // Only the stake and the round count come off. An open entry has been
+        // paid nothing, so there is no `returned` to reverse and no win to
+        // un-count -- and the settled rows that DO carry those numbers are no
+        // longer selected, because reversing a payout the player has actually
+        // received is a lie the books cannot see.
         this.db
           .prepare(
             `UPDATE players
                 SET wagered = wagered - ?,
-                    returned = returned - ?,
-                    roundsPlayed = roundsPlayed - 1,
-                    roundsWon = roundsWon - ?
+                    roundsPlayed = roundsPlayed - 1
               WHERE wallet = ?`,
           )
-          .run(o.staked, o.returned, wonBack, o.wallet);
+          .run(o.staked, o.wallet);
         // Per seat, not per wallet: a multi-plate wallet has one row per
         // plate in the orphaned round and each is its own refund.
         this.db
           .prepare(
             `UPDATE entries SET outcome = 'refunded', returned = staked, multiple = 1
-              WHERE roundId = ? AND wallet = ? AND seat = ?`,
+              WHERE roundId = ? AND wallet = ? AND seat = ? AND outcome = 'in'`,
           )
           .run(o.roundId, o.wallet, o.seat);
       }
@@ -314,13 +346,25 @@ export class Database {
     return r.returned;
   }
 
-  openRound(id: number, commit: string, startedAt: number): void {
+  /**
+   * Open a round, recording the commitment AND the secret behind it.
+   *
+   * The secret is not published by this: `historyFor` reads `seedHex`, which
+   * stays empty until the round closes. It is written here so that a round the
+   * process dies inside can still be revealed by the process that replaces it.
+   */
+  openRound(id: number, commit: string, startedAt: number, secret = ""): void {
     this.db
       .prepare(
-        `INSERT INTO rounds (id, commit_, startedAt) VALUES (?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET commit_ = excluded.commit_`,
+        `INSERT INTO rounds (id, commit_, secret, startedAt) VALUES (?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET commit_ = excluded.commit_, secret = excluded.secret`,
       )
-      .run(id, commit, startedAt);
+      .run(id, commit, secret, startedAt);
+  }
+
+  /** The seal nonce, once the entrant list is final. See the schema comment. */
+  sealRound(id: number, sealNonce: string): void {
+    this.db.prepare("UPDATE rounds SET sealNonce = ? WHERE id = ?").run(sealNonce, id);
   }
 
   /**
@@ -504,6 +548,97 @@ export class Database {
       );
   }
 
+  /**
+   * Close a round nobody could finish, and reveal what it committed to.
+   *
+   * A round that never reaches `closeRound` keeps a NULL `endedAt` and an
+   * empty `seedHex` forever, and `historyFor` excludes it -- so a round that
+   * published a commitment, ran, and moved real SOL becomes one the operator
+   * can never be asked to prove. For a game whose fairness claim IS the
+   * commit-reveal ceremony, every crash and every deploy restart minted one of
+   * those, silently. The audit trail argument for leaving the row open was
+   * about a round the recovery sweep had not touched yet; once it HAS been
+   * rolled back, an unclosed row is not evidence of anything, it is a round
+   * hidden from the only people entitled to check it.
+   *
+   * No winner, no pot, no digest: there is no outcome to record. The record
+   * says `interrupted`, which is what tells a verifier to check the
+   * commitment and report the replay as not applicable rather than failed.
+   * `endedAt IS NULL` in the WHERE so this can never overwrite a round that
+   * actually finished.
+   */
+  closeInterrupted(
+    id: number,
+    secretHex: string,
+    entrants: number,
+    ticks: number,
+    record: string,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE rounds SET seedHex = ?, entrants = ?, ticks = ?, record = ?, endedAt = ?
+          WHERE id = ? AND endedAt IS NULL`,
+      )
+      .run(secretHex, entrants, ticks, record, Date.now(), id);
+  }
+
+  /**
+   * Reveal every round the last process never closed. Run once at startup,
+   * after the entries have been rolled back.
+   *
+   * `closeInterrupted` covers the round this process aborts itself. This
+   * covers the other two ways a round ends without closing, which are the
+   * common ones: the box dies, or a deploy restarts the service. Both used to
+   * leave a round that published a commitment, took real SOL and was excluded
+   * from history forever -- unprovable by construction, and minted on every
+   * single deploy.
+   *
+   * It can only reveal what was written down. The secret was (see openRound),
+   * the seal nonce was, and the entrant list is recoverable from the entry
+   * rows in seat order -- which is the order the seats were issued in and
+   * therefore the order they were sealed in. That is enough to rebuild the
+   * seed the round ran on. The cash-out schedule is not: it lived in memory,
+   * so there is no replay, and the record says so rather than implying one.
+   *
+   * `deriveSeed` is passed in rather than imported so this file stays free of
+   * the ceremony; game.ts owns that string and hashes it.
+   *
+   * @returns the rounds revealed, for the caller to log
+   */
+  revealInterrupted(
+    config: unknown,
+    deriveSeed: (secret: string, sealNonce: string, entrantIds: number[]) => string,
+  ): number {
+    const open = this.db
+      .prepare("SELECT id, secret, sealNonce FROM rounds WHERE endedAt IS NULL")
+      .all() as { id: number; secret: string; sealNonce: string }[];
+    let revealed = 0;
+    for (const r of open) {
+      const seats = this.db
+        .prepare("SELECT seat FROM entries WHERE roundId = ? ORDER BY seat ASC")
+        .all(r.id) as { seat: number }[];
+      const entrantIds = seats.map((s) => s.seat);
+      this.closeInterrupted(
+        r.id,
+        r.secret,
+        entrantIds.length,
+        0,
+        JSON.stringify({
+          interrupted: true,
+          // Empty when the process died before the lobby sealed, which is the
+          // honest answer: no seed was ever drawn for that round.
+          seedHex: r.sealNonce ? deriveSeed(r.secret, r.sealNonce, entrantIds) : "",
+          sealNonce: r.sealNonce,
+          config,
+          entrantIds,
+          cashOuts: [],
+        }),
+      );
+      revealed++;
+    }
+    return revealed;
+  }
+
   lastRoundId(): number {
     const r = this.db.prepare("SELECT MAX(id) AS id FROM rounds").get() as { id: number | null };
     return r.id ?? 0;
@@ -570,11 +705,33 @@ export class Database {
       .run(wallet, token, Date.now());
   }
 
+  /**
+   * The wallet's live token, or null once it has aged out.
+   *
+   * `at` was written by `setAuthToken` from the beginning and read by nothing,
+   * so every token this server ever minted was valid forever. The row is
+   * deleted rather than merely refused: an expired credential kept on disk is
+   * a credential, and this way one stale row cannot outlive the wallet.
+   */
   authTokenOf(wallet: string): string | null {
     const r = this.db
-      .prepare("SELECT token FROM wallet_tokens WHERE wallet = ?")
-      .get(wallet) as { token: string } | undefined;
-    return r?.token ?? null;
+      .prepare("SELECT token, at FROM wallet_tokens WHERE wallet = ?")
+      .get(wallet) as { token: string; at: number } | undefined;
+    if (!r) return null;
+    if (CONFIG.tokenTtlMs > 0 && Date.now() - Number(r.at) > CONFIG.tokenTtlMs) {
+      this.clearAuthToken(wallet);
+      return null;
+    }
+    return r.token;
+  }
+
+  /**
+   * Revocation. Disconnecting a wallet used to clear the BROWSER's copy only,
+   * which meant the server row stayed valid forever and "disconnect" was a
+   * statement about one device rather than about the seat.
+   */
+  clearAuthToken(wallet: string): void {
+    this.db.prepare("DELETE FROM wallet_tokens WHERE wallet = ?").run(wallet);
   }
 
   getMeta(key: string): string | null {

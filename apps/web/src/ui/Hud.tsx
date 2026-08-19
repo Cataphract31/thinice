@@ -652,6 +652,11 @@ export function ActionBar({
         // still hammering it would extract at 0.95× before they can read.
         // Nothing can shatter during grace, so keeping extraction shut for
         // those ticks costs the player exactly nothing.
+        //
+        // THE SERVER REFUSES IT TOO, and this is only the affordance. It was
+        // this check alone for a while, which made the rule a suggestion: a
+        // scripted client sent `cashout` on tick 0 and banked below its own
+        // stake. See `cashOut` in game.ts, which draws the same boundary.
         const s = Math.max(
           1,
           Math.ceil((snap.graceRemaining * DEFAULT_CONFIG.timing.tickMs) / 1000),

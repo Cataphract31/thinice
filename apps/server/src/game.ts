@@ -6,12 +6,13 @@ import {
   hazardAt,
   outcomeDigest,
   rngFromSeedHex,
+  roundSeedPreimage,
   totalRake,
   type Entrant,
   type GameConfig,
 } from "@zinc/engine";
 import { CONFIG, toLamports, toSol } from "./config.ts";
-import { Database } from "./db.ts";
+import { Database, type PlayerRow } from "./db.ts";
 import { LedgerError, type ArcadeLedger } from "./arcade.ts";
 import type { NetChat, NetHistory, NetPlayer, NetState } from "./protocol.ts";
 
@@ -29,19 +30,43 @@ function sha256Hex(s: string): string {
 }
 
 /**
+ * THE CEREMONY THIS SERVER RUNS, as a version number inside the commitment.
+ *
+ * A round that binds its entrant set (see `roundSeedPreimage`) and one that
+ * does not are different promises, and a verifier has to be able to tell which
+ * promise it is holding. Without the tag an operator could commit under the
+ * strong ceremony and then ship a record shaped like the weak one -- the
+ * record's own `sealNonce` would be missing, the verifier would fall back to
+ * the old chain, and the downgrade would render as three green ticks. With it,
+ * the fallback simply does not hash to the published commitment.
+ *
+ * Rounds published before this existed carry no version and verify under the
+ * ceremony they were played under, which is the same rule `RoundRecord.config`
+ * already applies to the rules.
+ */
+export const CEREMONY = 2;
+
+/**
  * What the published hash is a hash of. The rules hash is in here alongside
- * the seed so the commitment covers the game that was actually played, not
+ * the secret so the commitment covers the game that was actually played, not
  * just the dice it was played with.
+ *
+ * `secretHex` IS NOT THE SEED THE ROUND RUNS ON, and has not been since the
+ * entrant set was bound into the draw. It is the half of the seed that is
+ * committed to before anybody joins; the other half is drawn when the lobby
+ * seals and the two are hashed together with the entrant list. See
+ * `roundSeedPreimage` in the engine for why the seed cannot be known while
+ * the entrant set is still being decided.
  *
  * EXPORTED SO IT CAN BE TESTED, not because anything else calls it. This
  * string is the whole ceremony: a verifier recomputes it from the revealed
- * seed and checks it against the hash published before the round sealed. It
+ * secret and checks it against the hash published before the round sealed. It
  * used to be private, which meant the only way to cover it was to restate the
  * format in a test -- a second copy that would keep agreeing with itself long
  * after the real one moved.
  */
-export function commitPreimage(roundId: number, seedHex: string, rulesHash: string): string {
-  return `thinice:${roundId}:${seedHex}:${rulesHash}`;
+export function commitPreimage(roundId: number, secretHex: string, rulesHash: string): string {
+  return `thinice:${CEREMONY}:${roundId}:${secretHex}:${rulesHash}`;
 }
 
 /** The rules every round is committed under, hashed over their canonical form. */
@@ -49,9 +74,27 @@ export function rulesHashOf(config: GameConfig): string {
   return sha256Hex(canonicalConfig(config));
 }
 
-/** The hash published before a round seals. Revealed seed + these rules = this. */
-export function commitmentFor(roundId: number, seedHex: string, rulesHash: string): string {
-  return sha256Hex(commitPreimage(roundId, seedHex, rulesHash));
+/** The hash published before a round seals. Revealed secret + these rules = this. */
+export function commitmentFor(roundId: number, secretHex: string, rulesHash: string): string {
+  return sha256Hex(commitPreimage(roundId, secretHex, rulesHash));
+}
+
+/**
+ * The seed the round actually runs on, once the lobby has sealed.
+ *
+ * Derived rather than drawn, so the entrant list is inside it: see
+ * `roundSeedPreimage` in the engine, which is the string both this server and
+ * every player's browser build. The full digest is stored and only its first
+ * 128 bits reach the RNG -- `rngFromSeedHex` takes four 32-bit words -- so the
+ * recorded seed is the whole hash and nothing about it is a truncation
+ * somebody has to remember.
+ */
+export function roundSeedFrom(
+  secretHex: string,
+  sealNonce: string,
+  entrantIds: number[],
+): string {
+  return sha256Hex(roundSeedPreimage(secretHex, sealNonce, entrantIds));
 }
 
 /**
@@ -105,6 +148,11 @@ export class GameServer {
   private nextSeatId = 1;
 
   private sessions = new Set<Session>();
+  /** The committed half of the seed, drawn at lobby open and revealed at close. */
+  private secretHex = "";
+  /** The other half, drawn when the lobby seals. Empty until then, on purpose. */
+  private sealNonce = "";
+  /** The seed the round runs on: derived from both halves plus the entrants. */
   private seedHex = "";
   private commit = "";
   /** Hash of the rules every round is committed under. Fixed for the process. */
@@ -146,8 +194,79 @@ export class GameServer {
    */
   private balances = new Map<string, { free: number; held: number }>();
 
-  /** Seats whose ledger settlement has not been confirmed. Retried at close. */
-  private unsettled = new Set<number>();
+  /*
+   * SEATS WHOSE LEDGER SETTLEMENT HAS NOT BEEN CONFIRMED, KEYED BY ROUND AND
+   * SEAT BECAUSE A SEAT NUMBER ALONE IS NOT AN IDENTITY.
+   *
+   * `nextSeatId` restarts at 1 every lobby, so seat 3 exists in almost every
+   * round and this set held only the number. Round R's seat 3 wins 8x, the
+   * settle is fired and the books are briefly down, so `3` stays pending.
+   * Round R+1 opens, a different player takes seat 3, dies, settles for zero,
+   * and its `.then()` deleted `3` -- round R's entry, for round R+1's event.
+   * `reconcileRound` did the same from the other side: `owedFor(R+1, 3)` looks
+   * up by round and seat and would have answered for the wrong round entirely.
+   *
+   * Either way round R's winner was never paid, their hold stayed open until a
+   * restart, and the startup sweep then RELEASED it -- handing back a 0.1 SOL
+   * stake in place of 0.8 SOL of winnings. Keyed properly, the two entries
+   * cannot touch each other.
+   */
+  private unsettled = new Map<string, { roundId: number; seat: number }>();
+
+  /*
+   * HOLDS THE BOOKS WOULD NOT GIVE BACK, WAITING FOR ANOTHER ASK.
+   *
+   * A settlement has a durable retry -- `unsettled` plus `reconcileBooks` --
+   * and a release had nothing but the startup sweep, which only runs when the
+   * process next restarts. That is a player who stepped off in the lobby,
+   * whose local row is already deleted, watching their stake sit in escrow for
+   * however long this process happens to stay up. Same shape, same retry.
+   */
+  private unreleased = new Map<string, { roundId: number; seat: number; why: string }>();
+
+  /*
+   * WHAT A WALLET HAS ASKED FOR RIGHT NOW, INCLUDING MONEY STILL IN FLIGHT.
+   *
+   * `seatsOf` is written AFTER the ledger answers, which leaves a whole
+   * network round trip in which the server's honest answer to "how many plates
+   * does this wallet hold" is zero. Everything that guards a wallet read that
+   * number, so during the gap every guard was open at once:
+   *
+   *   ten `join` messages in one tick all passed the plate cap and sent ten
+   *   holds, because each of them read an empty list;
+   *
+   *   `unjoin` found nothing to refund, answered "nothing was wrong", and the
+   *   holds landed anyway -- the player pressed step off, was told it worked,
+   *   and was bonded five deep in a round they had explicitly left;
+   *
+   *   `autoEnter` runs every 50ms and skips a wallet only once `seatsOf` has
+   *   it, so a 250ms ledger -- ordinary, since the arcade's books are one
+   *   SQLite IMMEDIATE transaction shared with every other game on the box --
+   *   fired five auto-buys for a player who had configured one plate.
+   *
+   * One structure closes all three, because they are one bug. `inFlight` is
+   * counted as if it were a seat, so the caps hold across the await.
+   * `generation` is bumped by `unjoin`: a join that started under an older
+   * generation has had its consent withdrawn while its money was moving, and
+   * gives the stake straight back rather than seating somebody who left.
+   * `autoBusy` is what stops auto from racing itself.
+   */
+  private intents = new Map<string, { inFlight: number; generation: number; autoBusy: boolean }>();
+
+  /** Seats being paid for right now, across every wallet: the field cap's half. */
+  private seatsInFlight = 0;
+
+  /*
+   * PLAYER ROWS FOR THE PASS CURRENTLY BEING BUILT, AND NO LONGER.
+   *
+   * `stateFor` reads a row per session and `broadcast` calls it per session,
+   * so a full lattice was 250 SQLite reads every 200ms to render numbers that
+   * change once a round. Set for the duration of one broadcast or one tick and
+   * dropped in a `finally`: a cache that outlived the pass would be a second
+   * answer to "what are this player's settings", which is exactly what
+   * `rowFor` exists to prevent.
+   */
+  private passRows: Map<string, PlayerRow> | null = null;
 
   constructor(private db: Database, private ledger: ArcadeLedger) {
     this.rulesHash = rulesHashOf(this.config);
@@ -168,8 +287,33 @@ export class GameServer {
    *
    * One accessor, so there is no second place to forget.
    */
-  private rowFor(s: Session) {
-    return s.guest ? Database.spectatorRow(s.wallet) : this.db.player(s.wallet);
+  private rowFor(s: Session): PlayerRow {
+    const cached = this.passRows?.get(s.wallet);
+    if (cached) return cached;
+    const row = s.guest ? Database.spectatorRow(s.wallet) : this.db.player(s.wallet);
+    this.passRows?.set(s.wallet, row);
+    return row;
+  }
+
+  /** The intent record for a wallet, created on first use. */
+  private intentFor(wallet: string): { inFlight: number; generation: number; autoBusy: boolean } {
+    let i = this.intents.get(wallet);
+    if (!i) {
+      i = { inFlight: 0, generation: 0, autoBusy: false };
+      this.intents.set(wallet, i);
+    }
+    return i;
+  }
+
+  /**
+   * Plates a wallet holds THIS ROUND, counting the ones still being paid for.
+   *
+   * The whole point: a stake whose hold is in the air is a plate the player
+   * has committed to, and every cap in this file has to see it that way or it
+   * is not a cap at all -- it is a cap on how fast the ledger answers.
+   */
+  private platesOf(wallet: string): number {
+    return (this.seatsOf.get(wallet)?.length ?? 0) + (this.intents.get(wallet)?.inFlight ?? 0);
   }
 
   /** Remember what the books last said about a wallet. Display only. */
@@ -206,24 +350,90 @@ export class GameServer {
   }
 
   /**
-   * The emergency exit for a round the loop could not finish: roll it back
-   * exactly like the startup sweep would after a crash — every entry
-   * refunded, cash-outs clawed back, the round row left open as the audit
-   * trail — then reopen the lobby. The in-memory ticket ledgers may briefly
-   * carry the aborted round's accruals (they re-sync from the database on
-   * the next restart); that dust is accepted, because the alternative was a
-   * room that sits in "live" forever with everyone's stake locked.
+   * The emergency exit for a round the loop could not finish.
+   *
+   * IT DOES WHAT THE STARTUP PATH DOES, AND IT USED TO DO HALF OF IT. The
+   * comment here claimed it rolled a round back "exactly like the startup
+   * sweep would after a crash". Startup (index.ts) does two things:
+   * `db.refundOpenEntries()` AND `await ledger.sweep()`. This did only the
+   * first. So on any throw inside `loop()` the local rows were stamped
+   * 'refunded' with `returned = staked` while every lamport of every stake
+   * stayed in arcade escrow -- the books and the game disagreeing, in writing,
+   * until somebody restarted the process. From the player's side that is their
+   * money reading `held` rather than `free` in every game on the box, with no
+   * round anywhere behind it.
+   *
+   * Four things happen here now, and the round comes out of it verifiable:
+   *
+   *   the local entries are rolled back;
+   *   the round is CLOSED as interrupted, revealing its seed, so it does not
+   *     become a round that took real money and can never be proved (see
+   *     db.closeInterrupted);
+   *   the holds are swept, which is the half that was missing;
+   *   and the in-memory round is actually cleared -- `seats` and `unsettled`
+   *     stayed populated, so `viewOf` reported every player as still "in" for
+   *     the whole 6.5s result phase of a round that had already died.
+   *
+   * The startup sweep remains the backstop for whatever cannot be reached from
+   * a process that is already in trouble.
    */
   private abortRound(err: unknown): void {
-    console.error("round aborted", this.roundId, err);
+    const aborted = this.roundId;
+    console.error("round aborted", aborted, err);
     try {
       this.db.refundOpenEntries();
     } catch (e) {
       console.error("abort refund failed", e);
     }
+    // Reveal what was committed. A round that published a commitment and ran
+    // is one an operator can be asked to prove; leaving it unclosed made every
+    // crash and every deploy restart mint a round outside the ceremony.
+    try {
+      this.closeInterrupted(aborted);
+    } catch (e) {
+      console.error("abort reveal failed", e);
+    }
+    /*
+     * AND THE MONEY, WHICH IS THE HALF THIS USED TO SKIP.
+     *
+     * Not awaited, because this runs inside the interval callback's catch and
+     * there is nothing here that can wait. Idempotent on the arcade's side, so
+     * the startup sweep repeating it later costs one request.
+     *
+     * HOLDS FIRST, THEN THE EXPOSURE ROW, IN THAT ORDER. The arcade treats a
+     * stake still sitting in `~escrow` as proof that the round is still in
+     * flight -- one shared service key means the books have to stand in for
+     * identity -- so the register refuses to drop this game's rows while any
+     * hold is open. Releasing the room before the money would be asking in the
+     * order that cannot work.
+     */
+    void this.ledger
+      .sweep()
+      .then((n) => {
+        if (n > 0) console.log(`[thin-ice] abort released ${n} stranded holds`);
+        for (const s of this.sessions) void this.refreshBalance(s.wallet);
+      })
+      .catch((e) =>
+        console.error(
+          `[thin-ice] ABORT COULD NOT RELEASE HOLDS for r${aborted}: ${(e as Error).message}` +
+            " -- stakes stay in escrow until this process restarts",
+        ),
+      )
+      .finally(() => void this.releaseExposure(aborted));
     try {
       this.round = null;
+      this.seats.clear();
+      this.seatsOf.clear();
       this.settled.clear();
+      // The sweep above releases every hold this game has open -- not only
+      // this round's -- so any settlement still queued is a payout against a
+      // hold that no longer exists. Retrying them would ask the books to pay
+      // against refs that have just been closed, forever and to no effect.
+      this.unsettled.clear();
+      this.winner = null;
+      this.winnerWallet = null;
+      this.soleOwnerWallet = null;
+      this.outlastedWallet = null;
       this.phase = "result";
       this.phaseEnd = Date.now() + this.config.timing.resultMs;
       this.broadcast(true);
@@ -232,9 +442,72 @@ export class GameServer {
     }
   }
 
+  /**
+   * Close a round nobody finished, so it stays inside the ceremony.
+   *
+   * An interrupted round never reaches `closeRound`, so it never had a seed
+   * written and `historyFor` excluded it -- which made it a round that
+   * published a commitment, ran, moved real SOL, and can never be checked by
+   * anybody. For a product whose fairness claim IS the commit-reveal, that is
+   * the worst possible thing to leave behind, and every crash and every deploy
+   * restart minted one.
+   *
+   * What is revealed is what is true: the secret behind the published hash,
+   * the seal nonce and entrant list if the round had sealed, and the exits it
+   * managed before it died. There is no outcome digest because there is no
+   * outcome; the record says `interrupted` so a verifier checks the
+   * commitment and reports the replay as not applicable rather than failed.
+   */
+  private closeInterrupted(roundId: number): void {
+    const round = this.round;
+    const entrantIds = round ? round.players.map((p) => p.id) : [...this.seats.keys()];
+    this.db.closeInterrupted(
+      roundId,
+      this.secretHex,
+      entrantIds.length,
+      round?.currentTick ?? 0,
+      JSON.stringify({
+        interrupted: true,
+        // Empty while the round was still in the lobby: there was no seed yet,
+        // which is the point of drawing it at the seal. The commitment is
+        // still checkable, and that is the whole of what such a round promised.
+        seedHex: this.seedHex,
+        sealNonce: this.sealNonce,
+        config: this.config,
+        entrantIds,
+        cashOuts: round ? round.cashOutLog : [],
+      }),
+    );
+  }
+
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  /**
+   * A CLEAN STOP CLOSES THE ROUND INSTEAD OF JUST STOPPING THE CLOCK.
+   *
+   * `stop()` only cancels the timer, so a deploy restart left the open round
+   * exactly as a crash would: entries still 'in', stakes still in escrow, and
+   * -- worst -- a published commitment with no reveal, excluded from history
+   * forever. The startup sweep makes that survivable, but a shutdown we chose
+   * should not need rescuing, and the reveal is the part the sweep alone
+   * cannot do honestly for anybody watching.
+   *
+   * Synchronous, because a signal handler has no time to await anything. The
+   * local half is done here; the escrow is handed back by the next boot's
+   * sweep, which is the same guarantee a crash gets.
+   */
+  shutdown(): void {
+    this.stop();
+    if (this.phase === "result" && !this.round) return;
+    try {
+      this.db.refundOpenEntries();
+      this.closeInterrupted(this.roundId);
+    } catch (err) {
+      console.error("shutdown could not close the open round", err);
+    }
   }
 
   attach(s: Session): void {
@@ -308,16 +581,45 @@ export class GameServer {
     this.outlastedWallet = null;
     this.phaseEnd = Date.now() + this.config.timing.lobbyMs;
 
-    // Commit-reveal, run server side: the seed is drawn from the OS CSPRNG and
-    // its hash is published before anybody is sealed in. The seed itself is
-    // released only once the round is over, so nobody — including whoever runs
-    // this process — can know an outcome in advance and act on it.
-    // 128 bits, not 32. A 32-bit seed makes the published commitment an oracle
-    // an attacker can simply enumerate during the lobby — see rngFromSeedHex.
-    this.seedHex = randomBytes(16).toString("hex");
-    this.commit = commitmentFor(this.roundId, this.seedHex, this.rulesHash);
-    this.db.openRound(this.roundId, this.commit, Date.now());
+    // Intents for wallets with nothing in the air are last round's business.
+    // Anything still in flight keeps its entry: its `generation` is what a
+    // landing hold compares against, and dropping the record would tell a join
+    // whose consent was withdrawn that it still had it.
+    for (const [wallet, i] of this.intents) {
+      if (i.inFlight === 0 && !i.autoBusy) this.intents.delete(wallet);
+    }
 
+    /*
+     * COMMIT-REVEAL, RUN SERVER SIDE, IN TWO HALVES.
+     *
+     * The half drawn here is a SECRET, not the seed: 128 bits from the OS
+     * CSPRNG whose hash is published before anybody is sealed in, and which is
+     * revealed once the round is over. 128 bits and not 32, because a 32-bit
+     * value makes the published commitment an oracle an attacker enumerates
+     * inside the lobby -- see rngFromSeedHex.
+     *
+     * THE SEED ITSELF IS NOT DRAWN UNTIL THE LOBBY SEALS, and that is the fix
+     * for something the commitment never covered. Elimination consumes one
+     * draw per live player in join order and the hazard curve reads
+     * live/total, so a seed known during the lobby makes who dies a pure
+     * function of join order and entrant count -- both of which this server
+     * decides, after seeing it. No grinding required; one honest seed and a
+     * free choice of ordering picks the winner, and the replay still verifies
+     * because the record honestly states the order that was used. There is now
+     * nothing to steer with while the lobby is open. See seal().
+     */
+    this.secretHex = randomBytes(16).toString("hex");
+    this.sealNonce = "";
+    this.seedHex = "";
+    this.commit = commitmentFor(this.roundId, this.secretHex, this.rulesHash);
+    // The secret rides along, unpublished, so a round this process dies inside
+    // can still be revealed by the process that replaces it. See db.openRound.
+    this.db.openRound(this.roundId, this.commit, Date.now(), this.secretHex);
+
+    // Anything the books refused last round, asked again now that nothing is
+    // watching the clock. Lobby-time releases especially: a player who stepped
+    // off has no round left to reconcile them against.
+    void this.reconcileBooks();
 
     this.autoJoin();
     this.broadcast(true);
@@ -360,12 +662,34 @@ export class GameServer {
    * HTTP call. Its callers run inside the lobby, which is a waiting phase with
    * seconds to spare, so the buy landing a moment later is invisible -- and a
    * refusal was always the normal outcome for a wallet that cannot cover it.
+   *
+   * ONE OF THESE PER WALLET AT A TIME, AND THE TARGET IS CARRIED INTO THE BUY.
+   *
+   * Neither guard existed, and together they charged honest players five times
+   * what they had configured. `autoEnter` runs off the 50ms loop and skipped a
+   * wallet only once `seatsOf` had it -- which happens after the ledger
+   * answers -- so a hold taking T ms fired ceil(T/50) independent auto-buys
+   * before the first recorded anything, plus one more from `autoJoin` at the
+   * top of the lobby. Each survived its own post-await re-check because that
+   * check enforced the GLOBAL cap of five and never the caller's own target.
+   * A player with auto on and one plate configured was charged 0.5 SOL a round
+   * instead of 0.1, for as long as the ledger was busy, without touching
+   * anything. 250ms is enough to saturate the cap, and the arcade's books are
+   * one SQLite IMMEDIATE transaction shared with every game on the box.
    */
   private async autoBuy(s: Session, want: number): Promise<void> {
-    const target = Math.min(Math.max(1, want), CONFIG.maxPlatesPerWallet);
-    while ((this.seatsOf.get(s.wallet)?.length ?? 0) < target) {
-      if (this.phase !== "lobby") break;
-      if ((await this.join(s)) !== null) break;
+    const intent = this.intentFor(s.wallet);
+    if (intent.autoBusy) return;
+    intent.autoBusy = true;
+    try {
+      const target = Math.min(Math.max(1, want), CONFIG.maxPlatesPerWallet);
+      // Counted with the in-flight holds, so the loop cannot lap itself either.
+      while (this.platesOf(s.wallet) < target) {
+        if (this.phase !== "lobby") break;
+        if ((await this.join(s, target)) !== null) break;
+      }
+    } finally {
+      intent.autoBusy = false;
     }
   }
 
@@ -376,19 +700,57 @@ export class GameServer {
    * the cap protects the LOBBY, because the field is finite and one whale
    * filling it locks everyone else out of the round.
    */
-  async join(s: Session): Promise<string | null> {
+  async join(s: Session, ceiling = CONFIG.maxPlatesPerWallet): Promise<string | null> {
     if (this.phase !== "lobby") return "the lattice is already sealed";
-    const mine = this.seatsOf.get(s.wallet) ?? [];
-    if (mine.length >= CONFIG.maxPlatesPerWallet) {
-      return `plate limit is ${CONFIG.maxPlatesPerWallet} per round`;
+    /*
+     * A GUEST IS TURNED AWAY HERE, NOT BY THE BOOKS.
+     *
+     * Guest ids are namespaced `guest:...`, the ledger has no account for one,
+     * and it refuses with BAD_ACCOUNT -- correctly, and after a full HTTP round
+     * trip and a write attempt against the SQLite file every other game on this
+     * box shares. `{t:"guest"}` needs no signature at all, so that round trip
+     * was free, unauthenticated amplification aimed at the arcade's books: a
+     * wallet that never gets a seat never populates `seatsOf`, so no cap ever
+     * tripped and every message bought a fresh POST. The answer has never
+     * depended on anything the ledger knows, so it is given before the call.
+     */
+    if (s.guest) return "connect a wallet to play for real -- a guest id holds no money";
+    // The caller's own ceiling as well as the global one. `autoBuy` passes the
+    // plate count the player configured, and without it every concurrent
+    // auto-buy re-checked only the cap of five and bought to it.
+    const cap = Math.max(1, Math.min(ceiling, CONFIG.maxPlatesPerWallet));
+    const intent = this.intentFor(s.wallet);
+    // Read before the await, and compared after it. `unjoin` bumps this the
+    // instant a player steps off, which is the only way for a hold already in
+    // the air to learn that the person who authorised it has withdrawn.
+    const generation = intent.generation;
+    // Plates in hand PLUS plates being paid for. Counting only the first is
+    // what let ten concurrent joins each see an empty list and send ten holds.
+    if (this.platesOf(s.wallet) >= cap) {
+      return cap < CONFIG.maxPlatesPerWallet
+        ? `auto play is set to ${cap} plate${cap === 1 ? "" : "s"}`
+        : `plate limit is ${CONFIG.maxPlatesPerWallet} per round`;
     }
     // The lobby cap is a game rule, not a simulation detail: the hazard curve
     // reads crowding off the field size, and every economic guarantee is
     // certified over the configured range. An uncapped lobby runs the game
-    // outside the numbers that were verified.
-    if (this.seats.size >= this.config.field.max) return "the lattice is full";
+    // outside the numbers that were verified. In-flight seats count here too:
+    // a field that fills while stakes are moving is a field that overfills.
+    if (this.seats.size + this.seatsInFlight >= this.config.field.max) return "the lattice is full";
     const stake = toLamports(this.config.entry);
     const id = this.nextSeatId++;
+    /*
+     * WHICH ROUND THIS STAKE IS FOR, READ BEFORE IT MOVES.
+     *
+     * `openLobby` resets `nextSeatId` to 1. If it ran during the hold below,
+     * everything after the await would be writing into the NEW round under a
+     * seat number that round may have already issued: `takeEntry` would land
+     * on somebody else's row and `this.seats.set(id, ...)` would overwrite
+     * their seat outright, redirecting their payout to this wallet. Only about
+     * three seconds of timing margin -- held by config values in two different
+     * repositories -- stood between that and a live bug.
+     */
+    const roundAtHold = this.roundId;
     // Read BEFORE the stake moves, so the lifetime snapshot on the profile card
     // is "as of stepping on" rather than dipping by one unsettled stake.
     const row = this.rowFor(s);
@@ -406,8 +768,14 @@ export class GameServer {
      * key -- the seat is NOT sold. Failing closed costs a player one refused
      * join; failing open costs the house a round it never took payment for.
      */
+    intent.inFlight++;
+    this.seatsInFlight++;
+    /** Did the books answer with an EXISTING hold rather than a new one? */
+    let replayed = false;
     try {
-      this.noteBalance(s.wallet, await this.ledger.hold(s.wallet, stake, this.roundId, id));
+      const held = await this.ledger.hold(s.wallet, stake, roundAtHold, id);
+      this.noteBalance(s.wallet, held);
+      replayed = held.replayed;
     } catch (err) {
       if (err instanceof LedgerError && err.isBroke) return "not enough balance";
       /*
@@ -415,17 +783,71 @@ export class GameServer {
        *
        * Guest ids are namespaced `guest:...` so they can never collide with a
        * real address -- which also means the ledger has no account for them and
-       * refuses with BAD_ACCOUNT. That is correct and permanent: money is keyed
-       * by wallet across this whole arcade, and an id minted by this server is
-       * not one. Said plainly here, because the generic message below would
-       * blame the books for a player simply not having signed in.
+       * refuses with BAD_ACCOUNT. Turned away at the top of this function now,
+       * before the round trip, but the answer is kept here because the ledger
+       * is the authority on what is an account and the generic message below
+       * would blame the books for somebody simply not having signed in.
        */
       if (err instanceof LedgerError && err.code === "BAD_ACCOUNT") {
         return "connect a wallet to play for real -- a guest id holds no money";
       }
       const why = err instanceof LedgerError ? err.code : "unknown";
-      console.error(`[thin-ice] hold failed for ${s.wallet} r${this.roundId}s${id}: ${why}`);
-      return "the books are unreachable -- your money has not been touched";
+      console.error(`[thin-ice] hold failed for ${s.wallet} r${roundAtHold}s${id}: ${why}`);
+      /*
+       * A REF THAT ALREADY MEANS SOMETHING IS NOT OURS TO CLEAN UP.
+       *
+       * The arcade refuses a ref that is taken (REF_CONFLICT) or no longer
+       * open (HOLD_CLOSED) rather than quietly answering yes. Both say the
+       * same thing: a stake exists under this round and seat number and this
+       * join did not create it. Release is idempotent, so "tidying up" here
+       * would hand back a stranger's live stake in the middle of their round.
+       * Refuse, say so, and let the seat id move on -- the same reasoning as
+       * the replayed-hold branch below.
+       */
+      if (err instanceof LedgerError && (err.code === "REF_CONFLICT" || err.code === "HOLD_CLOSED")) {
+        return "that plate could not be issued -- nothing was staked";
+      }
+      /*
+       * "YOUR MONEY HAS NOT BEEN TOUCHED" IS A CLAIM THIS CODE CANNOT MAKE.
+       *
+       * A LedgerError arrives from the client side of the call. The common one
+       * is a timeout, and `AbortSignal.timeout(5000)` aborts US -- if the
+       * request arrived and only the response was lost, the hold exists, under
+       * this exact ref, and the stake is in escrow. Saying otherwise is the
+       * one sentence a player would act on: they see the balance move, are
+       * told it did not, and file a support ticket about a bug that is only in
+       * the message. So the release is attempted -- idempotent, and free if
+       * there was never a hold to release -- and the wording says what is
+       * actually known.
+       */
+      void this.releaseSeat(roundAtHold, id, "hold failed or its answer was lost");
+      return "the books did not answer -- if the stake moved it is being returned";
+    } finally {
+      intent.inFlight--;
+      this.seatsInFlight--;
+    }
+
+    /*
+     * A REPLAYED HOLD IS NOT A HOLD THIS JOIN MADE, AND MUST NOT BUY A SEAT.
+     *
+     * Refs are idempotent by design -- `thin-ice:r{R}:s{N}` asked for twice
+     * returns the first answer instead of moving money again -- which is what
+     * makes retries and crash replays safe. It also means a 200 does not by
+     * itself mean "this stake just moved". If this round and seat number have
+     * ever been used before, the answer is somebody else's escrowed stake and
+     * seating on it sells a plate nobody paid for.
+     *
+     * NOTHING IS RELEASED HERE. The hold that came back belongs to whatever
+     * made it, and release is idempotent: giving it back would return a
+     * stranger's live stake in the middle of their round. Fail closed, loudly,
+     * and let the seat id move on.
+     */
+    if (replayed) {
+      console.error(
+        `[thin-ice] REPLAYED HOLD r${roundAtHold}s${id} for ${s.wallet}: a seat id has been` +
+          " re-issued, so this join is refused and the existing hold left alone",
+      );
+      return "that plate could not be issued -- nothing was staked";
     }
 
     /*
@@ -453,20 +875,42 @@ export class GameServer {
      */
     const mineNow = this.seatsOf.get(s.wallet) ?? [];
     const stale =
-      this.phase !== "lobby"
-        ? "the lattice is already sealed"
-        : mineNow.length >= CONFIG.maxPlatesPerWallet
-          ? `plate limit is ${CONFIG.maxPlatesPerWallet} per round`
-          : this.seats.size >= this.config.field.max
-            ? "the lattice is full"
-            : null;
+      /*
+       * THE ROUND, ASKED FIRST, BECAUSE EVERY OTHER ANSWER IS ABOUT THE WRONG
+       * ONE IF IT MOVED. Seat numbers restart at 1 every lobby, so a stake
+       * held for round R and written into round R+1 lands on a seat id that
+       * round has already sold -- overwriting a stranger's seat and their
+       * payout with it.
+       */
+      this.roundId !== roundAtHold
+        ? "that round sealed while the stake was moving"
+        : /*
+           * AND CONSENT, WHICH THE PLAYER IS ALLOWED TO WITHDRAW MID-FLIGHT.
+           *
+           * `unjoin` bumps the generation the moment step-off arrives. Before
+           * this, a step-off during the hold found `seatsOf` still empty,
+           * returned null -- which index.ts reports as success -- and the holds
+           * landed afterwards: the player was told nothing was wrong and was
+           * bonded anyway, up to five deep, in a round they had explicitly
+           * left. Timed at the last second of the lobby they were then sealed
+           * into it.
+           */
+          intent.generation !== generation
+          ? "stepped off while the stake was moving -- nothing was staked"
+          : this.phase !== "lobby"
+            ? "the lattice is already sealed"
+            : // The caller's own ceiling as well as the global cap: this is the
+              // check that used to let concurrent auto-buys reach five plates
+              // for a player who had asked for one.
+              mineNow.length >= cap
+              ? cap < CONFIG.maxPlatesPerWallet
+                ? `auto play is set to ${cap} plate${cap === 1 ? "" : "s"}`
+                : `plate limit is ${CONFIG.maxPlatesPerWallet} per round`
+              : this.seats.size >= this.config.field.max
+                ? "the lattice is full"
+                : null;
     if (stale) {
-      // Idempotent, and the startup sweep is the backstop if it does not land.
-      void this.ledger
-        .release(this.roundId, id, "the lattice changed while the stake was moving")
-        .catch((err) =>
-          console.error(`[thin-ice] release after a stale join: ${(err as Error).message}`),
-        );
+      void this.releaseSeat(roundAtHold, id, "the lattice changed while the stake was moving");
       return stale;
     }
 
@@ -477,9 +921,9 @@ export class GameServer {
      * attempt during the startup sweep is free.
      */
     try {
-      this.db.takeEntry(this.roundId, s.wallet, stake, id);
+      this.db.takeEntry(roundAtHold, s.wallet, stake, id);
     } catch (err) {
-      void this.ledger.release(this.roundId, id, "seat could not be recorded").catch(() => {});
+      void this.releaseSeat(roundAtHold, id, "seat could not be recorded");
       console.error(`[thin-ice] takeEntry failed after a hold: ${(err as Error).message}`);
       return "the table could not record that seat -- nothing was staked";
     }
@@ -514,8 +958,44 @@ export class GameServer {
    */
   async unjoin(s: Session): Promise<string | null> {
     if (this.phase !== "lobby") return "the lattice is already sealed";
+
+    /*
+     * CONSENT IS WITHDRAWN FIRST, SYNCHRONOUSLY, BEFORE ANYTHING IS READ.
+     *
+     * A wallet's seats are recorded only after the ledger answers, so a player
+     * who pressed bond and then step-off inside one round trip had an empty
+     * `seatsOf` here -- this returned null, index.ts read that as success and
+     * said nothing, and the holds landed a moment later. They were told
+     * stepping off worked and were bonded up to five plates deep in a round
+     * they had explicitly left; timed at the end of the lobby, sealed into it.
+     *
+     * The generation bump is what a landing hold checks. It has to happen
+     * before the first `await` in this function and before the early return
+     * below, because both of those are places the old version gave up.
+     */
+    const intent = this.intentFor(s.wallet);
+    intent.generation++;
+
+    /*
+     * AND AUTO GOES OFF EVEN WHEN THERE IS NOTHING TO REFUND YET.
+     *
+     * Stepping off IS the statement that you are done. It used to be the last
+     * thing this function did, so the early return above skipped it entirely
+     * and auto play stayed on in the database while the client had already
+     * shown it off -- the next lobby tick then bought the seat straight back.
+     */
+    const row = this.rowFor(s);
+    if (row.autoEnabled) {
+      this.db.setAuto(s.wallet, false, row.autoTarget, row.autoPlates ?? 1);
+    }
+
     const mine = this.seatsOf.get(s.wallet);
-    if (!mine || mine.length === 0) return null;
+    if (!mine || mine.length === 0) {
+      // Nothing bought yet, but a hold may be in the air; the generation bump
+      // above is what turns it back. The screen still needs the auto switch.
+      this.broadcast(true);
+      return null;
+    }
 
     /*
      * DECIDE AND MUTATE FIRST, WITH NO AWAIT ANYWHERE IN IT. THEN MOVE MONEY.
@@ -562,23 +1042,40 @@ export class GameServer {
 
     // And only now the books. The stake goes back; idempotent, so the startup
     // sweep finding the same hold later is free rather than a double refund.
+    // A refusal is queued and asked again -- see releaseSeat.
+    const round = this.roundId;
     for (const id of refunded) {
-      try {
-        await this.ledger.release(this.roundId, id, "stepped off before the seal");
-      } catch (err) {
-        // The row is already gone locally and the hold is still open; the
-        // sweep will return it. Logged rather than shown, because from the
-        // player's side stepping off did work.
-        console.error(`[thin-ice] release failed r${this.roundId}s${id}: ${(err as Error).message}`);
-      }
+      await this.releaseSeat(round, id, "stepped off before the seal");
     }
     void this.refreshBalance(s.wallet);
-    const row = this.rowFor(s);
-    if (row.autoEnabled) {
-      this.db.setAuto(s.wallet, false, row.autoTarget, row.autoPlates ?? 1);
-    }
     this.broadcast(true);
     return null;
+  }
+
+  /**
+   * Hand one seat's stake back, and keep asking until the books take it.
+   *
+   * Settlement has had a durable retry for a long time -- `unsettled` plus
+   * `reconcileBooks` -- and release had nothing but the startup sweep. That is
+   * not symmetric: by the time this is called the local entry row is already
+   * deleted, so a refusal leaves a player's stake sitting in escrow with
+   * nothing in this game still pointing at it, and the only thing that would
+   * ever free it is somebody restarting the process. Same failure, same retry.
+   *
+   * Awaitable, but every caller on a hot path fires it without waiting: the
+   * queue is what makes that safe.
+   */
+  private async releaseSeat(roundId: number, seat: number, why: string): Promise<void> {
+    const key = `r${roundId}:s${seat}`;
+    try {
+      await this.ledger.release(roundId, seat, why);
+      this.unreleased.delete(key);
+    } catch (err) {
+      this.unreleased.set(key, { roundId, seat, why });
+      // Logged rather than shown: from the player's side stepping off did work,
+      // and the retry is already booked.
+      console.error(`[thin-ice] release failed r${roundId}s${seat}, queued: ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -590,6 +1087,24 @@ export class GameServer {
     const round = this.round;
     const mine = this.seatsOf.get(s.wallet);
     if (!round || !mine || this.phase !== "live") return;
+    /*
+     * THE GRACE LOCK IS A RULE, SO THE SERVER HOLDS IT.
+     *
+     * The HUD hides the extract button for the opening grace ticks: the same
+     * button was "bond another" half a second earlier, and a player still
+     * hammering it would bank 0.98x -- less than the entry they had just paid.
+     * Nothing can shatter during grace, so the lock costs them nothing.
+     *
+     * It was ONLY the HUD, which makes it a suggestion. A scripted client sent
+     * `cashout` on tick 0 and extracted below its own stake. Their money and
+     * their bad trade, but a rule the server does not own is not a rule -- and
+     * this one is inside the rules hash every round is committed under. The
+     * same tick boundary the client draws: it unlocks once the round has
+     * walked past the grace ticks. Server-side auto exits and the sole-owner
+     * ending are settlements rather than player extractions, and are
+     * deliberately not gated here.
+     */
+    if (round.currentTick < this.config.hazard.graceTicks) return;
     let any = false;
     for (const id of mine) {
       const banked = round.cashOut(id);
@@ -644,8 +1159,12 @@ export class GameServer {
   private settleExit(wallet: string, seat: number, sol: number, ticks: number, outcome: string): void {
     const lamports = toLamports(sol);
     const multiple = sol / this.config.entry;
+    // Captured, never re-read: everything below can outlive the round it
+    // belongs to, and `this.roundId` will have moved on by the time a slow
+    // settle answers.
+    const roundId = this.roundId;
     this.db.settleEntry(
-      this.roundId,
+      roundId,
       wallet,
       seat,
       lamports,
@@ -666,21 +1185,27 @@ export class GameServer {
      * arcade's latency inside the game's clock, and a slow ledger would stretch
      * the tick every player is watching.
      *
-     * It is safe to fire because the ref makes it exactly-once: `settleRound`
+     * It is safe to fire because the ref makes it exactly-once: `reconcileBooks`
      * retries every seat that has not confirmed when the round closes, and the
      * startup sweep catches anything after a crash. The worst case is that a
      * payout lands a moment late in the books, never that it lands twice or not
      * at all.
+     *
+     * ROUND AND SEAT, NOT SEAT. The pending set was keyed by the bare seat
+     * number, which is re-issued from 1 every lobby -- so a settle landing for
+     * round R+1's seat 3 deleted round R's still-pending seat 3 and its winner
+     * was never paid. See the field's own comment.
      */
-    this.unsettled.add(seat);
+    const key = `r${roundId}:s${seat}`;
+    this.unsettled.set(key, { roundId, seat });
     void this.ledger
-      .settle(this.roundId, seat, lamports)
+      .settle(roundId, seat, lamports)
       .then(() => {
-        this.unsettled.delete(seat);
+        this.unsettled.delete(key);
         void this.refreshBalance(wallet);
       })
       .catch((err) => {
-        console.error(`[thin-ice] settle deferred r${this.roundId}s${seat}: ${(err as Error).message}`);
+        console.error(`[thin-ice] settle deferred r${roundId}s${seat}: ${(err as Error).message}`);
       });
   }
 
@@ -700,11 +1225,99 @@ export class GameServer {
       });
     }
     this.settled.clear();
+
+    /*
+     * AND ONLY NOW IS THERE A SEED, WHICH IS THE POINT.
+     *
+     * The nonce is drawn here, after the entrant list above is final and
+     * before a single roll, and the seed is the hash of it with the committed
+     * secret and that list. Three consequences, in the order they matter:
+     *
+     *   nobody held a seed while the lobby was open, so join order and entrant
+     *   count could not be chosen against one;
+     *
+     *   the entrant list is INSIDE the seed, so the order the record claims is
+     *   the order the round was played in -- change, add, drop or swap one id
+     *   and the replay stops matching the published outcome;
+     *
+     *   and the lobby's commitment is untouched, so the client still pins the
+     *   hash it saw on screen before it was sealed in.
+     *
+     * What remains is an operator willing to redraw this nonce until it likes
+     * the simulated result -- seed grinding, which is one open box on
+     * MAINNET.md and is closed by entropy the house does not choose. The point
+     * of this change is that grinding is now the ONLY way in; before it, one
+     * honest seed and a free choice of ordering was enough.
+     */
+    this.sealNonce = randomBytes(16).toString("hex");
+    this.seedHex = roundSeedFrom(
+      this.secretHex,
+      this.sealNonce,
+      entrants.map((e) => e.id),
+    );
+    this.db.sealRound(this.roundId, this.sealNonce);
     this.round = new Round(this.config, rngFromSeedHex(this.seedHex), entrants);
     this.phase = "live";
     this.nextTickAt = Date.now() + this.config.timing.tickMs;
 
+    void this.reserveExposure(this.roundId, this.round.pot);
     this.broadcast(true);
+  }
+
+  /*
+   * ── THE BOX-WIDE EXPOSURE REGISTER ─────────────────────────────────────
+   *
+   * WHAT THIS TABLE COULD COST THE HOUSE, WHICH IS NORMALLY NOTHING.
+   *
+   * Thin Ice is self-funding: the pot is the entrants' own stakes less rake,
+   * every payout is settled against the hold that funded it, and the house
+   * nets the rake. So this game never appeared in the arcade's exposure
+   * register at all, and for the ordinary round that is honest.
+   *
+   * It stops being honest on the recovery paths. If holds are released while
+   * a payout has already been made -- a crash after a big extraction, a deploy
+   * restart timed the same way -- `ledger.settle` funds the difference from
+   * `~house` with `overdraft: true`, and nothing caps it. The worst case is
+   * one seat banking the whole pot while every other stake goes back: pot
+   * minus that seat's own entry. That is the number reserved.
+   *
+   * NOT FAIL-CLOSED, AND THIS IS THE ONE PLACE IN THIS FILE WHERE THAT IS
+   * RIGHT. A stake refused because the books are unreachable costs a player
+   * one join. A round refused because a BACKSTOP is unreachable costs every
+   * player at a table whose payouts are already fully funded by stakes the
+   * arcade is holding. So the reservation is fired, loudly logged when it
+   * fails, and the register is dropped for the life of the process if the
+   * arcade turns out not to have the route at all -- the same bargain Thin
+   * Line makes, for the same reason: this client and the register's routes
+   * deploy from repositories that are pulled separately.
+   */
+  private async reserveExposure(roundId: number, pot: number): Promise<void> {
+    const worst = Math.max(0, toLamports(pot) - toLamports(this.config.entry));
+    if (worst === 0) return;
+    try {
+      await this.ledger.exposure.reserve(roundId, worst);
+    } catch (err) {
+      const e = err as LedgerError;
+      if (e.status === 404) {
+        console.warn(
+          "[thin-ice] this arcade has no exposure register, so this table is not in the" +
+            " box-wide total. Update the arcade and restart to join it.",
+        );
+        return;
+      }
+      console.error(`[thin-ice] exposure not reserved for r${roundId}: ${e.message}`);
+    }
+  }
+
+  /** Give the room back. Idempotent on the arcade's side; never fatal here. */
+  private async releaseExposure(roundId: number): Promise<void> {
+    try {
+      await this.ledger.exposure.release(roundId);
+    } catch (err) {
+      console.error(
+        `[thin-ice] the arcade still thinks r${roundId} is in flight: ${(err as Error).message}`,
+      );
+    }
   }
 
   private loop(): void {
@@ -750,9 +1363,13 @@ export class GameServer {
       Auto play buys exactly ONE plate per round; extra breadth is a choice. */
   private autoEnter(): void {
     for (const s of this.uniqueSessions()) {
-      // Any seat means auto already ran (or the player bought by hand); auto
-      // never tops up a position the player chose themselves.
-      if (this.seatsOf.has(s.wallet) || s.guest) continue;
+      if (s.guest) continue;
+      // Any plate means auto already ran (or the player bought by hand); auto
+      // never tops up a position the player chose themselves. PLATES, not
+      // seats: a stake still moving is a plate, and this test reading only
+      // `seatsOf` is what let a 50ms loop fire five auto-buys into one ledger
+      // round trip. `autoBusy` is the same guard for the loop inside autoBuy.
+      if (this.platesOf(s.wallet) > 0 || this.intents.get(s.wallet)?.autoBusy) continue;
       const row = this.rowFor(s);
       if (row.autoEnabled) void this.autoBuy(s, row.autoPlates ?? 1).catch(() => {});
     }
@@ -761,6 +1378,19 @@ export class GameServer {
   private tick(): void {
     const round = this.round;
     if (!round) return;
+    // One read per WALLET for this tick, not one per seat. The auto sweep
+    // below asks for a player row per seat, so a full lattice at two ticks a
+    // second was 500 SQLite reads a second to check settings that change once
+    // in a session -- and a five-plate wallet was read five times over.
+    const rows = new Map<string, PlayerRow>();
+    const rowOf = (wallet: string): PlayerRow => {
+      let r = rows.get(wallet);
+      if (!r) {
+        r = this.db.player(wallet);
+        rows.set(wallet, r);
+      }
+      return r;
+    };
     round.step();
 
     // Settle from player state rather than the tick event: the event carries
@@ -782,7 +1412,7 @@ export class GameServer {
     for (const seat of this.seats.values()) {
       const p = round.players.find((x) => x.id === seat.id);
       if (!p || p.outcome !== "in") continue;
-      const row = this.db.player(seat.wallet);
+      const row = rowOf(seat.wallet);
       if (row.autoEnabled && p.balance / this.config.entry >= row.autoTarget) {
         const banked = round.cashOut(seat.id);
         if (banked !== null) {
@@ -916,7 +1546,11 @@ export class GameServer {
 
     this.db.closeRound(
       this.roundId,
-      this.seedHex,
+      // THE REVEAL IS THE SECRET, not the seed the round ran on. It is what
+      // hashes to the commitment published during the lobby; the seed is
+      // derived from it and is inside the record below, where the replay
+      // rebuilds it from the entrant list and checks the two agree.
+      this.secretHex,
       res.players.length,
       res.ticks,
       best,
@@ -925,6 +1559,7 @@ export class GameServer {
       toLamports(res.pot),
       JSON.stringify({
         seedHex: this.seedHex,
+        sealNonce: this.sealNonce,
         config: this.config,
         entrantIds: res.players.map((p) => p.id),
         cashOuts: res.cashOuts,
@@ -940,29 +1575,51 @@ export class GameServer {
     // Anything the tick loop fired and did not get confirmation for. Idempotent
     // by ref, so retrying a settle that actually succeeded costs one request
     // and changes nothing.
-    void this.reconcileRound(this.roundId);
+    void this.reconcileBooks();
+    // The round is over, so the room it was holding in the box-wide register
+    // is room nobody needs. Told unconditionally, exactly like Thin Line's
+    // settle path: a table that keeps its reservation after the round ends
+    // shrinks every other table's headroom for nothing.
+    void this.releaseExposure(this.roundId);
   }
 
   /**
-   * Make the books agree with the round that just ended.
+   * Make the books agree with this game, for every round still owed anything.
    *
    * Settlement is fired from the tick loop without awaiting, so a slow or
-   * briefly unreachable ledger leaves seats marked unsettled. This retries
-   * them once the round is over and nothing is watching the clock. What it
-   * cannot fix -- the ledger still down -- is left to the startup sweep, which
-   * releases every hold this game still has open.
+   * briefly unreachable ledger leaves seats marked unsettled; releases are
+   * fired the same way from the lobby. This retries both once a round is over
+   * and nothing is watching the clock, and again at the top of every lobby.
+   *
+   * IT IS NOT LIMITED TO ONE ROUND, AND THAT IS THE FIX. The old version took
+   * a round id, retried only what was pending for it, and left everything else
+   * behind forever -- so a payout the books refused during round R had exactly
+   * one attempt at the end of round R and then waited for a restart, at which
+   * point the sweep RELEASED the hold and paid the winner their stake back
+   * instead of their winnings. Every pending entry now carries the round it
+   * belongs to, so all of them can be asked again.
+   *
+   * What this still cannot fix -- the ledger down for the life of the process
+   * -- is left to the startup sweep.
    */
-  private async reconcileRound(roundId: number): Promise<void> {
-    if (this.unsettled.size === 0) return;
-    const pending = [...this.unsettled];
-    for (const seat of pending) {
+  private async reconcileBooks(): Promise<void> {
+    if (this.unsettled.size === 0 && this.unreleased.size === 0) return;
+    for (const [key, { roundId, seat }] of [...this.unsettled]) {
       const owed = this.db.owedFor(roundId, seat);
       if (owed === null) continue;
       try {
         await this.ledger.settle(roundId, seat, owed);
-        this.unsettled.delete(seat);
+        this.unsettled.delete(key);
       } catch (err) {
         console.error(`[thin-ice] reconcile r${roundId}s${seat} failed: ${(err as Error).message}`);
+      }
+    }
+    for (const [key, { roundId, seat, why }] of [...this.unreleased]) {
+      try {
+        await this.ledger.release(roundId, seat, why);
+        this.unreleased.delete(key);
+      } catch (err) {
+        console.error(`[thin-ice] re-release r${roundId}s${seat} failed: ${(err as Error).message}`);
       }
     }
     for (const s of this.sessions) void this.refreshBalance(s.wallet);
@@ -1153,6 +1810,15 @@ export class GameServer {
     const now = Date.now();
     if (!force && now - this.lastBroadcast < 200) return;
     this.lastBroadcast = now;
-    for (const s of this.sessions) s.send(this.stateFor(s));
+    // One player row per WALLET for this pass. Two tabs are two sessions and
+    // were two identical reads; a full lattice was 250 of them every 200ms.
+    // Dropped in the `finally`, so nothing outside this pass can ever read a
+    // row this pass cached -- see `passRows`.
+    this.passRows = new Map();
+    try {
+      for (const s of this.sessions) s.send(this.stateFor(s));
+    } finally {
+      this.passRows = null;
+    }
   }
 }

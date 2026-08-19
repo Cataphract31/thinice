@@ -146,12 +146,24 @@ function Row({ h, onVerify }: { h: HistoryEntry; onVerify: () => void }): JSX.El
             {h.seedOk ? "✓" : "✗"} sha256(seed) matches the hash published before
             the round started
           </div>
-          <div
-            style={{ color: h.replayOk ? "var(--color-profit)" : "var(--color-danger)" }}
-          >
-            {h.replayOk ? "✓" : "✗"} re-ran all {h.ticks} ticks from the seed:{" "}
-            {h.entrants} players, every elimination and payout identical
-          </div>
+          {/* Null on a round the server never finished. A crash mid-round
+              still reveals the seed and records who was in it, but there is no
+              outcome to replay against — and calling that a mismatch would
+              condemn the operator for the one thing they got right, which is
+              publishing the round at all rather than leaving it hidden. */}
+          {h.replayOk === null ? (
+            <div className="text-[var(--color-dim)]">
+              · round interrupted: the seed was revealed, but the round never
+              finished, so there is nothing to replay
+            </div>
+          ) : (
+            <div
+              style={{ color: h.replayOk ? "var(--color-profit)" : "var(--color-danger)" }}
+            >
+              {h.replayOk ? "✓" : "✗"} re-ran all {h.ticks} ticks from the seed:{" "}
+              {h.entrants} players, every elimination and payout identical
+            </div>
+          )}
           {/* Without this a round replays perfectly under rigged numbers and
               still reads "fair" — the other two checks only prove the operator
               is consistent with itself. Null on rounds played before the rules

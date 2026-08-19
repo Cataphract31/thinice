@@ -117,7 +117,11 @@ export default function App(): JSX.Element {
         onShowInfo={() => setShowInfo(true)}
         onShowChars={() => setShowChars(true)}
         onShowBank={() => setShowBank(true)}
-        onWalletChange={(connected) => client.reauth(connected)}
+        /* Disconnecting REVOKES the seat rather than merely re-handshaking.
+           Clearing the browser's copy of the token left the server's row valid
+           forever, so "disconnect" meant "this device forgot" — and that token
+           rides in a cookie shared with every world on the domain. */
+        onWalletChange={(connected) => (connected ? client.reauth(true) : client.logout())}
       />
       <OfflineBar snap={snap} />
       <StateBar snap={snap} onShowBank={() => setShowBank(true)} />

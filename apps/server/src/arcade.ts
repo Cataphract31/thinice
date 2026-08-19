@@ -117,7 +117,26 @@ export function createArcadeLedger({
   /** Is the ledger wired up at all? False means this box cannot take stakes. */
   const enabled = key !== "";
 
-  async function post(route: string, body: Record<string, unknown>): Promise<any> {
+  /*
+   * `family` IS THE ARCADE SURFACE BEING SPOKEN TO, AND THERE ARE TWO.
+   *
+   * `ledger` is the books -- holds, settlements, balances -- and is what every
+   * call in this file meant when the path was hardcoded. `exposure` is the
+   * box-wide register of what is promised to rounds still in flight, which
+   * games mounted inside the arcade process join by holding an object and a
+   * game in its own process joins through a door. See
+   * arcade/money/exposure-routes.js.
+   *
+   * One function for both, because everything that makes the call safe is the
+   * same either way: the key, the loopback guard, the timeout, failing closed,
+   * and turning an arcade error body into a LedgerError somebody can act on.
+   * The only difference is the path.
+   */
+  async function post(
+    route: string,
+    body: Record<string, unknown>,
+    family: "ledger" | "exposure" = "ledger",
+  ): Promise<any> {
     if (!enabled) {
       throw new LedgerError(
         "LEDGER_CLOSED",
@@ -127,7 +146,7 @@ export function createArcadeLedger({
     }
     let res: Response;
     try {
-      res = await fetchImpl(`${base}/api/ledger/${route}`, {
+      res = await fetchImpl(`${base}/api/${family}/${route}`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-ledger-key": key },
         body: JSON.stringify(body),
@@ -148,7 +167,15 @@ export function createArcadeLedger({
     try {
       parsed = text ? JSON.parse(text) : null;
     } catch {
-      throw new LedgerError("LEDGER_GARBAGE", `the ledger answered with ${res.status} and not JSON`, 502);
+      // The STATUS survives even when the body does not. An arcade that has
+      // never heard of a route answers 404 with whatever its fallback handler
+      // writes, and a caller that has to tell "no such route" from "the route
+      // failed" needs that number rather than a flat 502.
+      throw new LedgerError(
+        "LEDGER_GARBAGE",
+        `the ledger answered with ${res.status} and not JSON`,
+        res.ok ? 502 : res.status,
+      );
     }
 
     if (!res.ok) {
@@ -263,10 +290,80 @@ export function createArcadeLedger({
      * For startup after a crash: holds outlive the process that made them,
      * which is the point of holds, and money in flight is the only money a
      * crash can lose.
+     *
+     * The game is NAMED, and the arcade now requires it: one shared LEDGER_KEY
+     * means no caller can prove its identity on the wire, so an unnamed sweep
+     * would be one game handing back every other game's stakes.
      */
     async sweep(): Promise<number> {
       const r = await post("sweep", { game: GAME });
       return Number(r.released ?? 0);
+    },
+
+    /*
+     * ── THE BOX-WIDE EXPOSURE REGISTER ──────────────────────────────────
+     *
+     * A second surface on the same arcade, reached the same way. What it holds
+     * is one number: how much of `~house` is promised to rounds that have not
+     * finished, across every table on this box at once.
+     *
+     * WHY A SELF-FUNDING GAME IS IN IT AT ALL. Thin Ice pays its pot out of the
+     * entrants' own stakes, so in the ordinary round the house is promised
+     * nothing and the register would be right to show zero. The recovery paths
+     * are where that stops being true: if holds are released while a payout has
+     * already been made, `ledger.settle` funds the difference from `~house`
+     * with `overdraft: true`. That is real house exposure, it is invisible
+     * until the day it happens, and the operator deciding whether a payout is
+     * still owed consults exactly this total.
+     *
+     * NOTHING HERE MOVES A LAMPORT. A reservation is a promise about room, not
+     * money; the money is `hold` and `settle` above.
+     */
+    exposure: {
+      /**
+       * Ask the box for room for one round's worst case.
+       *
+       * REFUSED BY THE ARCADE, NOT BY US. Two games asking at the same moment
+       * would both pass their own check, so the question and the answer happen
+       * in one call on the side that can see everybody. A refusal arrives as a
+       * LedgerError with code `OVER_ARCADE_EXPOSURE`.
+       *
+       * The amount goes over as a decimal STRING: it is BigInt lamports on the
+       * arcade's side and JSON has no BigInt, so a string survives the trip
+       * exactly where a Number is a rounding mode waiting to happen.
+       */
+      async reserve(roundId: number, worstCaseLamports: number): Promise<void> {
+        await post(
+          "reserve",
+          { game: GAME, round: String(roundId), amount: String(Math.max(0, Math.floor(worstCaseLamports))) },
+          "exposure",
+        );
+      },
+
+      /** Give the room back. Idempotent on the arcade's side. */
+      async release(roundId: number): Promise<void> {
+        await post("release", { game: GAME, round: String(roundId) }, "exposure");
+      },
+
+      /**
+       * Drop every row this game is holding.
+       *
+       * BOOT ONLY, and AFTER the hold sweep above -- the arcade refuses this
+       * with 409 ROUNDS_IN_FLIGHT while this game still has a stake in escrow,
+       * on the reasoning that one shared service key means the books have to
+       * stand in for identity: a live hold is proof of a live round. So the
+       * order is not a preference, it is the only order that works.
+       *
+       * A mounted table's reservations die with the arcade process because they
+       * ARE that process; ours outlive us, so without this a crash would leave
+       * the box believing it owes payouts for rounds that no longer exist,
+       * shrinking every other table's headroom with nothing alive to put it
+       * back.
+       */
+      async sweep(): Promise<number> {
+        const r = await post("sweep", { game: GAME }, "exposure");
+        return Number(r.dropped ?? 0);
+      },
     },
   };
 }

@@ -152,6 +152,16 @@ export type ClientMessage =
    * Kills the Phantom popup on every reload, reconnect and server restart.
    */
   | { t: "resume"; wallet: string; token: string }
+  /**
+   * "Forget this seat", and the counterpart `resume` never had.
+   *
+   * The token is a bearer credential for a wallet's seat, and a seat can bond
+   * that wallet's plates. Without a way to revoke one, disconnecting a wallet
+   * cleared the browser's copy while the server's row stayed valid forever --
+   * so a token lifted from the shared cookie was a permanent seat. Carries no
+   * fields: it revokes the session's own wallet and nothing else.
+   */
+  | { t: "logout" }
   | { t: "guest"; id: string }
   /**
    * "Re-read my balance from the books."
