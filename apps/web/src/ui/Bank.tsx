@@ -306,7 +306,13 @@ export function BankOverlay({
       });
       setSaid({ text: "approve it in your wallet.", tone: "busy" });
       const found = await walletNow();
-      const signature = await approveTransfer(found?.provider ?? null, prep);
+      // The wallet popup is not a checker. The bytes the arcade built must be
+      // for the amount typed and the custody address shown, or they are never
+      // handed to the wallet at all.
+      const signature = await approveTransfer(found?.provider ?? null, prep, {
+        lamports: want,
+        to: info?.address,
+      });
       setAmount("");
       setSaid({
         text: `${sol(want)} ◎ sent. waiting for the network.`,

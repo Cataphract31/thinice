@@ -58,7 +58,7 @@ interface Seat {
 
 export interface Session {
   wallet: string;
-  guest: boolean;
+  spectator: boolean;
   session: number;
   send(state: NetState): void;
   sendHistory(h: NetHistory[]): void;
@@ -116,7 +116,7 @@ export class GameServer {
   private rowFor(s: Session): PlayerRow {
     const cached = this.passRows?.get(s.wallet);
     if (cached) return cached;
-    const row = s.guest ? Database.spectatorRow(s.wallet) : this.db.player(s.wallet);
+    const row = s.spectator ? Database.spectatorRow(s.wallet) : this.db.player(s.wallet);
     this.passRows?.set(s.wallet, row);
     return row;
   }
@@ -239,7 +239,7 @@ export class GameServer {
 
   attach(s: Session): void {
     this.sessions.add(s);
-    void this.refreshBalance(s.wallet);
+    if (!s.spectator) void this.refreshBalance(s.wallet);
     this.pushHistory(s);
     if (this.chatLog.length > 0) {
       s.sendChat(this.chatLog.map((m) => this.chatView(m, s.wallet)));
@@ -319,7 +319,7 @@ export class GameServer {
 
   private autoJoin(): void {
     for (const s of this.uniqueSessions()) {
-      if (s.guest) continue;
+      if (s.spectator) continue;
       const row = this.rowFor(s);
       if (row.autoEnabled) void this.autoBuy(s, row.autoPlates ?? 1).catch(() => {});
     }
@@ -342,7 +342,7 @@ export class GameServer {
 
   async join(s: Session, ceiling = CONFIG.maxPlatesPerWallet): Promise<string | null> {
     if (this.phase !== "lobby") return "the lattice is already sealed";
-    if (s.guest) return "connect a wallet to play for real -- a guest id holds no money";
+    if (s.spectator) return "connect a wallet to play for real -- a spectator seat holds no money";
     const cap = Math.max(1, Math.min(ceiling, CONFIG.maxPlatesPerWallet));
     const intent = this.intentFor(s.wallet);
     const generation = intent.generation;
@@ -367,7 +367,7 @@ export class GameServer {
     } catch (err) {
       if (err instanceof LedgerError && err.isBroke) return "not enough balance";
       if (err instanceof LedgerError && err.code === "BAD_ACCOUNT") {
-        return "connect a wallet to play for real -- a guest id holds no money";
+        return "connect a wallet to play for real -- a spectator seat holds no money";
       }
       const why = err instanceof LedgerError ? err.code : "unknown";
       console.error(`[thin-ice] hold failed for ${s.wallet} r${roundAtHold}s${id}: ${why}`);
@@ -633,7 +633,7 @@ export class GameServer {
 
   private autoEnter(): void {
     for (const s of this.uniqueSessions()) {
-      if (s.guest) continue;
+      if (s.spectator) continue;
       if (this.platesOf(s.wallet) > 0 || this.intents.get(s.wallet)?.autoBusy) continue;
       const row = this.rowFor(s);
       if (row.autoEnabled) void this.autoBuy(s, row.autoPlates ?? 1).catch(() => {});

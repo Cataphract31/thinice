@@ -95,10 +95,10 @@ function fakeLedger() {
   return { ledger: ledger as unknown as ArcadeLedger, holds, settles, releases, reserves, exposureReleases, state };
 }
 
-function fakeSession(wallet: string, guest = false): Session & { last: unknown } {
+function fakeSession(wallet: string, spectator = false): Session & { last: unknown } {
   return {
     wallet,
-    guest,
+    spectator,
     session: 0,
     last: null,
     send(state) {
@@ -262,9 +262,9 @@ test("a hold whose answer is lost is released rather than declared untouched", a
   t.db.close();
 });
 
-test("a guest is turned away before the arcade's books are ever asked", () => {
+test("a spectator is turned away before the arcade's books are ever asked", () => {
   const t = table();
-  const s = fakeSession("guest:aaaaaaaa", true);
+  const s = fakeSession("~spec:aaaaaaaaaaaaaaaa", true);
   t.game.attach(s);
 
   return t.game.join(s).then((answer) => {

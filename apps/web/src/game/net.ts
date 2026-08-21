@@ -15,6 +15,14 @@ import {
   sfxYouDied,
 } from "../audio/sound";
 import { arcadeToken, onArcadeDomain, SHARED_DOMAIN } from "./arcade";
+import { toChatMsg, toServerState } from "./snapshot";
+
+// The guest identity is gone; sweep the old storage key so a visitor's
+// browser stops carrying an id that no longer means anything.
+try {
+  localStorage.removeItem("zinc.guest.v1");
+} catch {
+}
 
 interface NetStats {
   roundsPlayed: number;
@@ -27,7 +35,7 @@ interface NetStats {
 export interface NetExtras {
   connected: boolean;
   online: number;
-  guest: boolean;
+  spectator: boolean;
   address: string;
   stats: NetStats;
 }
@@ -39,26 +47,6 @@ const EMPTY_STATS: NetStats = {
   returned: 0,
   bestMultiple: 0,
 };
-
-let memoryGuestId = "";
-function guestId(): string {
-  const KEY = "zinc.guest.v1";
-  const fresh = (): string => {
-    const b = new Uint8Array(12);
-    crypto.getRandomValues(b);
-    return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
-  };
-  try {
-    const stored = localStorage.getItem(KEY);
-    if (stored && /^[a-zA-Z0-9_-]{8,40}$/.test(stored)) return stored;
-    const id = fresh();
-    localStorage.setItem(KEY, id);
-    return id;
-  } catch {
-    if (!memoryGuestId) memoryGuestId = fresh();
-    return memoryGuestId;
-  }
-}
 
 type PhantomProvider = {
   isPhantom?: boolean;
@@ -93,8 +81,13 @@ function readShared(): { wallet: string; token: string } | null {
 function writeShared(wallet: string, token: string): void {
   if (!onArcadeDomain()) return;
   const v = encodeURIComponent(`${wallet}.${token}`);
+  // 7 days, not the token's full 30: this cookie is readable by every sibling
+  // app on the arcade domain by design (it IS the cross-subdomain handoff),
+  // so its window is kept deliberately shorter than the seat it carries. It
+  // refreshes on every fresh sign-in; off-domain tabs keep the localStorage
+  // copy for the rest of the month.
   document.cookie =
-    `${SHARED_COOKIE}=${v}; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax; Secure`;
+    `${SHARED_COOKIE}=${v}; Domain=${SHARED_DOMAIN}; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
 }
 
 function clearShared(): void {
@@ -249,7 +242,7 @@ export class NetClient {
   private extras: NetExtras = {
     connected: false,
     online: 0,
-    guest: true,
+    spectator: true,
     address: "",
     stats: EMPTY_STATS,
   };
@@ -336,7 +329,7 @@ export class NetClient {
   private async handle(m: Record<string, unknown>): Promise<void> {
     switch (m.t) {
       case "challenge":
-        await this.authenticate(String(m.nonce));
+        await this.authenticate(String(m.nonce ?? ""), String(m.text ?? ""));
         return;
 
       case "ready":
@@ -344,7 +337,7 @@ export class NetClient {
         this.extras = {
           ...this.extras,
           connected: true,
-          guest: Boolean(m.guest),
+          spectator: Boolean(m.spectator),
           address: String(m.wallet),
         };
         if (typeof m.token === "string" && m.token) {
@@ -352,25 +345,37 @@ export class NetClient {
         }
         this.snap = {
           ...this.snap,
-          seat: { guest: Boolean(m.guest), address: String(m.wallet) },
+          seat: { spectator: Boolean(m.spectator), address: String(m.wallet) },
         };
         this.emit();
         return;
 
       case "state": {
-        const s = m.state as Record<string, unknown> & Snapshot & { stats: NetStats };
-        this.extras = { ...this.extras, online: Number(s.online ?? 0), stats: s.stats };
+        const frame = toServerState(m.state);
+        this.extras = {
+          ...this.extras,
+          online: frame.online,
+          stats: frame.stats,
+        };
         const prev = this.snap;
-        this.pinCommit(Number(s.roundId ?? 0), String(s.nextCommit ?? ""));
-        this.phaseEndAt = Date.now() + Number(s.msToPhaseEnd ?? 0);
+        // Pin the commitment ONLY while the lobby is open -- that is the one
+        // moment a commit is a promise rather than a description. A state
+        // that arrives mid-live or mid-result pins nothing: by then the
+        // server's word is all there is, and recording it would dress a
+        // retroactive value up as a witnessed one.
+        if (frame.snapshot.phase === "lobby") {
+          this.pinCommit(frame.snapshot.roundId, frame.snapshot.nextCommit);
+        }
+        this.phaseEndAt = Date.now() + frame.snapshot.msToPhaseEnd;
         this.snap = {
-          ...IDLE,
-          ...s,
+          ...frame.snapshot,
+          stats: frame.stats,
+          online: frame.online,
           chat: this.chat,
           history: this.history,
           connected: true,
           seat: this.extras.connected
-            ? { guest: this.extras.guest, address: this.extras.address }
+            ? { spectator: this.extras.spectator, address: this.extras.address }
             : undefined,
         };
         if (this.snap.roundId !== this.pendingRound) {
@@ -399,16 +404,7 @@ export class NetClient {
 
       case "chat": {
         const rows = (m.msgs ?? []) as Record<string, unknown>[];
-        for (const r of rows) {
-          this.pushChat({
-            id: Number(r.id ?? 0),
-            name: String(r.name ?? ""),
-            charId: String(r.charId ?? "chad"),
-            text: String(r.text ?? ""),
-            at: Number(r.at ?? Date.now()),
-            you: Boolean(r.you),
-          });
-        }
+        for (const r of rows) this.pushChat(toChatMsg(r));
         this.snap = { ...this.snap, chat: [...this.chat] };
         this.emit();
         return;
@@ -442,7 +438,7 @@ export class NetClient {
     }
   }
 
-  private async authenticate(nonce: string): Promise<void> {
+  private async authenticate(nonce: string, text: string): Promise<void> {
     const origin = this.ws;
     const stillOurs = (): boolean => this.ws === origin && origin?.readyState === WebSocket.OPEN;
 
@@ -458,14 +454,21 @@ export class NetClient {
       return;
     }
 
+    // The server owns the signable text (it binds the site's public origin
+    // into it). Sign exactly what arrived -- after checking it is actually a
+    // login challenge for THIS nonce, so a hostile frame cannot talk the
+    // wallet into signing arbitrary bytes.
+    const signable =
+      text.startsWith("THIN ICE login") && text.includes(`nonce: ${nonce}`) ? text : null;
+
     const p = this.signatureWanted ? phantom() : null;
     this.signatureWanted = false;
-    if (p) {
+    if (p && signable) {
       try {
         const res = await p.connect({ onlyIfTrusted: true }).catch(() => p.connect());
         const pubkey = res?.publicKey ?? p.publicKey;
         if (pubkey) {
-          const msg = new TextEncoder().encode(`THIN ICE login\nnonce: ${nonce}`);
+          const msg = new TextEncoder().encode(signable);
           const { signature } = await p.signMessage(msg, "utf8");
           if (!stillOurs()) return;
           const sig = btoa(String.fromCharCode(...signature));
@@ -476,7 +479,9 @@ export class NetClient {
       }
     }
     if (!stillOurs()) return;
-    this.send({ t: "guest", id: guestId() });
+    // No wallet to prove: watch only. The server seats this connection under
+    // an identity IT chose, read-only, with no token issued.
+    this.send({ t: "spectate" });
   }
 
   private cue(a: Snapshot, b: Snapshot): void {
@@ -590,6 +595,9 @@ export class NetClient {
 
   logout(): void {
     this.send({ t: "logout" });
+    // Revoke locally NOW, not after the server's round trip: if the answer
+    // never comes, the UI must not go on treating this browser as seated.
+    clearWalletSession();
     this.reauth(false);
   }
 
@@ -635,6 +643,8 @@ export class NetClient {
       rulesOk: h.rulesOk,
       payoutOk: h.payoutOk,
       unavailable: h.unavailable,
+      unwitnessed: h.unwitnessed,
+      checked: h.checked,
     };
     this.receipts.set(roundId, receipt);
     const live = this.history.find((x) => x.roundId === roundId);

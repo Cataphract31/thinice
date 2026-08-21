@@ -24,7 +24,7 @@ function Dot({ color }: { color: string }): JSX.Element {
 }
 
 function FundsButton({ snap, onOpen }: { snap: Snapshot; onOpen: () => void }): JSX.Element | null {
-  if (!snap.seat || snap.seat.guest) return null;
+  if (!snap.seat || snap.seat.spectator) return null;
   const broke = snap.wallet < snap.entry;
   return (
     <button
@@ -118,7 +118,7 @@ export function TopNav({
   );
 }
 
-const seated = (snap: Snapshot): boolean => Boolean(snap.seat && !snap.seat.guest);
+const seated = (snap: Snapshot): boolean => Boolean(snap.seat && !snap.seat.spectator);
 
 export function StateBar({
   snap,

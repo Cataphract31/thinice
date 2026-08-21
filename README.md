@@ -215,7 +215,11 @@ Some non-obvious things that are load-bearing. Do not "simplify" them:
 - **The client pins the commitment it saw during the lobby** and refuses a
   finished round whose commitment differs. Checking a server-supplied seed
   against a server-supplied hash that arrived in the same message proves only
-  that the server can run sha256.
+  that the server can run sha256 — so a round this browser never witnessed
+  from its lobby is shown as **"not witnessed"**, never as verified, no matter
+  how self-consistent its record is. The pin lives across reloads in
+  localStorage; the pinning itself happens only while a lobby is open, because
+  after the seal a commit is a description, not a promise.
 - **The replayed seed and the revealed secret must be one hash apart, checked.**
   They are two fields; if they are allowed to drift, an operator commits to one
   draw, plays on another, and still shows green ticks.
@@ -259,14 +263,24 @@ mispriced round, never a signed transfer.
 
 - [ ] **Build the arcade's one custody edge** — hot/cold split, withdrawal
       caps, and monitoring. This is now arcade work, not game work.
-- [ ] **Remove guest accounts.** `{t:"guest", id}` accepts any id as a bearer
-      token: anyone who learns an id can spend against it. Delete the branch
-      and require a signed wallet.
+- [x] **Remove guest accounts.** `{t:"guest", id}` used to accept any id as a
+      bearer token: anyone who learned an id could spend against it. The
+      branch is deleted. A visitor without a wallet may still watch, but the
+      server names that connection itself (`~spec:…`), it is read-only — no
+      chat, no join, no settings — and it is issued no token, so there is
+      nothing to learn, steal or squat. Anything with a voice or a seat
+      requires a signed wallet.
 - [ ] **Prove the deposit/withdraw round trip on devnet** at the arcade edge.
-      The money loop has never completed a live round trip.
-- [ ] **Bind the login challenge to a domain** (SIWS-style) and enforce an
-      Origin allowlist on the websocket upgrade. Today the signed text is just
-      `THIN ICE login\nnonce: …`, so a signature is not tied to this site.
+      The money loop has never completed a live round trip. (The client now
+      also verifies the arcade's prepared deposit — amount and destination —
+      before handing it to the wallet, so a hostile custody edge cannot get
+      extra signed.)
+- [x] **Bind the login challenge to a domain** (SIWS-style) and enforce an
+      Origin allowlist on the websocket upgrade. The server folds its public
+      origin into the signed text (`site: …`, from `PUBLIC_ORIGIN`) and hands
+      the client the exact bytes to sign; the upgrade is refused for any page
+      origin not on `ALLOWED_ORIGINS`. Both are documented in
+      `.env.example`.
 - [ ] **Terminate TLS** in front of the server (`wss://`). Note the fairness
       panel needs a secure origin: `crypto.subtle` does not exist otherwise and
       rounds render as "unverifiable" rather than verified.
@@ -279,13 +293,17 @@ mispriced round, never a signed transfer.
   length-capped, and stripped of control/bidi/zero-width codepoints, and chat
   lives in memory only — but there is no mute, ban, or wordlist. Fine for
   devnet; a public mainnet room wants at least an operator mute.
-- **`outcomeDigest` uses `Math.pow`**, whose precision ECMAScript does not
-  specify. A last-ulp difference between engines could theoretically flip a
-  digest and accuse an honest server. Roughly one in 10^7; fixing it invalidates
-  every stored digest, so it needs a planned migration, not a drive-by change.
-- **Four fixes are not covered by tests** and can regress silently: the
-  last-player cash-out deadlock, the websocket error handler, the frame payload
-  cap, and the rate-limit clamp. Worth encoding before the next big change.
+- **`outcomeDigest` uses float formatting**, whose precision ECMAScript does
+  not fully specify across engines. A last-ulp difference could theoretically
+  flip a digest and accuse an honest server. Roughly one in 10^7; fixing it
+  invalidates every stored digest, so it needs a planned migration, not a
+  drive-by change.
+- **The websocket error handler and the last-player cash-out deadlock are the
+  two fixes tests cannot see directly** (they live inside the connection
+  loop). The frame payload cap, the message budget, resume rate limiting,
+  token TTL, nonce single-use and the X-Forwarded-For trust rule are all now
+  encoded in `apps/server/test/auth.test.ts` and `wire.test.ts`, which boot
+  the real server and attack it over real sockets.
 - **SQLite is single-writer.** One server process. Horizontal scaling means
   changing the store, not adding processes.
 

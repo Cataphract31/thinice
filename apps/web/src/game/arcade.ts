@@ -140,11 +140,41 @@ export async function arcadeSignIn(): Promise<string> {
   return out.address;
 }
 
+export interface TransferExpectation {
+  /** lamports the player asked to move */
+  lamports?: number;
+  /** custody address shown on screen */
+  to?: string;
+}
+
 export async function approveTransfer(
   provider: ArcadeProvider | null,
   prepared: PreparedDeposit | string,
+  expect?: TransferExpectation,
 ): Promise<string> {
   const prep = typeof prepared === "string" ? ({ message: prepared } as PreparedDeposit) : prepared;
+
+  // The bytes came over the wire from the arcade; the player asked for a
+  // specific amount to a specific address. Never let the wallet popup be the
+  // only thing that checks. A hostile or compromised custody edge cannot move
+  // a signed cent more than was asked, because nothing is signed before these
+  // hold.
+  if (expect?.lamports !== undefined && Number(prep.lamports) !== expect.lamports) {
+    throw new ArcadeError(
+      `The arcade built a transfer of ${sol(Number(prep.lamports))} ◎ but you asked for `
+        + `${sol(expect.lamports)} ◎. Nothing was signed — reload and try again.`,
+      "AMOUNT_MISMATCH",
+    );
+  }
+  if (expect?.to !== undefined && prep.to !== expect.to) {
+    const short = (a: string | undefined): string =>
+      a ? `${a.slice(0, 4)}…${a.slice(-4)}` : "(none)";
+    throw new ArcadeError(
+      `The arcade built this transfer to ${short(prep.to)}, not the custody address `
+        + `${short(expect.to)} shown on screen. Nothing was signed.`,
+      "DESTINATION_MISMATCH",
+    );
+  }
 
   if (provider?.isDeeplink && typeof provider.deposit === "function") {
     await provider.deposit(prep);

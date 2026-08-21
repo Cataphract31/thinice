@@ -32,19 +32,34 @@ Environment=DB_PATH=/var/lib/thinice/zinc.db
 
 # -- the arcade's books ------------------------------------------------------
 #
-# LEDGER_KEY, ARCADE_LEDGER_URL and ARCADE_AUTH_URL, in ONE file shared with
-# gielinor.service and cursors.service. See the long note in gielinor.service:
-# the key is the whole authority to move anybody's money on this box, and three
-# copies of it is not a filing problem but a rotation hazard.
+# ARCADE_LEDGER_URL and ARCADE_AUTH_URL, in ONE file shared with
+# gielinor.service and cursors.service.
+#
+# LEDGER_KEY IS NO LONGER IN THAT FILE. It is "the whole authority to move
+# anybody's money on this box", and an environment variable is readable from
+# /proc/<pid>/environ by anything that can touch this process, besides living
+# in a plaintext file shared across units. It now arrives as a systemd
+# credential instead: a root-owned 0400 file bound in at /run/credentials,
+# outside the environment and out of arcade.env. The app reads it through
+# LEDGER_KEY_FILE below. Put the raw key in /etc/arcade/ledger_key on the box:
+#
+#   sudo install -m 0400 -o root /dev/null /etc/arcade/ledger_key
+#   sudoedit /etc/arcade/ledger_key      # paste the key, save, exit
+#
+# and DELETE the LEDGER_KEY line from /etc/arcade/arcade.env once every unit
+# has moved over (rotation day, not today).
 #
 # THE URLS ARE LOOPBACK AND MUST STAY LOOPBACK. apps/server/src/arcade.ts
-# refuses to start if LEDGER_KEY is set and the ledger URL is not on 127.0.0.1,
+# refuses to start if a key is set and the ledger URL is not on 127.0.0.1,
 # because posting a service key to a public origin is a compromise that looks
 # exactly like ordinary traffic. Caddy terminates TLS in front of both
 # processes, so they are already on the same machine.
 #
-# No `-` prefix: a missing file must stop this unit rather than bring up a
-# server that looks healthy and refuses every stake.
+# No `-` prefix on either line: a missing env file OR a missing key file must
+# stop this unit rather than bring up a server that looks healthy and refuses
+# every stake.
+LoadCredential=ledger_key:/etc/arcade/ledger_key
+Environment=LEDGER_KEY_FILE=%d/ledger_key
 EnvironmentFile=/etc/arcade/arcade.env
 
 # The database is this game's own -- rounds, seats, chat. Not money: money is
@@ -104,6 +119,16 @@ SystemCallErrorNumber=EPERM
 # turns any file-write bug into something that survives a restart. Its database
 # lives under StateDirectory=thinice, which stays writable on its own.
 ProtectSystem=strict
+
+# NO OUTBOUND NETWORK, NOW ENFORCED. DEPLOYMENT.md has always promised that
+# this process talks to its database, to the arcade on loopback, and to
+# nothing else; this is the line pair that makes the promise true instead of
+# aspirational. Everything -- inbound and outbound -- must be loopback: nginx
+# reaches :8787 from localhost, the ledger and auth edges are 127.0.0.1, and
+# there is no third conversation to have. A compromised process can no longer
+# phone home, scan the box's neighbours, or exfiltrate anything off-machine.
+IPAddressAllow=localhost
+IPAddressDeny=any
 
 [Install]
 WantedBy=multi-user.target

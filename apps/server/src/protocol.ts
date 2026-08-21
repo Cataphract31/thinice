@@ -97,7 +97,7 @@ export type ClientMessage =
   | { t: "arcade"; token: string }
   | { t: "resume"; wallet: string; token: string }
   | { t: "logout" }
-  | { t: "guest"; id: string }
+  | { t: "spectate" }
   | { t: "sync" }
   | { t: "join" }
   | { t: "unjoin" }
@@ -107,11 +107,11 @@ export type ClientMessage =
   | { t: "chat"; text: string };
 
 export type ServerMessage =
-  | { t: "challenge"; nonce: string }
+  | { t: "challenge"; nonce: string; text: string }
   | {
       t: "ready";
       wallet: string;
-      guest: boolean;
+      spectator: boolean;
       token?: string;
     }
   | { t: "state"; state: NetState }

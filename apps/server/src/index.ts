@@ -1,13 +1,23 @@
 import { createServer, type IncomingMessage } from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import bs58 from "bs58";
-import nacl from "tweetnacl";
+import { randomBytes } from "node:crypto";
 import { WebSocketServer, type WebSocket } from "ws";
 import { CONFIG } from "./config.ts";
 import { Database } from "./db.ts";
 import { createArcadeLedger } from "./arcade.ts";
 import { reportVendoredMoney } from "./vendorcheck.ts";
 import { CHARS, GameServer, roundSeedFrom, type Session } from "./game.ts";
+import {
+  NONCE_TTL_MS,
+  challengeText,
+  clientIpOf,
+  newNonce,
+  originAllowed,
+  parseOrigins,
+  parseTrustedProxies,
+  resumeTokenMatches,
+  verifySignature,
+  ResumeLimiter,
+} from "./wire.ts";
 import { DEFAULT_CONFIG } from "@zinc/engine";
 import type { ClientMessage, NetChat, NetHistory, NetState, ServerMessage } from "./protocol.ts";
 
@@ -56,11 +66,27 @@ if (ledger.enabled) {
 const game = new GameServer(db, ledger);
 game.start();
 
-function challengeText(nonce: string): string {
-  return `THIN ICE login\nnonce: ${nonce}`;
+// The origin this site is publicly known by, e.g. "https://thinice.zinc.cash".
+// When set, it is bound INTO the login challenge text, so a signature shown to
+// a wallet names this site and cannot be minted for a phishing relay.
+const PUBLIC_ORIGIN = (process.env.PUBLIC_ORIGIN ?? "").replace(/\/+$/, "");
+
+// Pages allowed to open this websocket. Browsers always send Origin on the
+// upgrade; when the list is empty any page may connect (local development).
+const ALLOWED_ORIGINS = parseOrigins(process.env.ALLOWED_ORIGINS);
+if (ALLOWED_ORIGINS.length === 0) {
+  console.warn(
+    "NO ALLOWED_ORIGINS: any web page may open this socket. Set it to your site's" +
+      " origin(s) in production, comma separated.",
+  );
 }
 
-const NONCE_TTL_MS = 120_000;
+// Proxies whose X-Forwarded-For we believe. Only connections FROM these may
+// tell us the client IP; everyone else keys to their socket address, so an
+// attacker who can reach :8787 directly cannot rotate fake IPs past the
+// per-IP caps. Defaults to loopback, which matches the documented deployment
+// (one nginx on the same box).
+const TRUSTED_PROXIES = parseTrustedProxies(process.env.TRUSTED_PROXIES);
 
 const AUTH_PATH = "/api/auth/me";
 
@@ -84,7 +110,7 @@ async function arcadeWallet(token: string): Promise<string | null> {
       signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return null;
-    if (!/application\/json/i.test(res.headers.get("content-type") ?? "")) {
+    if (!/application\/json/i.test(res.headers.get("content-type") ?? "")) {
       console.warn(
         `arcade auth: ${ARCADE_AUTH} answered ${res.status} but not JSON ` +
           `(content-type: ${res.headers.get("content-type") ?? "none"}). ` +
@@ -97,19 +123,6 @@ async function arcadeWallet(token: string): Promise<string | null> {
     return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet) ? wallet : null;
   } catch {
     return null;
-  }
-}
-
-function verify(wallet: string, nonce: string, sigBase64: string): boolean {
-  try {
-    const pubkey = bs58.decode(wallet);
-    if (pubkey.length !== 32) return false;
-    const sig = Buffer.from(sigBase64, "base64");
-    if (sig.length !== 64) return false;
-    const msg = new TextEncoder().encode(challengeText(nonce));
-    return nacl.sign.detached.verify(msg, new Uint8Array(sig), pubkey);
-  } catch {
-    return false;
   }
 }
 
@@ -138,30 +151,16 @@ const MAX_SOCKETS = 300;
 const MAX_PER_IP = 6;
 const perIp = new Map<string, number>();
 
-const resumeTries = new Map<string, { n: number; at: number }>();
-const RESUME_WINDOW_MS = 60_000;
-setInterval(() => {
-  const cutoff = Date.now() - RESUME_WINDOW_MS;
-  for (const [ip, r] of resumeTries) if (r.at < cutoff) resumeTries.delete(ip);
-}, RESUME_WINDOW_MS).unref();
-
-function mayResume(ip: string): boolean {
-  const now = Date.now();
-  const r = resumeTries.get(ip);
-  if (!r || now - r.at > RESUME_WINDOW_MS) {
-    resumeTries.set(ip, { n: 1, at: now });
-    return true;
-  }
-  r.n++;
-  return r.n <= CONFIG.resumeTriesPerMin;
-}
+const resumeLimiter = new ResumeLimiter(CONFIG.resumeTriesPerMin);
 
 wss.on("error", (err) => console.error("wss error", err));
 
 wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-  const fwd = String(req.headers["x-forwarded-for"] ?? "");
-  const ip =
-    (fwd.split(",").pop() ?? "").trim() || req.socket.remoteAddress || "?";
+  if (!originAllowed(req.headers.origin, ALLOWED_ORIGINS)) {
+    ws.close(1008, "origin not allowed");
+    return;
+  }
+  const ip = clientIpOf(req, TRUSTED_PROXIES);
   const ipCount = perIp.get(ip) ?? 0;
   if (wss.clients.size > MAX_SOCKETS || ipCount >= MAX_PER_IP) {
     ws.close(1013, "server full");
@@ -169,7 +168,8 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
   }
   perIp.set(ip, ipCount + 1);
 
-  const nonce = randomBytes(16).toString("hex");
+  const nonce = newNonce();
+  const signable = challengeText(nonce, PUBLIC_ORIGIN);
   const nonceAt = Date.now();
   let nonceSpent = false;
   let session: Session | null = null;
@@ -189,47 +189,25 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     ws.send(JSON.stringify(m));
   };
 
-  send({ t: "challenge", nonce });
+  send({ t: "challenge", nonce, text: signable });
 
-  const seat = (wallet: string, guest: boolean, token?: string): void => {
+  // A seat is either a proven wallet or an ephemeral spectator the SERVER
+  // named. There is no client-chosen identity left anywhere: spectators get a
+  // fresh random tag per connection, are read-only, and are issued no token,
+  // so there is no bearer credential to learn, steal or squat.
+  const seat = (wallet: string, spectator: boolean, token?: string): void => {
     if (session) return;
-    if (guest) {
-      session = {
-        wallet,
-        guest,
-        session: 0,
-        send: (state: NetState) => send({ t: "state", state }),
-        sendHistory: (history: NetHistory[]) => send({ t: "history", history }),
-        sendChat: (msgs: NetChat[]) => send({ t: "chat", msgs }),
-      };
-      send({ t: "ready", wallet, guest });
-      game.attach(session);
-      return;
-    }
-    const before = db.player(wallet);
-    const awayMs = Date.now() - before.seenAt;
-    const autoLapsed =
-      before.autoEnabled === 1 &&
-      CONFIG.autoLapseMs > 0 &&
-      awayMs > CONFIG.autoLapseMs;
-    if (autoLapsed) db.setAuto(wallet, false, before.autoTarget, before.autoPlates ?? 1);
-    db.touch(wallet);
     session = {
       wallet,
-      guest,
+      spectator,
       session: 0,
       send: (state: NetState) => send({ t: "state", state }),
       sendHistory: (history: NetHistory[]) => send({ t: "history", history }),
       sendChat: (msgs: NetChat[]) => send({ t: "chat", msgs }),
     };
-    send({
-      t: "ready",
-      wallet,
-      guest,
-      ...(token ? { token } : {}),
-    });
+    send({ t: "ready", wallet, spectator, ...(token ? { token } : {}) });
     game.attach(session);
-  };
+  };;
 
   let budget = 40;
   const refill = setInterval(() => {
@@ -281,7 +259,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         }
         nonceSpent = true;
         const wallet = String(msg.wallet ?? "");
-        if (!verify(wallet, nonce, String(msg.sig ?? ""))) {
+        if (!verifySignature(wallet, signable, String(msg.sig ?? ""))) {
           send({ t: "error", message: "signature rejected" });
           return;
         }
@@ -310,16 +288,14 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
       case "resume": {
         if (session) return;
-        if (!mayResume(ip)) {
+        if (!resumeLimiter.may(ip)) {
           send({ t: "error", message: "too many attempts" });
           return;
         }
         const wallet = String(msg.wallet ?? "");
         const offered = String(msg.token ?? "");
         const stored = wallet.includes(":") ? null : db.authTokenOf(wallet);
-        const a = Buffer.from(offered);
-        const b = Buffer.from(stored ?? "");
-        if (!stored || a.length !== b.length || !timingSafeEqual(a, b)) {
+        if (!stored || !resumeTokenMatches(offered, stored)) {
           send({ t: "error", message: "session expired" });
           return;
         }
@@ -328,24 +304,20 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
 
       case "logout": {
-        if (!session || session.guest) return;
+        if (!session || session.spectator) return;
         db.clearAuthToken(session.wallet);
         return;
       }
 
-      case "guest": {
-        const id = String(msg.id ?? "").slice(0, 40).replace(/[^a-zA-Z0-9_-]/g, "");
-        if (id.length < 8) {
-          send({ t: "error", message: "bad guest id" });
-          return;
-        }
-        seat(`guest:${id}`, true);
+      case "spectate": {
+        if (session) return;
+        seat(`~spec:${newNonce().slice(0, 16)}`, true);
         return;
       }
 
       case "join": {
         if (!session) return;
-        if (session.guest) {
+        if (session.spectator) {
           send({ t: "error", message: "connect a wallet to play for real" });
           return;
         }
@@ -371,7 +343,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         return;
 
       case "sync": {
-        if (!session || session.guest) return;
+        if (!session || session.spectator) return;
         if (syncBudget <= 0) return;
         syncBudget--;
         game.refresh(session);
@@ -379,7 +351,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
 
       case "setAuto": {
-        if (!session) return;
+        if (!session || session.spectator) return;
         const raw = Number(msg.target);
         const target = Number.isFinite(raw) ? Math.min(1000, Math.max(1.05, raw)) : 2;
         const rawPlates = Number(msg.plates);
@@ -392,6 +364,10 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 
       case "chat": {
         if (!session) return;
+        if (session.spectator) {
+          send({ t: "error", message: "chat: connect a wallet to talk" });
+          return;
+        }
         const text = String(msg.text ?? "")
           .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
           .trim()
@@ -407,7 +383,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
       }
 
       case "setChar":
-        if (!session) return;
+        if (!session || session.spectator) return;
         if (!CHARS.includes(String(msg.charId))) {
           send({ t: "error", message: "unknown character" });
           return;
@@ -440,7 +416,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     if (left <= 0) perIp.delete(ip);
     else perIp.set(ip, left);
     if (session) {
-      db.touch(session.wallet);
+      if (!session.spectator) db.touch(session.wallet);
       game.detach(session);
     }
   });
@@ -451,8 +427,17 @@ http.listen(CONFIG.port, () => {
   console.log(`  db     ${CONFIG.dbPath}`);
 });
 
-process.on("uncaughtException", (err) => console.error("uncaught", err));
-process.on("unhandledRejection", (err) => console.error("unhandled rejection", err));
+process.on(
+  "uncaughtException",
+  (err) => {
+    console.error("uncaught", err);
+    process.exit(1);
+  },
+);
+process.on("unhandledRejection", (err) => {
+  console.error("unhandled rejection", err);
+  process.exit(1);
+});
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {

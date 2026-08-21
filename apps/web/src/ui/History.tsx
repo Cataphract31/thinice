@@ -100,13 +100,20 @@ function Row({ h, onVerify }: { h: HistoryEntry; onVerify: () => void }): JSX.El
           <span className="label ml-auto shrink-0 text-[var(--color-warn)]">
             unverifiable
           </span>
-        ) : h.verified === null ? (
+        ) : h.verified === null && !h.checked && !h.unwitnessed ? (
           <button
             onClick={onVerify}
             className="label ml-auto shrink-0 rounded-sm bg-[var(--color-panel2)] px-1.5 py-0.5 hover:text-[var(--color-text)]"
           >
             verify
           </button>
+        ) : h.verified === null ? (
+          <span
+            className="label ml-auto shrink-0 text-[var(--color-dim)]"
+            title="this browser never saw this round's lobby, so its commitment could not be pinned before play"
+          >
+            {h.unwitnessed ? "not witnessed" : "unverifiable"}
+          </span>
         ) : h.verified ? (
           <span className="label ml-auto shrink-0 text-[var(--color-profit)]">✓ fair</span>
         ) : (
@@ -114,14 +121,27 @@ function Row({ h, onVerify }: { h: HistoryEntry; onVerify: () => void }): JSX.El
         )}
       </div>
 
-      {h.verified !== null && (
+      {h.checked && (
         <div className="mt-1 space-y-0.5 rounded-sm bg-[var(--color-panel2)]/60 p-1.5 text-[9.5px] leading-relaxed">
-          <div
-            style={{ color: h.seedOk ? "var(--color-profit)" : "var(--color-danger)" }}
-          >
-            {h.seedOk ? "✓" : "✗"} sha256(seed) matches the hash published before
-            the round started
-          </div>
+          {h.unwitnessed && (
+            <div className="text-[var(--color-dim)]">
+              · you were not here when this round's lobby opened, so its hash
+              could not be pinned before play. The checks below prove internal
+              consistency only.
+            </div>
+          )}
+          {h.seedOk === null ? (
+            <div className="text-[var(--color-dim)]">
+              {h.unwitnessed || !h.commit
+                ? "· commitment check unavailable"
+                : "· no sealed seed to check: the lobby never sealed"}
+            </div>
+          ) : (
+            <div style={{ color: h.seedOk ? "var(--color-profit)" : "var(--color-danger)" }}>
+              {h.seedOk ? "✓" : "✗"} the revealed secret hashes to the commitment
+              published before the round, and the seed derives from it
+            </div>
+          )}
           {h.replayOk === null ? (
             <div className="text-[var(--color-dim)]">
               · round interrupted: the seed was revealed, but the round never

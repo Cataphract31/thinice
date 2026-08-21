@@ -139,7 +139,7 @@ export function WalletButton({
   seat,
   onChange,
 }: {
-  seat?: { guest: boolean; address: string };
+  seat?: { spectator: boolean; address: string };
   onChange?: (connected: boolean, arcadeSeated?: boolean) => void;
 }): JSX.Element {
   const [addr, setAddr] = useState<string | null>(null);
@@ -154,9 +154,9 @@ export function WalletButton({
       .catch(() => {});
   }, []);
 
-  const seatAddr = seat && !seat.guest ? seat.address : null;
+  const seatAddr = seat && !seat.spectator ? seat.address : null;
   const shown = seat ? seatAddr : addr;
-  const expired = seat !== undefined && seat.guest && walletSeated();
+  const expired = seat !== undefined && seat.spectator && walletSeated();
   const known = !shown && !expired && Boolean(walletCarried());
 
   const click = async (): Promise<void> => {

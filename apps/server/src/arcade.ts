@@ -1,6 +1,18 @@
+import { readFileSync } from "node:fs";
+
 const GAME = "thin-ice";
 
 const DEFAULT_URL = "http://127.0.0.1:8080";
+
+function loadKeyFile(): string {
+  const path = process.env.LEDGER_KEY_FILE ?? "";
+  if (!path) return "";
+  try {
+    return readFileSync(path, "utf8").trim();
+  } catch (err) {
+    throw new Error(`LEDGER_KEY_FILE is set but could not be read: ${(err as Error).message}`);
+  }
+}
 
 export class LedgerError extends Error {
   code: string;
@@ -38,7 +50,7 @@ function isLoopback(url: string): boolean {
 
 export function createArcadeLedger({
   url = process.env.ARCADE_LEDGER_URL ?? DEFAULT_URL,
-  key = process.env.LEDGER_KEY ?? "",
+  key = process.env.LEDGER_KEY ?? loadKeyFile(),
   fetchImpl = globalThis.fetch as Fetch,
   timeoutMs = 5000,
 }: {

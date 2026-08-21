@@ -84,6 +84,11 @@ routes, not here.
       any world on it lifted a permanent seat — and a seat is a money
       primitive, not griefing. Seat the victim, bond their five plates, enter
       the same lobby with your own wallet, extract yours and let theirs die.
+      The whole wire layer now has an adversarial suite
+      (`apps/server/test/auth.test.ts` + `wire.test.ts`) that boots the real
+      server and attacks it: nonce replay, cross-socket challenge reuse,
+      wrong-token and expired-token resume, guest-shaped wallets, message
+      budgets, payload caps, and the X-Forwarded-For trust rule.
 - [x] **Shutdown closes the open round** instead of just stopping the timer.
       `GameServer.shutdown()` rolls the entries back and closes the round as
       interrupted, revealing its secret, so a deploy restart no longer leaves a

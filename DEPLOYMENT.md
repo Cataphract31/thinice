@@ -148,6 +148,10 @@ not this process. A firewall that lets nothing out is a correct firewall here.
 
 ### systemd example
 
+The repo's `thinice.service` is the real, fully hardened unit — copy that one
+if your box is shaped like ours. The minimal shape of a correct unit, with the
+three hardening lines that matter most spelled out, is:
+
 ```ini
 [Unit]
 Description=THIN ICE game server
@@ -159,13 +163,31 @@ User=thinice
 WorkingDirectory=/opt/thinice
 Environment=PORT=8787
 Environment=DB_PATH=/var/lib/thinice/zinc.db
+# The site's public origin gets bound into the login challenge text; the
+# websocket refuses pages from any other origin. See .env.example.
+Environment=PUBLIC_ORIGIN=https://your-host
+Environment=ALLOWED_ORIGINS=https://your-host
+# Only these addresses may name clients via X-Forwarded-For.
+Environment=TRUSTED_PROXIES=127.0.0.1,::1
 ExecStart=/usr/bin/npm run server
 Restart=always
 RestartSec=5
 
+# This process needs loopback and nothing else: nginx reaches it on 127.0.0.1,
+# the arcade ledger and auth edges are 127.0.0.1, and there is no third
+# conversation to have. These two lines turn DEPLOYMENT's no-egress promise
+# into something enforced.
+IPAddressAllow=localhost
+IPAddressDeny=any
+
 [Install]
 WantedBy=multi-user.target
 ```
+
+`thinice.service` goes further (ProtectSystem=strict, SystemCallFilter, an
+empty capability set, UMask=0077, the ledger key delivered as a systemd
+credential instead of an environment variable) — read it before writing your
+own from scratch.
 
 That is the whole environment. There is no starting balance to zero out, no
 bot count to hold at zero and no banking switch to leave off, because none of
@@ -197,7 +219,7 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_set_header Host       $host;
         proxy_set_header X-Real-IP  $remote_addr;
-        # The server keys its per-IP cap on the LAST X-Forwarded-For entry.
+        # The server keys its per-IP cap on the address this header carries.
         # Without this line every player keys to 127.0.0.1 and the seventh
         # concurrent socket site-wide is rejected as "server full".
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

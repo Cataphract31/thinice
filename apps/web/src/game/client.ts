@@ -89,7 +89,7 @@ export interface Snapshot {
   stats: PlayerStats;
   online: number;
   connected: boolean;
-  seat?: { guest: boolean; address: string };
+  seat?: { spectator: boolean; address: string };
 }
 
 export interface PlayerStats {
@@ -118,11 +118,21 @@ export function commitPreimage(
 
 export async function verifyEntry(h: HistoryEntry, expected: GameConfig): Promise<void> {
   try {
+    h.checked = true;
     if (h.unavailable) {
-      h.seedOk = h.replayOk = h.rulesOk = h.verified = null;
+      h.seedOk = h.replayOk = h.rulesOk = h.payoutOk = null;
+      h.unwitnessed = undefined;
+      h.verified = null;
       return;
     }
 
+    // The commitment check means something ONLY if this browser saw the
+    // commitment during a lobby and pinned it before the round ran, and the
+    // commit that arrives with the finished round is still that same one. A
+    // commit, seed and record that all arrive together after the fact are
+    // self-consistent by construction; "verified" would prove nothing beyond
+    // that the server can run sha256. Unwitnessed rounds still get every
+    // self-consistency check below, but they can never earn the badge.
     const rules = h.record.config ?? expected;
 
     const interrupted = h.record.interrupted === true;
@@ -144,19 +154,22 @@ export async function verifyEntry(h: HistoryEntry, expected: GameConfig): Promis
 
     const rec = h.record;
     const ceremony = rec.sealNonce !== undefined ? 2 : 1;
-    let seedsAgree: boolean;
+    const sealed = typeof rec.sealNonce === "string" && rec.sealNonce !== "";
+    let seedsAgree: boolean | null;
     if (ceremony === 1) {
       seedsAgree = rec.seedHex !== undefined && rec.seedHex === h.seedHex;
+    } else if (!sealed) {
+      // The lobby never sealed: no seed was ever drawn, so there is nothing
+      // for a seed check to say either way.
+      seedsAgree = null;
     } else if (interrupted && !rec.seedHex) {
-      seedsAgree = true;
+      seedsAgree = null;
     } else {
       const derived = await sha256Hex(
         roundSeedPreimage(h.seedHex, rec.sealNonce ?? "", rec.entrantIds),
       );
       seedsAgree = derived !== null && rec.seedHex === derived;
     }
-
-    const commitPinned = h.observedCommit === undefined || h.observedCommit === h.commit;
 
     const canonical = canonicalConfig(rules);
     const rulesHash = await sha256Hex(canonical);
@@ -169,13 +182,34 @@ export async function verifyEntry(h: HistoryEntry, expected: GameConfig): Promis
     }
 
     const hash = await sha256Hex(commitPreimage(h.roundId, h.seedHex, rulesHash, ceremony));
-    h.seedOk = seedsAgree && commitPinned && h.commit !== "" && hash === h.commit;
+    const commitMatches = hash !== null && h.commit !== "" && hash === h.commit;
+    const seen = h.observedCommit !== undefined;
+    const pinned = seen && h.observedCommit === h.commit;
+    h.unwitnessed = !seen || undefined;
+    // Tri-state on purpose: false only when something was CHECKED and failed,
+    // null when the check could not run (never witnessed, or no sealed seed).
+    h.seedOk = !seen
+      ? null
+      : !pinned || !commitMatches
+        ? false
+        : seedsAgree === false
+          ? false
+          : seedsAgree === true
+            ? true
+            : null;
     h.rulesOk = canonical === canonicalConfig(expected);
-    h.verified =
-      h.replayOk !== false &&
+    const clean =
+      h.replayOk === true &&
       h.seedOk === true &&
       h.rulesOk === true &&
       h.payoutOk !== false;
+    const broken =
+      h.replayOk === false ||
+      h.seedOk === false ||
+      h.rulesOk === false ||
+      h.payoutOk === false;
+    h.verified =
+      !seen || interrupted ? null : clean ? true : broken ? false : null;
   } catch {
     h.verified = false;
     h.seedOk = h.seedOk ?? false;
@@ -202,6 +236,10 @@ export interface HistoryEntry {
   payoutOk: boolean | null;
   yourSeats?: number[] | null;
   unavailable?: boolean;
+  /** this browser never saw the lobby, so the commitment could not be pinned */
+  unwitnessed?: boolean;
+  /** verifyEntry has run at least once */
+  checked?: boolean;
   record: RoundRecord;
   digest: string;
   winnerChar: string | null;
